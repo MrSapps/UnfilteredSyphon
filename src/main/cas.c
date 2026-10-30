@@ -27,6 +27,35 @@ void EGSDisplayHASetCurrentFrame(void *anim, s32 anim1, s32 frame);
 void EGSDisplayAnimateHMD(void *anim);
 void EGSFrameUpdateHierarchy(void *frame);
 static void func_8002AC1C();
+
+typedef struct CASSequence {
+    /* 0x00 */ s16 action; /* <= 0 terminates */
+    /* 0x02 */ s16 sub;    /* 0: any */
+    /* 0x04 */ u8 needFlags2;
+    /* 0x05 */ u8 blockFlags2;
+    /* 0x06 */ u8 unk06[0x12];
+} CASSequence; /* size 0x18 */
+
+typedef struct CASAnimSet {
+    /* 0x00 */ u8 unk00[0x18];
+    /* 0x18 */ CASSequence *sequences;
+} CASAnimSet;
+
+typedef struct CASRule {
+    /* 0x00 */ u32 stateMask; /* 0: any; else bit per request state */
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ u32 require;   /* CAS flags that must be set */
+    /* 0x0C */ s32 forbid;    /* CAS flags that must be clear; -1: flags must equal require */
+} CASRule;
+
+typedef struct CASAction {
+    /* 0x00 */ u8 unk00[4];
+    /* 0x04 */ u32 setFlags;
+    /* 0x08 */ u32 clearFlags;
+    /* 0x0C */ u32 setFlags2;
+    /* 0x10 */ u32 clearFlags2;
+    /* 0x14 */ u8 unk14[0xC];
+} CASAction; /* size 0x20 */
 static void func_8002AD98();
 
 void SYSCasInit(void) {
@@ -39,15 +68,109 @@ void SYSCasInit(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029298);
 
-INCLUDE_ASM("asm/main/nonmatchings/cas", CASGetAnimSequence);
+CASSequence *CASGetAnimSequence(CASAnimSet *set, s32 action, s32 sub) {
+    CASSequence *seqs;
+    CASSequence *seq;
+    int i;
 
+    seqs = set->sequences;
+    if (seqs == NULL) {
+        return (CASSequence *)gNullSequence;
+    }
+    for (i = 0;; i++) {
+        seq = &seqs[i];
+        if (seq->action < 0 || seq->action == 0) {
+            return seq;
+        }
+        if (seq->action == action && (seq->sub == 0 || seq->sub == sub)) {
+            return seq;
+        }
+    }
+}
+
+#ifdef NON_MATCHING
+/* result lives in v1 instead of v0 */
+static s32 func_80029794(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
+    struct CASSlots *slots;
+    CASSequence *seq;
+    u32 flags2;
+    s32 ret;
+
+    slots = &rt->cas->queue->slots;
+    if (slots->current != -1 && slots->state[slots->current] == 2) {
+        ret = 0;
+    } else {
+        seq = CASGetAnimSequence(set, req[1], sub);
+        flags2 = rt->cas->flags2;
+        ret = 1;
+        if (flags2 & seq->needFlags2) {
+            ret = (flags2 & seq->blockFlags2) == 0;
+        }
+    }
+    return ret;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029794);
+#endif
 
+#ifdef NON_MATCHING
+/* final test: original branches to set 0/1 instead of sltiu (likely a function-wide result variable) */
+/* May a request in state *req run under this rule? */
+static s32 func_80029838(GameObjectRuntime *rt, CASRule *rule, u8 *req) {
+    struct CASSlots *slots;
+    u32 flags;
+    u32 have;
+
+    slots = &rt->cas->queue->slots;
+    if (slots->current != -1 && slots->state[slots->current] == 2) {
+        return 1;
+    }
+    if (rule->stateMask != 0 && !(rule->stateMask & (1 << *req))) {
+        return 0;
+    }
+    if (rule->forbid == -1 && rt->cas->flags != 0) {
+        return 0;
+    }
+    flags = rt->cas->flags;
+    have = flags & rule->require;
+    if (have != rule->require) {
+        return 0;
+    }
+    if (rule->forbid == -1 && flags != have) {
+        return 0;
+    }
+    return !(rt->cas->flags & rule->forbid);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029838);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029920);
 
+#ifdef NON_MATCHING
+/* same instructions, register numbering differs */
+/* Leave action `from` and enter action `to`, updating the CAS flag words. */
+static void func_80029B78(GameObjectRuntime *rt, s32 from, s32 to) {
+    CASState *cas;
+    CASAction *table;
+    CASAction *a;
+
+    cas = rt->cas;
+    table = cas->actionTable;
+    if (from != -1) {
+        a = &table[from];
+        cas->flags2 &= ~a->clearFlags2;
+        rt->cas->flags &= ~a->clearFlags;
+    }
+    if (to != -1) {
+        a = &table[to];
+        rt->cas->flags2 |= a->setFlags2;
+        rt->cas->flags |= a->setFlags;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029B78);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029C04);
 
@@ -62,11 +185,11 @@ void CASReset(s32 id) {
     rt = gameObjectsInfo[id].runtime;
     cas = rt->cas;
     queue = cas->queue;
-    queue->current = -1;
+    queue->slots.current = -1;
     queue->unk6C = 0;
     for (i = 0; i < 3; i++) {
-        queue->prio[i] = 0xFF;
-        queue->state[i] = 0;
+        queue->slots.prio[i] = 0xFF;
+        queue->slots.state[i] = 0;
     }
     cas->active = 1;
     cas->mode = 2;
@@ -89,7 +212,24 @@ void CASGetCurrentAnim(s32 id, s32 *anim, s32 *frame) {
     *frame = ha->frame;
 }
 
+#ifdef NON_MATCHING
+/* scheduling: original saves both params into s-regs in the prologue */
+void CASSetAnimFrame(s32 id, s32 anim, s32 frame) {
+    GameObjectRuntime *rt;
+
+    rt = gameObjectsInfo[id].runtime;
+    EGSDisplayHAStartUnique(rt->anim, 0);
+    EGSDisplayHASetCurrentFrame(rt->anim, anim, frame);
+    if (rt->anim->unk00[8] & 0x10) {
+        EGSDisplayAnimateHMD(rt->anim);
+        EGSFrameUpdateHierarchy(rt->anim->frame);
+        rt->anim->unk00[8] |= 4;
+        rt->anim->unk00[8] &= ~0x10;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cas", CASSetAnimFrame);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/cas", CASGetHipMotion);
 

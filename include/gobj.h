@@ -33,9 +33,11 @@ typedef struct CASQueue {
     /* 0x01 */ u8 max;
     /* 0x02 */ u8 pad02[2];
     /* 0x04 */ s32 *items;
-    /* 0x08 */ s32 current;   /* -1 when idle */
-    /* 0x0C */ s32 prio[3];
-    /* 0x18 */ s32 state[3];
+    /* 0x08 */ struct CASSlots {
+        s32 current; /* slot in use, -1 when idle */
+        s32 prio[3];
+        s32 state[3];
+    } slots;
     /* 0x24 */ u8 unk24[0x48];
     /* 0x6C */ s16 unk6C;
 } CASQueue;
