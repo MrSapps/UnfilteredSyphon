@@ -137,7 +137,7 @@ static void func_80141788(void) {
 static void func_801417C4(void) {
     NPCCombatModeCallback(NULL);
     gHitNPCCallback = NULL;
-    NPCInitHostageTaker(D_80143104->linkedId);
+    NPCInitHostageTaker(D_80143104->id);
     if (!D_80143118 && (gObjectives == NULL || !(gObjectives->completed & 2))) {
         SysSoundQueueXA(-1, 0x56);
         GameSysSetLetterBoxMode(1);
@@ -159,7 +159,7 @@ static void func_80141870(s16 id, s16 by) {
                 StringContactMeiXingMsg();
                 LevelObjectiveComplete(3);
                 func_80141434();
-            } else if ((s16)id == D_80143104->linkedId) {
+            } else if ((s16)id == D_80143104->id) {
                 func_801417C4();
             }
         }
@@ -204,9 +204,9 @@ static s32 func_80141B58(void) {
 }
 
 static void func_80141C0C(s16 id) {
-    if (!D_80143118 && id == D_80143104->linkedId) {
+    if (!D_80143118 && id == D_80143104->id) {
         NPCCombatModeCallback(NULL);
-        NPCShootHostage(D_80143104->linkedId);
+        NPCShootHostage(D_80143104->id);
     }
 }
 
@@ -218,11 +218,11 @@ static void func_80141C6C(s16 id, s16 by) {
 
     cop = ObjectMatchToRefID(id, GOBJ_TYPE_COP);
     if (by == gPlayerOffset) {
-        linked = cop->linkedId;
+        linked = cop->id;
         if (linked != id && linked != GOBJ_ID_666 &&
             gameObjectsModelInfo[gameObjectsInfo[linked].modelIndex].type == GOBJ_TYPE_COP) {
             SysPlayXA(0x59, 0, 1);
-            NPCHazmatStart(cop->linkedId);
+            NPCHazmatStart(cop->id);
             return;
         }
     }
@@ -365,7 +365,7 @@ void iParkInit(s32 mode) {
                 npc = gameObjectsInfo[i].runtime;
                 D_80143104 = npc;
                 if (gObjectives == NULL || !(gObjectives->completed & 2)) {
-                    NPCInitHostageTaker(npc->linkedId);
+                    NPCInitHostageTaker(npc->id);
                 } else {
                     do {
                         type = GOBJ_TYPE(ref);
@@ -391,8 +391,8 @@ void iParkInit(s32 mode) {
                 D_8014310C++;
             }
             cop = ObjectMatchToRefID(i, GOBJ_TYPE_COP);
-            type = GOBJ_TYPE(cop->linkedId);
-            if (cop->linkedId != i && type == GOBJ_TYPE_COP && (*(u32 *)rt & 0x8020) != 0x20) {
+            type = GOBJ_TYPE(cop->id);
+            if (cop->id != i && type == GOBJ_TYPE_COP && (*(u32 *)rt & 0x8020) != 0x20) {
                 cop->flags23 |= 2;
             }
             if (cop->healthInfo->maxHealth <= 0) {

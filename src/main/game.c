@@ -227,8 +227,8 @@ s32 GameFreeGobj(s16 id) {
 #line 514
     ASSERT(info->runtime != NULL);
 #line 515
-    ASSERT(info->runtime->linkedId == id);
-    info->runtime->linkedId = -1;
+    ASSERT(info->runtime->id == id);
+    info->runtime->id = -1;
     info->runtime = NULL;
     return 1;
 }

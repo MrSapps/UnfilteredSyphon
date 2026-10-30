@@ -336,7 +336,7 @@ typedef struct WhouseAnim {
 typedef struct WhouseMover {
     /* 0x00 */ u8 timer;
     /* 0x01 */ u8 flags1; /* low 3 bits: state, 0x80: has path */
-    /* 0x02 */ s16 linkedId;
+    /* 0x02 */ s16 id;
     /* 0x04 */ s32 unk04;
     /* 0x08 */ WhouseAnim *anim;
     /* 0x0C */ WhousePath *path;
@@ -447,7 +447,7 @@ void func_8014216C(WhouseMsg *msg) {
             }
         }
         if (!done) {
-            SysPostMessage(10, 4, m->linkedId, m->linkedId, 0, 0, 0, 0);
+            SysPostMessage(10, 4, m->id, m->id, 0, 0, 0, 0);
         }
         break;
     case 26:
@@ -455,7 +455,7 @@ void func_8014216C(WhouseMsg *msg) {
             m->timer = 0;
             MOVER_SET_STATE(m, 1);
             MovementAddGobj(m);
-            SysPostMessage(10, 4, m->linkedId, m->linkedId, 0, 0, 0, 0);
+            SysPostMessage(10, 4, m->id, m->id, 0, 0, 0, 0);
         }
         break;
     case 6:
@@ -470,7 +470,7 @@ void func_8014216C(WhouseMsg *msg) {
         break;
     case 2:
         m->unk22 = 0;
-        func_801463A4(m->linkedId, 0);
+        func_801463A4(m->id, 0);
         PathSetupEX(m, 1);
         if (m->path != NULL) {
             m->flags1 |= 0x80;

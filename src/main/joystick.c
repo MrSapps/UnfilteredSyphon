@@ -5,7 +5,7 @@ typedef struct ReactionEntry {
     /* 0x0 */ u8 key;
     /* 0x1 */ u8 pad[3];
     /* 0x4 */ u32 mask;          /* 0: any */
-    /* 0x8 */ u32 requiredFlags; /* 0: any, else tested against *rt->flagsPtr */
+    /* 0x8 */ u32 requiredFlags; /* 0: any, else tested against rt->cas->flags */
     /* 0xC */ s32 result;        /* 0 terminates the table */
 } ReactionEntry;
 
@@ -29,7 +29,7 @@ s32 func_80035328(ReactionSet *set, u8 key, u32 mask, GameObjectRuntime *rt) {
     e = set->entries;
     do {
         if (e->key == key && (e->mask == 0 || (e->mask & mask)) &&
-            (e->requiredFlags == 0 || (e->requiredFlags & *rt->flagsPtr))) {
+            (e->requiredFlags == 0 || (e->requiredFlags & rt->cas->flags))) {
             set->unk14 = set->unk10 + 1;
             result = e->result;
             break;

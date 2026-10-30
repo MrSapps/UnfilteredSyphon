@@ -56,7 +56,7 @@ static void func_801412D0(void) {
     health->health = -1;
     health->maxHealth = -1;
     bombRt->flags23 |= 2;
-    NPCHazmatStart(D_801420AC->linkedId);
+    NPCHazmatStart(D_801420AC->id);
     SysPlayXA(0x8F, 0, 1);
     InterfaceCountdownAbort();
     D_801420B8 = 0;
@@ -297,9 +297,9 @@ void iSubway2Init(s32 mode) {
             }
         } else if (type == GOBJ_TYPE_BOMB) {
             D_801420AC = ObjectMatchToRefID(i, GOBJ_TYPE_COP);
-            linkedType = GOBJ_TYPE(D_801420AC->linkedId);
+            linkedType = GOBJ_TYPE(D_801420AC->id);
             rt->flags0 |= 0x20;
-            if (D_801420AC->linkedId == i || linkedType != GOBJ_TYPE_COP) {
+            if (D_801420AC->id == i || linkedType != GOBJ_TYPE_COP) {
                 D_801420AC = NULL;
             } else {
                 D_801420AC->flags23 |= 2;

@@ -249,7 +249,7 @@ void iCatacombsInit(s32 mode) {
         }
         mei->npc->flags |= 1;
         mei->npc->unk48 = 2;
-        CASRequestAction(mei->linkedId, 0x59);
+        CASRequestAction(mei->id, 0x59);
     }
     gDefaultLevelDmgFX = 11;
 }

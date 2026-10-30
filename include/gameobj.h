@@ -43,7 +43,8 @@ typedef struct GameObjectModel {
 } GameObjectModel;
 
 typedef struct GameObjectAnim {
-    /* 0x00 */ u8 unk00[0x10];
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ struct EGSFrame *frame;
     /* 0x10 */ GameObjectModel *model;
 } GameObjectAnim;
 
@@ -53,14 +54,15 @@ typedef struct GameObjectHealth {
     /* 0x08 */ s16 maxHealth;
 } GameObjectHealth;
 
+/* Live game object ("gobj"): GameObjectInfo.runtime, pooled by GameGetGobj (0x24 bytes). */
 typedef struct GameObjectRuntime {
     /* 0x00 */ u8 flags0;
     /* 0x01 */ u8 flags1;
-    /* 0x02 */ s16 linkedId; /* related object (e.g. a bomb's target) */
+    /* 0x02 */ s16 id; /* gameObjectsInfo index, -1 when the pool entry is free */
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ GameObjectAnim *anim;
-    /* 0x0C */ void *unk0C;
-    /* 0x10 */ u32 *flagsPtr;
+    /* 0x0C */ struct MoveInfo *move;
+    /* 0x10 */ struct CASState *cas; /* character animation system; flags first */
     /* 0x14 */ struct TargetInfo *target;
     /* 0x18 */ GameObjectHealth *healthInfo;
     /* 0x1C */ struct NPCInfo *npc;

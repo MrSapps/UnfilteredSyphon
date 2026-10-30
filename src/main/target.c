@@ -2,6 +2,7 @@
 #include "system.h"
 #include "level.h"
 #include "gameobj.h"
+#include "gobj.h"
 
 /* target.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F821)
@@ -237,7 +238,7 @@ void TargetAcquire(GameObjectRuntime *rt, s32 mode) {
     if (rt->npcState == 2) {
         id = -1;
         if (rt->npc->flags & 0x20000000) {
-            s32 ref = gameObjectsInfo[rt->linkedId].refId;
+            s32 ref = gameObjectsInfo[rt->id].refId;
             if (gameObjectsInfo[ref].runtime->healthInfo->maxHealth > 0) {
                 id = ref;
             }
@@ -263,12 +264,12 @@ void TargetAcquire(GameObjectRuntime *rt, s32 mode) {
             target->targetId = -1;
             gTargetModeFlag = 0;
         }
-        if (!(*rt->flagsPtr & 0x02000000) && !gPlayerFlashlight) {
+        if (!(rt->cas->flags & 0x02000000) && !gPlayerFlashlight) {
             if (rt->target->targetId >= 0) {
-                CASRequestAction(rt->linkedId, 0x2B);
+                CASRequestAction(rt->id, 0x2B);
             } else {
                 if (mode != 2) {
-                    CASRequestAction(rt->linkedId, 0x2D);
+                    CASRequestAction(rt->id, 0x2D);
                 }
                 gTargetModeFlag = 0;
             }
