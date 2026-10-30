@@ -68,13 +68,15 @@ typedef struct EGSListNode {
 
 /* Movie playback state (system.c static). */
 typedef struct SysMovie {
-    /* 0x00 */ u8 unk00;
-    /* 0x01 */ u8 doneMsgId; /* message posted when the movie ends (0x21: end of level) */
-    /* 0x02 */ u8 unk02[2];
-    /* 0x04 */ s32 doneMsgFrom;
-    /* 0x08 */ s32 doneMsgTo;
-    /* 0x0C */ s32 unk0C;
-    /* 0x10 */ u8 playing;
+    /* 0x00 */ s16 width;
+    /* 0x02 */ s16 height;
+    /* 0x04 */ u8 unk04[5];
+    /* 0x09 */ u8 doneMsgId; /* message posted when the movie ends (0x21: end of level) */
+    /* 0x0A */ u8 unk0A[2];
+    /* 0x0C */ s32 doneMsgFrom;
+    /* 0x10 */ s32 doneMsgTo;
+    /* 0x14 */ s32 bufferSize;
+    /* 0x18 */ u8 playing;
 } SysMovie;
 
 /* system.c statics, still defined in the asm .bss */
@@ -83,6 +85,11 @@ extern EGSListNode *exeTickTimerList;
 extern SysMovie mSysMovie;
 extern char tcOverlay[];
 extern u8 D_801377E0[]; /* load address of texture-cache/menu/movie overlays */
+extern void (*gStallCallback)(void);
+extern void (*gSysMovieDoneCallback)(void);
+/* TODO: string literals; addressed directly until system.c's data moves to C */
+extern char D_8010F634[]; /* "%s.OVL" (.sdata) */
+extern char D_80010078[]; /* "\\BIN\\%s;1", owned by asm SysLoadOverlay */
 extern u8 gStallLoaded;
 extern u8 gStallFaded;
 extern u8 gPlayerRadioFlag;
@@ -137,6 +144,19 @@ void EGSListRemove(EGSListNode **list, EGSListNode *node);
 int strcmp(const char *, const char *);
 char *strcpy(char *, const char *);
 void func_801445A4(void);
+void EGSDisplayFade(s32 dir, s32 speed, void (*done)(void));
+void SysStopXA(void);
+void SysStreamTextureCacheOverlay(char *name, void (*done)(s32));
+void StreamOverlay(char *path, void *dst, s32 size, u32 tag, void (*done)(s32));
+void StallFadeCallback(void);
+void StallOverlayCallback(void);
+void EGSDisplayMovieMalloc(void *buf, s32 size);
+void SysSetMusicExciteLevel(s32 level);
+void EGSDisplayFlush(void);
+void EGSDeviceGraphicsSetResolution(s32 w, s32 h);
+void EGSDisplayAddMovie(void *camera, s32 arg1);
+void PrepareMovieSound(void);
+extern void **gCamera;
 void func_801470B0(void);
 
 void UnpauseTerrainStream(void);

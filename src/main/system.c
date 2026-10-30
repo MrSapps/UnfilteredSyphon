@@ -11,6 +11,7 @@ SDATA_LOCAL(gSysMovieDoneCallback)
 SDATA_LOCAL(gStallLoaded)
 SDATA_LOCAL(gStallFaded)
 SDATA_LOCAL(exeTickTimerList)
+SDATA_LOCAL(gStallCallback)
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 
@@ -304,7 +305,20 @@ void SysLoadTextureCacheOverlay(char *name, u8 arg1) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStreamTextureCacheOverlay);
+void SysStreamTextureCacheOverlay(char *name, void (*done)(s32)) {
+    char path[56];
+
+    DrawSync(0);
+    sprintf(path, D_80010078, name);
+    if (strcmp(name, tcOverlay) == 0) {
+        done(0);
+        return;
+    }
+    StreamOverlay(path, D_801377E0, 0x9800, (u8)name[0] | 0xFF000000, done);
+    /* first byte stays cleared until the stream finishes */
+    strcpy(tcOverlay + 1, name + 1);
+    tcOverlay[0] = 0;
+}
 
 void func_8001593C(void) {
     InterfaceForceOff();
@@ -320,9 +334,25 @@ void StallFadeCallback(void) {
     gStallFaded = 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStall);
+void SysStall(s32 level, s32 fadeSpeed, void (*callback)(void)) {
+    char name[24];
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStallCheck);
+    SysStatePush(9);
+    gStallLoaded = 0;
+    gStallFaded = 0;
+    gStallCallback = callback;
+    GameSysSetLetterBoxMode(3);
+    EGSDisplayFade(1, fadeSpeed, StallFadeCallback);
+    SysStopXA();
+    sprintf(name, D_8010F634, level);
+    SysStreamTextureCacheOverlay(name, (void (*)(s32))StallOverlayCallback);
+}
+
+void SysStallCheck(void) {
+    if (gStallLoaded != 0 && gStallFaded != 0) {
+        gStallCallback();
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", func_80015A64);
 
@@ -389,7 +419,18 @@ void func_80015DFC(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStopMovie);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysPlayMovieCB);
+void SysPlayMovieCB(void) {
+    EGSDisplayMovieMalloc(D_80145BF0, mSysMovie.bufferSize + 0x11000);
+    if (gSystemState != 4) {
+        SysStatePush(3);
+        SysSetMusicExciteLevel(1);
+    }
+    mSysMovie.playing = 1;
+    EGSDisplayFlush();
+    EGSDeviceGraphicsSetResolution(mSysMovie.width, mSysMovie.height);
+    EGSDisplayAddMovie(*gCamera, 1);
+    PrepareMovieSound();
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysPlayMovie);
 
