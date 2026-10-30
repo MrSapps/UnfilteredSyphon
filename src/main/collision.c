@@ -23,8 +23,10 @@ typedef struct CollPoly {
     /* 0x00 */ s32 count; /* vertices */
     /* 0x04 */ s32 unk4;
     /* 0x08 */ SVECTOR *normal;
-    /* 0x0C */ s32 unkC;
-    /* 0x10 */ s32 unk10;
+    /* 0x0C */ s16 unkC;
+    /* 0x0E */ s16 slope; /* normal.vy: 0x1000 flat floor, 0 wall */
+    /* 0x10 */ u16 unk10;
+    /* 0x12 */ u16 flags; /* 1: ignored, 2: near, 4: under the top, 8: over the bottom */
     /* 0x14 */ SVECTOR *verts[4];
 } CollPoly;
 
@@ -66,7 +68,7 @@ typedef struct CollisionDetectorParams {
     /* 0x2C */ s32 unk2C;
     /* 0x30 */ s32 unk30;
     /* 0x34 */ s32 unk34;
-    /* 0x38 */ s32 *unk38;
+    /* 0x38 */ struct CollRecord **records;
 } CollisionDetectorParams;
 
 /* A collision probe (0x178 bytes); objects keep lists of them for pushing/grabbing. */
@@ -89,7 +91,7 @@ typedef struct CollisionDetector {
     /* 0x14C */ VECTOR32 unk14C;
     /* 0x15C */ VECTOR32 unk15C;
     /* 0x16C */ s32 unk16C;
-    /* 0x170 */ s32 *unk170;
+    /* 0x170 */ struct CollRecord **records; /* contacts found by func_8006CB88 */
     /* 0x174 */ struct CollisionDetector *next;
 } CollisionDetector; /* size 0x178 */
 
@@ -146,7 +148,8 @@ typedef struct CollMoveInfo {
     /* 0x134 */ s32 unk134;
     /* 0x138 */ s32 unk138;
     /* 0x13C */ s32 unk13C;
-    /* 0x140 */ u8 unk140[0x20];
+    /* 0x140 */ VECTOR32 edgeBase;   /* nearest end of the ground edge */
+    /* 0x150 */ VECTOR32 edgeNormal; /* normal of the ground edge plane */
     /* 0x160 */ VECTOR32 unk160; /* added to attached detectors positions */
     /* 0x170 */ u8 unk170[0x24];
     /* 0x194 */ VECTOR32 pendingMove;
@@ -192,6 +195,9 @@ s32 EGSMathFIX_VectorClipToLength(VECTOR32 *v, s32 length, VECTOR32 *out);
 /* MIN(m, 0) - r, written so that it does not fold to a MIN_EXPR */
 #define EXTEND_DOWN(m, r) ((m) <= 0 ? (m) - (r) : -(r))
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
+/* same, but folds to a MAX_EXPR before any surrounding arithmetic is distributed into it */
+#define MAXF(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 /* Axis-aligned box swept by a probe. */
 typedef struct CollBox {
@@ -202,16 +208,39 @@ typedef struct CollBox {
 
 /* A surface hit handed to the detector-motion helpers (only the normal is known). */
 typedef struct CollHit {
-    u8 unk0[0x44];
-    VECTOR32 normal;
+    /* 0x00 */ u8 unk0[0x44];
+    /* 0x44 */ VECTOR32 normal;
+    /* 0x54 */ u8 unk54[0x14];
+    /* 0x68 */ VECTOR32 push;   /* share of the motion this hit stops */
+    /* 0x78 */ s32 weight;      /* 0x1000: all of it */
 } CollHit;
+
+/* Scratch for the 2/3-plane solve in func_8007112C (bss). */
+extern VECTOR32 D_8011EB40[4];
+extern s32 D_8011EB80[6];
+s32 EGSMathINT_SolveLinear3VectorEquationForParameters(VECTOR32 *v, s32 *out);
 s32 EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
 
 
 /* MoveInfo.charMove as collision.c sees it. */
 typedef struct CollCharMove {
-    u8 unk0[0x100];
-    s32 groundY; /* height of the last ground stood on, 0x80000001: none */
+    /* 0x000 */ u8 unk0[0x2C];
+    /* 0x02C */ VECTOR32 grabFace; /* facing while edge grabbing */
+    /* 0x03C */ u8 unk3C[8];
+    /* 0x044 */ u8 edgeDirty;      /* edge0/edge1 changed, recompute the ground edge */
+    /* 0x045 */ u8 pad45[3];
+    /* 0x048 */ VECTOR32 edge0;    /* ground edge (or point) being stood on */
+    /* 0x058 */ VECTOR32 edge1;
+    /* 0x068 */ s32 edgeLen;       /* << 12 */
+    /* 0x06C */ VECTOR32 edgeDir;
+    /* 0x07C */ u8 ledge[0x30];    /* CollEdge */
+    /* 0x0AC */ s32 pushZ;
+    /* 0x0B0 */ s32 pushY;
+    /* 0x0B4 */ u8 unkB4[0x4C];
+    /* 0x100 */ s32 groundY;       /* height of the last ground stood on, 0x80000001: none */
+    /* 0x104 */ u8 shadowOk;
+    /* 0x105 */ u8 pad105[3];
+    /* 0x108 */ MATRIX shadow;     /* shadow projection onto the ground edge plane */
 } CollCharMove;
 #define GOBJ_GRABBING(obj) \
     ((obj) != NULL && CMOVE(obj) != NULL && CMOVE(obj)->coll != NULL && CMOVE(obj)->coll->mode == 1)
@@ -257,13 +286,14 @@ s32 MovementBasicInfoUpdate(MovementBasicInfo *info, VECTOR32 *pos);
 s32 MovementBasicInfoUpdateCurrent(MovementBasicInfo *info);
 s32 EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
 s32 EGSMathINT_VectorScaleToLength(VECTOR32 *v, s32 length, VECTOR32 *out);
-void CollisionPhysicsGobj_DetectorMotion(Gobj *obj, s32 arg1, CollisionDetector *det, s32 *arg3, s32 arg4, void *arg5);
+void CollisionPhysicsGobj_DetectorMotion(Gobj *obj, s32 arg1, CollisionDetector *det, struct CollRecord **records, s32 arg4, void *arg5);
 s32 MovementGobjUpdateVelocity(Gobj *gobj, u8 translation, u8 rotation);
 s32 MovementGobjUpdateMovement(Gobj *gobj, u8 translation, u8 rotation);
 void CollisionGobjSetPushDetector(Gobj *obj, s32 which);
 s32 func_8006DDB4(Gobj *obj);
 s32 func_8006E0BC(Gobj *obj, u8 attach);
-void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, s32 *arg3, s32 *arg4);
+struct CollRecord;
+void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, struct CollRecord **records, s32 *count);
 static s32 func_8006EABC(Gobj *obj);
 static s32 func_8006F49C(Gobj *obj);
 s32 func_8006F4BC(Gobj *obj);
@@ -275,6 +305,36 @@ s32 CollisionDetectorRemoveFromList(CollisionDetector *det, CollisionDetector **
 s32 CollisionGobjSetModeGrab(Gobj *obj, CollisionGrab *grab);
 s32 CollisionGobjSetMode(Gobj *obj, s32 *mode);
 u8 CollisionGobjGetInfo(Gobj *obj, CollisionInfo **out);
+void OuterProduct0(VECTOR32 *a, VECTOR32 *b, VECTOR32 *out);
+void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
+u8 ShadowCalculateProjectionMatrix(VECTOR32 *normal, void *out);
+
+/* A terrain face gathered into GameObjectAnim.faceList. */
+typedef struct CollFace {
+    u32 unk0;
+    struct CollFace *next;
+    CollPoly poly;
+} CollFace;
+
+/* Face recorded for the physics solver (same layout as the head of CollHit). */
+typedef struct CollRecord {
+    s32 count;
+    VECTOR32 verts[4];
+    VECTOR32 normal;
+    u8 kind;
+} CollRecord;
+
+/* Tests mask in the aligned word holding the (possibly unaligned) halfword at p. */
+static inline s32 FlagWordTest(void *p, u32 mask) {
+    u32 a = (u32)p;
+    s32 sh = 0;
+
+    if (a & 3) {
+        sh = (a & 3) * 8;
+        a &= ~3;
+    }
+    return *(u32 *)a & (mask << sh);
+}
 
 /* The detector the object is carried by: the held one, else the one it rests on. */
 static inline CollisionDetector *CollisionInfoActiveDetector(CollisionInfo *info) {
@@ -449,10 +509,8 @@ static u8 func_8006BD48(VECTOR32 *pt, CollPoly *poly, s32 tol) {
     return func_8006BB88(&p, &flat, tol);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: radius << 12 is computed into a1 and copied to s3 in the original */
 void func_8006C2D0(CollisionProbe *p) {
-    s32 r = p->radius << 12;
+    s32 r = p->radius * 4096;
     s32 plane = p->planeDist;
     SVECTOR *nrm = p->poly->normal;
     s32 dist = p->dist;
@@ -492,9 +550,6 @@ void func_8006C2D0(CollisionProbe *p) {
         p->unk74.vz = 0;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/collision", func_8006C2D0);
-#endif
 
 void func_8006C4B0(CollisionProbe *p) {
     func_8006B860(p);
@@ -516,7 +571,7 @@ void func_8006C510(VECTOR32 *pos, s32 r, s32 bottom, s32 top, VECTOR32 *move, s3
     box->max.vz = pos->vz + FIX_TO_INT(MAX(move->vz, 0) + rad) + r;
 }
 
-s32 func_8006C7E8(CollBox *box, CollPoly *poly) {
+u8 func_8006C7E8(CollBox *box, CollPoly *poly) {
     SVECTOR *a = poly->verts[0];
     SVECTOR *b = poly->verts[1];
     SVECTOR *c = poly->verts[2];
@@ -567,27 +622,241 @@ s32 func_8006C7E8(CollBox *box, CollPoly *poly) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/collision", func_8006CB88);
-
 #ifdef NON_MATCHING
-/* after the CB88 call the target re-tests a constant-0 reg (v0=0; bnez) before the delta update */
+/* regalloc/caller-saves around the probe calls; edge-length block scheduling */
+void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **records, s32 *count) {
+    VECTOR32 lo;
+    VECTOR32 hi;
+    VECTOR32 mv;
+    VECTOR32 lowPos;
+    VECTOR32 highPos;
+    CollBox box;
+    CollisionProbe probe;
+    VECTOR32 sum;
+    VECTOR32 d;
+    VECTOR32 a;
+    u8 collect;
+    u8 onGround;
+    u8 onSteep;
+    u8 onWall;
+    s32 k;
+    s32 rad;
+    s32 av;
+    s32 r;
+    s32 top;
+    s32 bottom;
+    s32 limit;
+    s32 pass;
+    s32 n;
+    s32 i;
+    s32 j;
+    s32 slope;
+    s32 vcount;
+    SVECTOR **v;
+    CollFace *face;
+    u16 *flags;
+    CollPoly *poly;
+
+    onGround = 0;
+    onSteep = 0;
+    onWall = 0;
+    sum = D_800122C4;
+    n = 0;
+    collect = 0;
+    if (count != NULL) {
+        collect = records != NULL;
+    }
+    if (collect) {
+        *count = 0;
+    }
+    k = det->unk14 * 0x4CC;
+    av = IABS(k);
+    r = MAX(MAX(av, 0x6660), 0x4CC0);
+    hi = det->unk13C;
+    lo = hi;
+    lo.vy -= det->unk14;
+    hi.vy += det->unk14 + det->unk18;
+    mv = det->unk14C;
+    func_8006C510(&det->unk13C, det->unk14, lo.vy, hi.vy, &mv, r, r, &box);
+    rad = det->unk14;
+    lowPos = lo;
+    lowPos.vy += rad;
+    highPos = hi;
+    highPos.vy -= rad;
+    top = lowPos.vy + FIX_TO_INT(MAX(mv.vy, 0) + r);
+    bottom = highPos.vy + FIX_TO_INT(EXTEND_DOWN(mv.vy, r));
+    probe.unk28 = 0x4CC0;
+    probe.unk2C = k;
+    probe.unk30 = 0x6660;
+    probe.unk34 = arg2;
+    probe.radius = rad;
+    for (face = obj->anim->faceList; face != NULL; face = face->next) {
+        poly = &face->poly;
+        flags = &face->poly.flags;
+        if (!FlagWordTest(flags, 1) && func_8006C7E8(&box, poly) == 1) {
+            face->poly.flags |= 2;
+            vcount = face->poly.count;
+            v = face->poly.verts;
+            if (v[0]->vy <= top || v[1]->vy <= top || v[2]->vy <= top || (vcount == 4 && v[3]->vy <= top)) {
+                *flags |= 8;
+            }
+            if (v[0]->vy >= bottom || v[1]->vy >= bottom || v[2]->vy >= bottom ||
+                (vcount == 4 && v[3]->vy >= bottom)) {
+                *flags |= 4;
+            }
+        }
+    }
+    limit = top - 12;
+    for (pass = 0; pass < 2U; pass++) {
+        for (face = obj->anim->faceList; face != NULL; face = face->next) {
+            poly = &face->poly;
+            if (face->poly.flags & 2) {
+                vcount = face->poly.count;
+                slope = face->poly.slope;
+                v = face->poly.verts;
+                probe.hit = 0;
+                if (pass == 1) {
+                    if ((face->poly.flags & 8) && slope >= -0x7FF &&
+                        (slope >= 0xB50 || v[0]->vy >= limit || v[1]->vy >= limit || v[2]->vy >= limit ||
+                         (vcount == 4 && v[3]->vy >= limit))) {
+                        probe.poly = poly;
+                        probe.pos = lowPos;
+                        probe.move = det->unk14C;
+                        probe.unk30 = 0x6660;
+                        func_8006C4B0(&probe);
+                    }
+                } else if ((face->poly.flags & 4) && slope < 0x800) {
+                    probe.poly = poly;
+                    probe.pos = highPos;
+                    probe.move = det->unk14C;
+                    probe.unk30 = FIX_TO_INT((MAXF(0x1000 - IABS(slope), 0) * 2 + 0x1000) * 0x6660);
+                    func_8006C4B0(&probe);
+                }
+                if (probe.hit == 1) {
+                    if (slope > 0xB50) {
+                        for (i = 0; i < vcount; i++) {
+                            j = 0;
+                            if (i != vcount - 1) {
+                                j = i + 1;
+                            }
+                            d.vx = v[j]->vx - v[i]->vx;
+                            a.vx = IABS(d.vx);
+                            d.vy = v[j]->vy - v[i]->vy;
+                            a.vy = IABS(d.vy);
+                            d.vz = v[j]->vz - v[i]->vz;
+                            a.vz = IABS(d.vz);
+                            if (a.vx < a.vy) {
+                                s32 t = a.vx;
+                                a.vx = a.vy;
+                                a.vy = t;
+                            }
+                            if (a.vx < a.vz) {
+                                s32 t = a.vx;
+                                a.vx = a.vz;
+                                a.vz = t;
+                            }
+                            if (a.vx + ((a.vy + a.vz) >> 2) - 1 < 10U) {
+                                probe.hit = 0;
+                                break;
+                            }
+                        }
+                    }
+                    if (probe.hit == 1) {
+                        det->unk15C.vx += probe.unk54.vx;
+                        det->unk15C.vy += probe.unk54.vy;
+                        det->unk15C.vz += probe.unk54.vz;
+                        d.vx = HALVE(probe.unk74.vx);
+                        d.vy = HALVE(probe.unk74.vy);
+                        d.vz = HALVE(probe.unk74.vz);
+                        det->unk15C.vx -= d.vx;
+                        det->unk15C.vy -= d.vy;
+                        det->unk15C.vz -= d.vz;
+                        det->unk14C.vx += probe.unk64.vx;
+                        det->unk14C.vy += probe.unk64.vy;
+                        det->unk14C.vz += probe.unk64.vz;
+                        d.vx = FIX_TO_INT(probe.unk74.vx);
+                        d.vy = FIX_TO_INT(probe.unk74.vy);
+                        d.vz = FIX_TO_INT(probe.unk74.vz);
+                        lowPos.vx += d.vx;
+                        lowPos.vy += d.vy;
+                        lowPos.vz += d.vz;
+                        highPos.vx += d.vx;
+                        highPos.vy += d.vy;
+                        highPos.vz += d.vz;
+                        if (slope >= 0x800) {
+                            if (pass == 1) {
+                                onGround = 1;
+                                if (slope >= 0xB50) {
+                                    onSteep = 1;
+                                }
+                            }
+                        } else if (slope >= -0x800) {
+                            onWall = 1;
+                        }
+                        if (collect == 1 && *count < 15) {
+                            records[*count]->count = face->poly.count;
+                            for (i = 0; i < face->poly.count; i++) {
+                                records[*count]->verts[i].vx = face->poly.verts[i]->vx;
+                                records[*count]->verts[i].vy = face->poly.verts[i]->vy;
+                                records[*count]->verts[i].vz = face->poly.verts[i]->vz;
+                            }
+                            records[*count]->normal.vx = face->poly.normal->vx;
+                            records[*count]->normal.vy = face->poly.normal->vy;
+                            records[*count]->normal.vz = face->poly.normal->vz;
+                            records[*count]->kind = 1;
+                            (*count)++;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (n != 0) {
+        sum.vx /= n;
+        sum.vy /= n;
+        sum.vz /= n;
+        sum.vx = HALVE(sum.vx);
+        sum.vy = HALVE(sum.vy);
+        sum.vz = HALVE(sum.vz);
+        det->unk15C.vx += sum.vx;
+        det->unk15C.vy += sum.vy;
+        det->unk15C.vz += sum.vz;
+    }
+    for (face = obj->anim->faceList; face != NULL; face = face->next) {
+        face->poly.flags &= ~0xE;
+    }
+    if (onSteep) {
+        CMOVE(obj)->collFlags |= 0x100000;
+    }
+    if (onGround) {
+        CMOVE(obj)->collFlags |= 4;
+    }
+    if (onWall) {
+        CMOVE(obj)->collFlags |= 2;
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/collision", func_8006CB88);
+#endif
+
 s32 func_8006D9F4(Gobj *obj) {
     VECTOR32 pos;
     VECTOR32 delta;
     CollisionInfo *info;
     CollisionDetector *det;
     CollisionDetector *cur;
+    u8 blocked = 0; /* never set: the delta is always applied */
 
     info = CMOVE(obj)->coll;
     func_8006DDB4(obj);
     func_8006E0BC(obj, 1);
     det = info->unk20;
     if (det != NULL && CMOVE(obj)->coll->mode == 3) {
-        CollisionPhysicsGobj_DetectorMotion(obj, 0, det, det->unk170, det->unk16C, &info->unk3C);
+        CollisionPhysicsGobj_DetectorMotion(obj, 0, det, det->records, det->unk16C, &info->unk3C);
     }
     det = info->unk30;
     if (det != NULL) {
-        CollisionPhysicsGobj_DetectorMotion(obj, 0, det, det->unk170, det->unk16C, &info->unk3C);
+        CollisionPhysicsGobj_DetectorMotion(obj, 0, det, det->records, det->unk16C, &info->unk3C);
     }
     MovementGobjUpdateVelocity(obj, 1, 0);
     MovementGobjUpdateMovement(obj, 1, 0);
@@ -617,9 +886,9 @@ s32 func_8006D9F4(Gobj *obj) {
             det->unk16C = 0;
             cur->unk16C = 0;
         } else {
-            func_8006CB88(obj, det, 0x7FFFFFFF, cur->unk170, &cur->unk16C);
+            func_8006CB88(obj, det, 0x7FFFFFFF, cur->records, &cur->unk16C);
         }
-        if (cur->unk16C != 0) {
+        if (cur->unk16C != 0 && !blocked) {
             delta.vx += det->unk15C.vx;
             delta.vy += det->unk15C.vy;
             delta.vz += det->unk15C.vz;
@@ -628,9 +897,6 @@ s32 func_8006D9F4(Gobj *obj) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/collision", func_8006D9F4);
-#endif
 
 void CollisionGobjSetPushDetector(Gobj *obj, s32 which) {
     CollisionInfo *info;
@@ -763,7 +1029,7 @@ s32 func_8006E0BC(Gobj *obj, u8 attach) {
                 if (info->unk20 != NULL) {
                     det->unk16C = info->unk20->unk16C;
                     for (i = 0; i < det->unk16C; i++) {
-                        det->unk170[i] = info->unk20->unk170[i];
+                        det->records[i] = info->unk20->records[i];
                     }
                 } else {
                     det->unk16C = 0;
@@ -937,7 +1203,7 @@ s32 CollisionDetectorInitParams(CollisionDetector *det, CollisionDetectorParams 
     det->unk15C.vy = 0;
     det->unk15C.vz = 0;
     det->unk16C = 0;
-    det->unk170 = params->unk38;
+    det->records = params->records;
     det->next = NULL;
     return 1;
 }
@@ -1384,7 +1650,295 @@ void func_8006F810(Gobj *obj) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/collision", CollisionGobjBasicUpdate_Human);
+void CollisionGobjBasicUpdate_Human(Gobj *obj) {
+    VECTOR32 pos;
+    VECTOR32 push;
+    VECTOR32 e0;
+    VECTOR32 e1;
+    VECTOR32 base;
+    VECTOR32 nrm;
+    VECTOR32 dir;
+    VECTOR32 tmp;
+    VECTOR32 d;
+    VECTOR32 q;
+    s32 dist0;
+    s32 dist1;
+    s32 len;
+    CollMoveInfo *move;
+    CollCharMove *cm;
+    s8 *hip;
+    s32 k;
+    s32 y;
+
+    push = D_800122C4;
+    if (obj != NULL && CMOVE(obj) != NULL && CMOVE(obj)->charMove != NULL) {
+        move = CMOVE(obj);
+        cm = move->charMove;
+        pos = move->translation.cur.pos;
+        hip = CASGetHipMotion(obj->id);
+        if (hip != NULL) {
+            push.vz -= hip[2] << 12;
+            push.vx -= hip[0] << 12;
+            pos.vy -= hip[1];
+        } else {
+            d = move->unk160;
+            q = move->lowest;
+            q.vy -= 9;
+            pos.vy = q.vy + d.vy;
+        }
+        e0 = ((CollCharMove *)move->charMove)->edge0;
+        e1 = ((CollCharMove *)move->charMove)->edge1;
+        if (cm->edgeDirty) {
+            d.vx = e1.vx - e0.vx;
+            d.vy = e1.vy - e0.vy;
+            d.vz = e1.vz - e0.vz;
+            if (d.vx == 0 && d.vz == 0) {
+                nrm.vy = 0x1000;
+                nrm.vx = 0;
+                nrm.vz = 0;
+                base.vx = e0.vx;
+                base.vy = MIN(e0.vy, e1.vy);
+                base.vz = e0.vz;
+            } else {
+                q.vy = 0;
+                q.vx = d.vz;
+                q.vz = -d.vx;
+                OuterProduct0(&d, &q, &nrm);
+                GTEMath_VectorNormal((VECTOR *)&nrm, (VECTOR *)&nrm);
+                EGSGeometry_GetFuzzyDistancePoint2Point(&e0, &pos, &dist0);
+                EGSGeometry_GetFuzzyDistancePoint2Point(&e1, &pos, &dist1);
+                if (dist0 <= dist1) {
+                    base = e0;
+                } else {
+                    base = e1;
+                }
+            }
+            dir.vy = 0;
+            dir.vx = d.vx;
+            dir.vz = d.vz;
+            EGSMath_VectorModulus(&dir, &len);
+            if (len != 0) {
+                dir.vx = EGSMathFIXDiv(dir.vx, len);
+                dir.vy = dir.vy;
+                dir.vz = EGSMathFIXDiv(dir.vz, len);
+            } else {
+                dir.vx = 0;
+                dir.vy = 0;
+                dir.vz = 0;
+            }
+            len <<= 12;
+            move->edgeBase = base;
+            move->edgeNormal = nrm;
+            cm->edgeLen = len;
+            cm->edgeDir = dir;
+            cm->edgeDirty = 0;
+            cm->shadowOk = ShadowCalculateProjectionMatrix(&nrm, &cm->shadow);
+        } else {
+            base = move->edgeBase;
+            nrm = move->edgeNormal;
+            len = cm->edgeLen;
+            dir = cm->edgeDir;
+        }
+        {
+        VECTOR32 acc;
+        VECTOR32 fwd;
+        VECTOR32 right;
+        VECTOR32 tmp2;
+        s32 dot;
+        s32 dot2;
+        s32 h;
+        s32 h2;
+
+        if (CMOVE(obj)->collFlags & 4) {
+            acc = D_800122C4;
+            if (CMOVE(obj)->collFlags & 0x100000) {
+                push.vz -= cm->pushZ;
+                push.vy -= cm->pushY;
+                fwd.vx = obj->anim->frame->m[0][2];
+                fwd.vy = obj->anim->frame->m[1][2];
+                fwd.vz = obj->anim->frame->m[2][2];
+                fwd.vy = -fwd.vy;
+                right.vx = fwd.vz;
+                right.vy = 0;
+                right.vz = -fwd.vx;
+                if (push.vx != 0) {
+                    tmp.vx = EGSMathFIXMul(right.vx, push.vx);
+                    tmp.vy = EGSMathFIXMul(right.vy, push.vx);
+                    tmp.vz = EGSMathFIXMul(right.vz, push.vx);
+                    acc.vx += tmp.vx;
+                    acc.vy += tmp.vy;
+                    acc.vz += tmp.vz;
+                }
+                if (push.vz != 0) {
+                    tmp.vx = EGSMathFIXMul(fwd.vx, push.vz);
+                    tmp.vy = EGSMathFIXMul(fwd.vy, push.vz);
+                    tmp.vz = EGSMathFIXMul(fwd.vz, push.vz);
+                    acc.vx += tmp.vx;
+                    acc.vy += tmp.vy;
+                    acc.vz += tmp.vz;
+                }
+                (void)&dot;
+                dot = DOT_FIX(acc, nrm);
+                tmp2.vx = EGSMathFIXMul(nrm.vx, dot);
+                tmp2.vy = EGSMathFIXMul(nrm.vy, dot);
+                tmp2.vz = EGSMathFIXMul(nrm.vz, dot);
+                acc.vx -= tmp2.vx;
+                acc.vy -= tmp2.vy;
+                acc.vz -= tmp2.vz;
+                acc.vy += push.vy;
+            }
+            fwd = move->translation.next.vel;
+            acc.vx += fwd.vx;
+            acc.vy += fwd.vy;
+            acc.vz += fwd.vz;
+            right = move->translation.next.accel;
+            acc.vx += right.vx;
+            acc.vy += right.vy;
+            acc.vz += right.vz;
+            (void)&dot2;
+            dot2 = DOT_FIX(acc, nrm);
+            if (dot2 < 0) {
+                if (cm->pushY == 0) {
+                    k = 0xCCCC;
+                    if (CMOVE(obj)->collFlags & 0x100000) {
+                        fwd.vx = EGSMathFIXMul(nrm.vx, 0xCCCC);
+                        fwd.vy = EGSMathFIXMul(nrm.vy, 0xCCCC);
+                        fwd.vz = EGSMathFIXMul(nrm.vz, 0xCCCC);
+                        acc.vx += fwd.vx;
+                        acc.vy += fwd.vy;
+                        acc.vz += fwd.vz;
+                    } else {
+                        acc.vx = EGSMathFIXMul(nrm.vx, dot2 + k);
+                        acc.vy = EGSMathFIXMul(nrm.vy, dot2 + k);
+                        acc.vz = EGSMathFIXMul(nrm.vz, dot2 + k);
+                    }
+                }
+                acc.vx = -acc.vx;
+                acc.vy = -acc.vy;
+                acc.vz = -acc.vz;
+                CMOVE(obj)->translation.next.accel.vx += acc.vx;
+                CMOVE(obj)->translation.next.accel.vy += acc.vy;
+                CMOVE(obj)->translation.next.accel.vz += acc.vz;
+            }
+        }
+        MovementGobjUpdateVelocity(obj, 1, 0);
+        MovementGobjUpdateMovement(obj, 1, 0);
+        CMOVE(obj)->collFlags &= ~0x100;
+        CMOVE(obj)->collFlags &= ~4;
+        CMOVE(obj)->collFlags &= ~0x100000;
+        right = D_800122C4;
+        fwd = CMOVE(obj)->translation.next.delta;
+        tmp.vx = pos.vx - base.vx;
+        tmp.vy = pos.vy - base.vy;
+        tmp.vz = pos.vz - base.vz;
+        tmp.vx <<= 12;
+        tmp.vy <<= 12;
+        tmp.vz <<= 12;
+        tmp.vx += fwd.vx;
+        tmp.vy += fwd.vy;
+        tmp.vz += fwd.vz;
+        (void)&h;
+        h = DOT_FIX(tmp, nrm);
+        if (h <= 0x4CC0) {
+            (void)&h2;
+            h2 = -DOT_FIX(fwd, nrm);
+            CMOVE(obj)->collFlags |= 4;
+            if (nrm.vy >= 0xB50) {
+                CMOVE(obj)->collFlags |= 0x100000;
+            }
+            right.vx = EGSMathFIXMul(nrm.vx, -h);
+            right.vy = EGSMathFIXMul(nrm.vy, -h);
+            right.vz = EGSMathFIXMul(nrm.vz, -h);
+        }
+        CMOVE(obj)->translation.next.delta.vx += right.vx;
+        CMOVE(obj)->translation.next.delta.vy += right.vy;
+        CMOVE(obj)->translation.next.delta.vz += right.vz;
+        cm->pushZ = 0;
+        cm->pushY = 0;
+        {
+        VECTOR32 dl;
+        VECTOR32 p;
+        VECTOR32 r;
+        VECTOR32 perp;
+        s32 cross;
+        s32 side;
+
+        if (len != 0 || e0.vy == e1.vy) {
+            tmp2 = D_800122C4;
+            dl = CMOVE(obj)->translation.next.delta;
+            dl.vx = FIX_TO_INT(dl.vx);
+            dl.vy = FIX_TO_INT(dl.vy);
+            dl.vz = FIX_TO_INT(dl.vz);
+            p.vx = pos.vx + dl.vx;
+            p.vy = pos.vy + dl.vy;
+            p.vz = pos.vz + dl.vz;
+            r.vx = p.vx - e0.vx;
+            r.vy = p.vy - e0.vy;
+            r.vz = p.vz - e0.vz;
+            if (e0.vx != e1.vx || e0.vy != e1.vy || e0.vz != e1.vz) {
+                (void)&cross;
+                cross = r.vx * dir.vx + r.vz * dir.vz;
+                if (cross < -6) {
+                    tmp2.vx = -(r.vx << 12);
+                    tmp2.vy = r.vy > 0 ? 0 : -(r.vy << 12);
+                    tmp2.vz = -(r.vz << 12);
+                    if (nrm.vy < 0xB50 && e0.vy <= e1.vy) {
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edgeDirty = 1;
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edge0 = e0;
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edge1 = e0;
+                    }
+                } else if (cross > len + 6) {
+                    tmp2.vx = (e1.vx - p.vx) << 12;
+                    tmp2.vy = MAXF(e1.vy - p.vy, 0) << 12;
+                    tmp2.vz = (e1.vz - p.vz) << 12;
+                    if (nrm.vy < 0xB50 && e0.vy >= e1.vy) {
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edgeDirty = 1;
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edge0 = e1;
+                        ((CollCharMove *)CMOVE(obj)->charMove)->edge1 = e1;
+                    }
+                } else {
+                    perp.vx = dir.vz;
+                    perp.vy = 0;
+                    perp.vz = -dir.vx;
+                    (void)&side;
+                    side = r.vx * perp.vx + r.vz * perp.vz;
+                    if (IABS(side) > 0x6660) {
+                        tmp2.vx = EGSMathFIXMul(perp.vx, -side);
+                        tmp2.vy = EGSMathFIXMul(perp.vy, -side);
+                        tmp2.vz = EGSMathFIXMul(perp.vz, -side);
+                    }
+                }
+            } else {
+                tmp2.vx = -(r.vx << 12);
+                tmp2.vy = 0;
+                tmp2.vz = -(r.vz << 12);
+            }
+            CMOVE(obj)->translation.next.delta.vx += tmp2.vx;
+            CMOVE(obj)->translation.next.delta.vy += tmp2.vy;
+            CMOVE(obj)->translation.next.delta.vz += tmp2.vz;
+        }
+        MovementGobjUpdatePosition(obj, 1, 0);
+        dl = CMOVE(obj)->translation.cur.pos;
+        p.vx = e1.vx - e0.vx;
+        p.vy = e1.vy - e0.vy;
+        p.vz = e1.vz - e0.vz;
+        if (p.vx == 0 && p.vz == 0) {
+            y = MIN(e0.vy, e1.vy);
+        } else {
+            if (IABS(p.vx) > IABS(p.vz)) {
+                y = e0.vy + p.vy * (dl.vx - e0.vx) / p.vx;
+            } else {
+                y = e0.vy + p.vy * (dl.vz - e0.vz) / p.vz;
+            }
+        }
+        CMOVE(obj)->height = y;
+        func_8006F4BC(obj);
+        func_8006F738(obj, h);
+        func_8006F810(obj);
+        }
+        }
+    }
+}
 
 void CollisionGobjBasicUpdate_NonHuman(Gobj *obj) {
     VECTOR32 push;
@@ -1503,7 +2057,203 @@ s32 CollisionGobjUpdate(Gobj *obj) {
     return 1;
 }
 
+#ifdef NON_MATCHING
+/* regalloc: v/axis swap s5/s6; ratio load hoisted above the push stores */
+/* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
+s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, CollHit **hits, s32 *count) {
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 cur;
+    VECTOR32 n;
+    VECTOR32 planes[3];
+    s32 dot;
+    s32 dot2;
+    s32 len;
+    s32 ratio;
+    s32 pass;
+    s32 best;
+    s32 min;
+    s32 i;
+    CollHit **next;
+    CollHit *tmp;
+
+    (void)&dot;
+    (void)&dot2;
+    (void)&len;
+    (void)&ratio;
+    pass = 0;
+    next = hits;
+    do {
+        switch (pass) {
+            case 0:
+                cur = *v;
+                break;
+            case 1:
+                cur = b;
+                break;
+            case 2:
+                cur = b;
+                break;
+        }
+        best = -1;
+        min = 0x7FFFFFFF;
+        for (i = pass; i < *count; i++) {
+            n = hits[i]->normal;
+            dot = DOT_FIX(cur, n);
+            if (((pass == 0 && dot < 0) || dot < -0x3320) && dot < min) {
+                switch (pass) {
+                    case 0:
+                        best = i;
+                        min = dot;
+                        break;
+                    case 1:
+                        dot2 = DOT_FIX(planes[0], n);
+                        if (IABS(dot2) < 0xF0B) {
+                            best = i;
+                            min = dot;
+                        }
+                        break;
+                    case 2:
+                        dot2 = DOT_FIX(planes[0], n);
+                        if (IABS(dot2) < 0xF0B) {
+                            dot2 = DOT_FIX(planes[1], n);
+                            if (IABS(dot2) < 0xF0B) {
+                                best = i;
+                                min = dot;
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+        if (best >= 0) {
+            planes[pass] = hits[best]->normal;
+            switch (pass) {
+                case 0:
+                    a.vx = EGSMathFIXMul(planes[0].vx, min);
+                    a.vy = EGSMathFIXMul(planes[0].vy, min);
+                    a.vz = EGSMathFIXMul(planes[0].vz, min);
+                    b.vx = v->vx - a.vx;
+                    b.vy = v->vy - a.vy;
+                    b.vz = v->vz - a.vz;
+                    break;
+                case 1:
+                    OuterProduct12((VECTOR *)&planes[1], (VECTOR *)&planes[0], (VECTOR *)axis);
+                    GTEMath_VectorNormal((VECTOR *)axis, (VECTOR *)axis);
+                    *lenOut = DOT_FIX(*v, *axis);
+                    b.vx = EGSMathFIXMul(axis->vx, *lenOut);
+                    b.vy = EGSMathFIXMul(axis->vy, *lenOut);
+                    b.vz = EGSMathFIXMul(axis->vz, *lenOut);
+                    a.vx = v->vx - b.vx;
+                    a.vy = v->vy - b.vy;
+                    a.vz = v->vz - b.vz;
+                    break;
+                case 2:
+                    a = *v;
+                    b.vx = 0;
+                    b.vy = 0;
+                    b.vz = 0;
+                    break;
+            }
+            tmp = hits[best];
+            hits[best] = *next;
+            *next = tmp;
+            next++;
+            pass++;
+        }
+    } while (pass < 3 && best >= 0);
+    switch (pass) {
+        case 1:
+            EGSMath_VectorModulus(&b, lenOut);
+            if (*lenOut != 0) {
+                axis->vx = EGSMathFIXDiv(b.vx, *lenOut);
+                axis->vy = EGSMathFIXDiv(b.vy, *lenOut);
+                axis->vz = EGSMathFIXDiv(b.vz, *lenOut);
+                break;
+            }
+            goto zero;
+        case 2:
+            break;
+        case 3:
+            *lenOut = 0;
+        zero:
+            axis->vx = 0;
+            axis->vy = 0;
+            axis->vz = 0;
+            break;
+    }
+    *count = pass;
+    *rest = b;
+    switch (*count) {
+        case 1:
+            hits[0]->push = a;
+            hits[0]->weight = 0x1000;
+            break;
+        case 2:
+            D_8011EB40[0] = hits[0]->normal;
+            D_8011EB40[1] = hits[1]->normal;
+            EGSMath_VectorModulus(&a, &len);
+            D_8011EB40[2].vx = EGSMathFIXDiv(a.vx, len);
+            D_8011EB40[2].vy = EGSMathFIXDiv(a.vy, len);
+            D_8011EB40[2].vz = EGSMathFIXDiv(a.vz, len);
+            EGSMathINT_SolveLinear2VectorEquationForParameters(D_8011EB40, D_8011EB80);
+            ratio = EGSMathFIXDiv(D_8011EB80[1], D_8011EB80[0]);
+            hits[0]->weight = ratio;
+            D_8011EB40[0].vx = EGSMathFIXMul(D_8011EB40[0].vx, len);
+            D_8011EB40[0].vy = EGSMathFIXMul(D_8011EB40[0].vy, len);
+            D_8011EB40[0].vz = EGSMathFIXMul(D_8011EB40[0].vz, len);
+            hits[0]->push.vx = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
+            hits[0]->push.vy = EGSMathFIXMul(D_8011EB40[0].vy, ratio);
+            hits[0]->push.vz = EGSMathFIXMul(D_8011EB40[0].vz, ratio);
+            ratio = EGSMathFIXDiv(D_8011EB80[3], D_8011EB80[2]);
+            hits[1]->weight = ratio;
+            D_8011EB40[1].vx = EGSMathFIXMul(D_8011EB40[1].vx, len);
+            D_8011EB40[1].vy = EGSMathFIXMul(D_8011EB40[1].vy, len);
+            D_8011EB40[1].vz = EGSMathFIXMul(D_8011EB40[1].vz, len);
+            hits[1]->push.vx = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
+            hits[1]->push.vy = EGSMathFIXMul(D_8011EB40[1].vy, ratio);
+            hits[1]->push.vz = EGSMathFIXMul(D_8011EB40[1].vz, ratio);
+            break;
+        case 3:
+            D_8011EB40[0] = hits[0]->normal;
+            D_8011EB40[1] = hits[1]->normal;
+            D_8011EB40[2] = hits[2]->normal;
+            EGSMath_VectorModulus(&a, &len);
+            D_8011EB40[3].vx = EGSMathFIXDiv(a.vx, len);
+            D_8011EB40[3].vy = EGSMathFIXDiv(a.vy, len);
+            D_8011EB40[3].vz = EGSMathFIXDiv(a.vz, len);
+            EGSMathINT_SolveLinear3VectorEquationForParameters(D_8011EB40, D_8011EB80);
+            ratio = EGSMathFIXDiv(D_8011EB80[1], D_8011EB80[0]);
+            hits[0]->weight = ratio;
+            D_8011EB40[0].vx = EGSMathFIXMul(D_8011EB40[0].vx, len);
+            D_8011EB40[0].vy = EGSMathFIXMul(D_8011EB40[0].vy, len);
+            D_8011EB40[0].vz = EGSMathFIXMul(D_8011EB40[0].vz, len);
+            hits[0]->push.vx = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
+            hits[0]->push.vy = EGSMathFIXMul(D_8011EB40[0].vy, ratio);
+            hits[0]->push.vz = EGSMathFIXMul(D_8011EB40[0].vz, ratio);
+            ratio = EGSMathFIXDiv(D_8011EB80[3], D_8011EB80[2]);
+            hits[1]->weight = ratio;
+            D_8011EB40[1].vx = EGSMathFIXMul(D_8011EB40[1].vx, len);
+            D_8011EB40[1].vy = EGSMathFIXMul(D_8011EB40[1].vy, len);
+            D_8011EB40[1].vz = EGSMathFIXMul(D_8011EB40[1].vz, len);
+            hits[1]->push.vx = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
+            hits[1]->push.vy = EGSMathFIXMul(D_8011EB40[1].vy, ratio);
+            hits[1]->push.vz = EGSMathFIXMul(D_8011EB40[1].vz, ratio);
+            ratio = EGSMathFIXDiv(D_8011EB80[5], D_8011EB80[4]);
+            hits[2]->weight = ratio;
+            D_8011EB40[2].vx = EGSMathFIXMul(D_8011EB40[2].vx, len);
+            D_8011EB40[2].vy = EGSMathFIXMul(D_8011EB40[2].vy, len);
+            D_8011EB40[2].vz = EGSMathFIXMul(D_8011EB40[2].vz, len);
+            hits[2]->push.vx = EGSMathFIXMul(D_8011EB40[2].vx, ratio);
+            hits[2]->push.vy = EGSMathFIXMul(D_8011EB40[2].vy, ratio);
+            hits[2]->push.vz = EGSMathFIXMul(D_8011EB40[2].vz, ratio);
+            break;
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/collision", func_8007112C);
+#endif
 
 /* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
 s32 func_80071E04(Gobj *a, Gobj *b, VECTOR32 *rel, VECTOR32 *out) {
