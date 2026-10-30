@@ -1,40 +1,46 @@
 #!/usr/bin/env python3
-"""Compare built functions against the original:  tools/check_func.py Name [Name...] | --tu system"""
+"""Compare built functions against the original.
+
+    tools/check_func.py [-m module] Name [Name...]
+    tools/check_func.py --tu <tu>          (all C-defined functions of src/*/<tu>.c)
+
+OK = identical, REL = only relocated fields differ, BAD = real differences.
+"""
 import re
-import struct
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tu_analyze import functions  # noqa: E402
 from fingerprint import mask  # noqa: E402
+from modinfo import module, module_of_tu, symbol_addrs  # noqa: E402
+from tu_analyze import functions  # noqa: E402
 
 
 def main():
-    built = Path("build/scus_942.40").read_bytes()
-    orig = Path("orig/scus_942.40").read_bytes()
-    funcs = functions("build/scus_942.40.elf")
+    args = sys.argv[1:]
+    mod = "main"
+    if args[:1] == ["-m"]:
+        mod, args = args[1], args[2:]
+    if args[:1] == ["--tu"]:
+        mod = module_of_tu(args[1])
+        src = Path(f"src/{mod}/{args[1]}.c").read_text()
+        args = re.findall(r"^\w[\w\s\*]*?\b(\w+)\([^;]*$", src, re.M)
+    m = module(mod)
+    built = Path(m["built"]).read_bytes()
+    orig = Path(m["orig"]).read_bytes()
+    orig_addr = symbol_addrs(m["syms"])
+    funcs = functions(m["elf"])
     addrs = [a for _, a in funcs]
-    orig_addr = {}
-    for line in Path("config/symbols/main.txt").read_text().splitlines():
-        p = line.split()
-        if len(p) >= 3:
-            orig_addr[p[0]] = int(p[2].rstrip(";"), 16)
-    want = sys.argv[1:]
-    if want[:1] == ["--tu"]:
-        src = Path(f"src/main/{want[1]}.c").read_text()
-        want = re.findall(r"^\w[\w\s\*]*?\b(\w+)\([^;]*$", src, re.M)
+    word = lambda img, off: int.from_bytes(img[off : off + 4], "little")  # noqa: E731
     for name, a in funcs:
-        if name not in want:
+        if name not in args:
             continue
         i = addrs.index(a)
         end = addrs[i + 1] if i + 1 < len(addrs) else a + 4
-        o = a - 0x8000F800
         n = (end - a) // 4
-        oa = orig_addr.get(name, a) - 0x8000F800
-        w = lambda img, off, k: int.from_bytes(img[off + 4 * k : off + 4 * k + 4], "little")  # noqa: E731
-        diff = sum(1 for k in range(n) if w(built, o, k) != w(orig, oa, k))
-        mdiff = sum(1 for k in range(n) if mask(w(built, o, k)) != mask(w(orig, oa, k)))
+        bo, oo = a - m["base"], orig_addr.get(name, a) - m["base"]
+        diff = sum(1 for k in range(n) if word(built, bo + 4 * k) != word(orig, oo + 4 * k))
+        mdiff = sum(1 for k in range(n) if mask(word(built, bo + 4 * k)) != mask(word(orig, oo + 4 * k)))
         status = "OK " if not diff else ("REL" if not mdiff else "BAD")
         print(f"{status} {name:40s} {a:08X} {n:4d} insns {diff} differ ({mdiff} ignoring relocs)")
 

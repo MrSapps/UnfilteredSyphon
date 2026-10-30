@@ -45,8 +45,8 @@ segments:
     bss_size: 0xE8
     subsegments:
       - [0x0, rodatabin, header]
-      - [0x4, rodata, rdata]
-      - [0x628, asm, text]
+      - [0x4, .rodata, museum]
+      - [0x628, c, museum]
       - [0x2DDC, data, data]
       - { start: 0x2FA0, type: bss, vram: 0x80143F80, name: bss }
   - [0x2FA0]

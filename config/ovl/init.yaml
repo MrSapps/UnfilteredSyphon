@@ -43,7 +43,7 @@ segments:
     start: 0x0
     vram: 0x80145BF0
     subsegments:
-      - [0x0, rodata, rdata]
-      - [0x344, asm, text]
+      - [0x0, .rodata, init]
+      - [0x344, c, init]
       - [0x5E40, data, data]
   - [0x5EE8]

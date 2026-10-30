@@ -52,6 +52,11 @@ segments:
 """
 
 
+# Overlays that are a single game TU (menu/movie also link Psy-Q library code).
+C_OVERLAYS = {"levspec", "baseext", "cave", "chopper", "subway", "subway2", "park", "park2",
+              "museum", "whouse", "title", "init"}
+
+
 def main():
     sections, _ = parse_map("orig/siphon.map")
     groups = {}
@@ -78,9 +83,15 @@ def main():
                 if k == "header":
                     subs.append(f"      - [0x{rom(s.start):X}, rodatabin, header]")
                 elif k == "rdata":
-                    subs.append(f"      - [0x{rom(s.start):X}, rodata, rdata]")
+                    if name in C_OVERLAYS:
+                        subs.append(f"      - [0x{rom(s.start):X}, .rodata, {name}]")
+                    else:
+                        subs.append(f"      - [0x{rom(s.start):X}, rodata, rdata]")
                 elif k == "text":
-                    subs.append(f"      - [0x{rom(s.start):X}, asm, text]")
+                    if name in C_OVERLAYS:
+                        subs.append(f"      - [0x{rom(s.start):X}, c, {name}]")
+                    else:
+                        subs.append(f"      - [0x{rom(s.start):X}, asm, text]")
                 elif k == "data":
                     subs.append(f"      - [0x{rom(s.start):X}, data, data]")
                 elif k == "bss":

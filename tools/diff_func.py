@@ -1,41 +1,44 @@
 #!/usr/bin/env python3
-"""Side-by-side disassembly of a built function vs the original:  tools/diff_func.py Name"""
-import struct
+"""Side-by-side disassembly of a built function vs the original:  tools/diff_func.py [-m module] Name
+
+'!!' differs, '~~' differs only in relocated fields.
+"""
 import sys
 from pathlib import Path
 
 import rabbitizer
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tu_analyze import functions  # noqa: E402
 from fingerprint import mask  # noqa: E402
+from modinfo import module, symbol_addrs  # noqa: E402
+from tu_analyze import functions  # noqa: E402
 
 rabbitizer.config.regNames_gprAbiNames = rabbitizer.Abi.O32
 
 
-def words(img, addr, n):
-    o = addr - 0x8000F800
-    return [struct.unpack_from("<I", img, o + 4 * i)[0] for i in range(n)]
-
-
 def main():
-    name = sys.argv[1]
-    built = Path("build/scus_942.40").read_bytes()
-    orig = Path("orig/scus_942.40").read_bytes()
-    bf = dict((n, a) for n, a in functions("build/scus_942.40.elf"))
-    of = {}
-    for line in Path("config/symbols/main.txt").read_text().splitlines():
-        p = line.split()
-        if len(p) >= 3:
-            of[p[0]] = int(p[2].rstrip(";"), 16)
+    args = sys.argv[1:]
+    mod = "main"
+    if args[:1] == ["-m"]:
+        mod, args = args[1], args[2:]
+    name = args[0]
+    m = module(mod)
+    built = Path(m["built"]).read_bytes()
+    orig = Path(m["orig"]).read_bytes()
+    funcs = functions(m["elf"])
+    bf = dict(funcs)
     ba = bf[name]
-    oa = of.get(name, ba)
-    ad = sorted(a for _, a in functions("build/scus_942.40.elf"))
-    n = (ad[ad.index(ba) + 1] - ba) // 4 + 2
-    for i, (x, y) in enumerate(zip(words(built, ba, n), words(orig, oa, n))):
+    oa = symbol_addrs(m["syms"]).get(name, ba)
+    ad = sorted(a for _, a in funcs)
+    nxt = ad[ad.index(ba) + 1] if ad.index(ba) + 1 < len(ad) else ba + 0x40
+    n = (nxt - ba) // 4 + 2
+    word = lambda img, a: int.from_bytes(img[a - m["base"] : a - m["base"] + 4], "little")  # noqa: E731
+    for i in range(n):
+        x, y = word(built, ba + 4 * i), word(orig, oa + 4 * i)
         dx = rabbitizer.Instruction(x, ba + 4 * i).disassemble()
         dy = rabbitizer.Instruction(y, oa + 4 * i).disassemble()
-        print(f"{'  ' if x == y else ('~~' if mask(x) == mask(y) else '!!')} {i*4:4X}  {dx:40s} {dy}")
+        flag = "  " if x == y else ("~~" if mask(x) == mask(y) else "!!")
+        print(f"{flag} {i*4:4X}  {dx:40s} {dy}")
 
 
 if __name__ == "__main__":
