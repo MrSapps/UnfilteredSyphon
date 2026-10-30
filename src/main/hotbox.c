@@ -111,7 +111,7 @@ s32 HotboxCallback(Hotbox **event) {
     if (!gLevelReady) {
         return 0;
     }
-    if (player->healthInfo->maxHealth <= 0) {
+    if (player->healthInfo->health <= 0) {
         return 0;
     }
     box = *event;
@@ -119,7 +119,7 @@ s32 HotboxCallback(Hotbox **event) {
     type = flags & 0xFF;
     if (type == 0x14) {
         if (gSysInfo.level != 0xE) {
-            if (gObjPlayer->healthInfo->maxHealth > 0 && !gPlayerOnFireFlag) {
+            if (gObjPlayer->healthInfo->health > 0 && !gPlayerOnFireFlag) {
                 SysPostMessage(0xD, 4, 0x29A, gPlayerOffset, 0, 0, 0, 0);
             }
             return 1;

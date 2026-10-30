@@ -265,7 +265,7 @@ static void func_800172FC(void) {
 
 /* End-of-level fade finished. */
 static void func_80017348(void) {
-    if (gObjPlayer->healthInfo->maxHealth > 0) {
+    if (gObjPlayer->healthInfo->health > 0) {
         gInEOLState = 1;
         SysStatePush(5);
         EGSDisplayQueueInterrupt(func_800172FC, 1, 0xE0C00000);
@@ -337,7 +337,7 @@ void LevelGameOver(s32 arg0) {
 void LevelMissionFailed(s32 reason, s32 xa, u8 secondary) {
     char buf[32];
 
-    if (gObjPlayer->healthInfo->maxHealth <= 0) {
+    if (gObjPlayer->healthInfo->health <= 0) {
         return;
     }
     if (!secondary) {
@@ -389,7 +389,7 @@ void LevelObjectiveComplete(s16 objective) {
     s32 bit;
     s32 ticks;
 
-    if (gObjPlayer->healthInfo->maxHealth > 0) {
+    if (gObjPlayer->healthInfo->health > 0) {
         if (gObjectives != NULL) {
             bit = 1 << objective;
             if (!(gObjectives->unk18 & bit)) {

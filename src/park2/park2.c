@@ -388,7 +388,7 @@ static s32 func_801418C8(void) {
     BossNPC *npc;
 
     npc = D_801447C0->npc;
-    if (((GameObjectRuntime *)gObjPlayer)->healthInfo->maxHealth > 0 && (npc->flags & 0x100)) {
+    if (((GameObjectRuntime *)gObjPlayer)->healthInfo->health > 0 && (npc->flags & 0x100)) {
         if (npc->unk41 != 0) {
             return npc->unk41 != 0;
         }
@@ -425,7 +425,7 @@ void BOSSObjDispatch(SysMsg *msg) {
             break;
         }
         target = D_801447C0->target;
-        if (target->id == gPlayerOffset && ((GameObjectRuntime *)gObjPlayer)->healthInfo->maxHealth > 0) {
+        if (target->id == gPlayerOffset && ((GameObjectRuntime *)gObjPlayer)->healthInfo->health > 0) {
             if (!(target->flags & 2)) {
                 if (++D_801447B0 > 100) {
                     D_801447B0 = 0;
@@ -463,7 +463,7 @@ void BOSSObjDispatch(SysMsg *msg) {
         D_801447B4 = 180;
         D_801447B8 = 0;
         func_80141F5C();
-        D_801447C0->healthInfo->maxHealth = 0x7FFF;
+        D_801447C0->healthInfo->health = 0x7FFF;
         D_801447A8 = 0;
         CASRequestAction(D_801447C0->linkedId, 5);
         break;

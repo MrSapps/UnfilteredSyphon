@@ -311,7 +311,7 @@ void PickUpInventory(s16 objId) {
 }
 
 void PickupObjectSet(s16 objId, u8 armor, u8 weapon, s16 amount, u8 showMsg) {
-    if (gObjPlayer->healthInfo->maxHealth > 0 && D_801101C0 < PICKUP_PENDING_MAX) {
+    if (gObjPlayer->healthInfo->health > 0 && D_801101C0 < PICKUP_PENDING_MAX) {
         D_80121990[D_801101C0].objId = objId;
         D_80121990[D_801101C0].armor = armor;
         D_80121990[D_801101C0].weapon = weapon;

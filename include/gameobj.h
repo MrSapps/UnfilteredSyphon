@@ -50,8 +50,8 @@ typedef struct GameObjectAnim {
 
 typedef struct GameObjectHealth {
     /* 0x00 */ u8 unk00[6];
-    /* 0x06 */ s16 health;
-    /* 0x08 */ s16 maxHealth;
+    /* 0x06 */ s16 armor; /* flak jacket, 600 when undamaged */
+    /* 0x08 */ s16 health;
 } GameObjectHealth;
 
 /* Live game object ("gobj"): GameObjectInfo.runtime, pooled by GameGetGobj (0x24 bytes). */

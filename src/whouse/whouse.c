@@ -57,7 +57,7 @@ static void *func_80141D6C(s16 id, s16 kind);
 
 /* Inwhouse countdown expired: the warehouse burns down. */
 void InwhouseTimerEndCallback(void) {
-    if (((GameObjectRuntime *)gObjPlayer)->healthInfo->maxHealth > 0) {
+    if (((GameObjectRuntime *)gObjPlayer)->healthInfo->health > 0) {
         if (SysSoundIsXAPlaying()) {
             SysStopXA();
         }

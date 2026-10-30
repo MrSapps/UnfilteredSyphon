@@ -102,7 +102,7 @@ static void func_8014152C(void) {
             if ((id & 0x2000) && (id &= 0x3FF) != GOBJ_ID_666) {
                 if (gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type == GOBJ_TYPE_BOMB) {
                     rt = gameObjectsInfo[id].runtime;
-                    if (!(rt->flags1 & 0x80) && rt->healthInfo->maxHealth > 0) {
+                    if (!(rt->flags1 & 0x80) && rt->healthInfo->health > 0) {
                         ObjectDetonateBomb(rt);
                     }
                 }
@@ -379,7 +379,7 @@ void iParkInit(s32 mode) {
             ref = gameObjectsInfo[i].refId;
             if (ref == -1 || GOBJ_TYPE(ref) == GOBJ_TYPE_COP) {
                 npc = ObjectMatchToRefIDByCatID(i, 2);
-                if (npc->healthInfo->maxHealth <= 0) {
+                if (npc->healthInfo->health <= 0) {
                     D_80143118 = 1;
                 }
             }
@@ -394,7 +394,7 @@ void iParkInit(s32 mode) {
             if (cop->id != i && type == GOBJ_TYPE_COP && (*(u32 *)rt & 0x8020) != 0x20) {
                 cop->flags23 |= 2;
             }
-            if (cop->healthInfo->maxHealth <= 0) {
+            if (cop->healthInfo->health <= 0) {
                 gLevelInnocentsKilled++;
             }
         }

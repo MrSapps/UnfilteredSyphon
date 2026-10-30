@@ -493,9 +493,9 @@ static void func_80141C64(void) {
     }
     D_8014561C->state = 0;
     health = D_8014561C->healthInfo;
+    health->armor = 0xFA0;
     health->health = 0xFA0;
-    health->maxHealth = 0xFA0;
-    D_80145764 = health->health;
+    D_80145764 = health->armor;
     D_80145768[0] = D_80145764;
     for (i = 3; i > 0; i--) {
         D_80145768[i] = D_80145764 * (4 - i) / 4;
@@ -1084,7 +1084,7 @@ static void func_80143B88(u8 visible) {
             GTEMath_VectorNormal(&D_801456C0, &D_801456C0);
         }
         fire = 0;
-        if (visible && D_8014561C->healthInfo->maxHealth > 0 && D_801456A0.vy >= D_80145730 &&
+        if (visible && D_8014561C->healthInfo->health > 0 && D_801456A0.vy >= D_80145730 &&
             (dist <= 0x1900 || D_80145790 != 0)) {
             fire = 1;
         }
@@ -1217,7 +1217,7 @@ void ChopperTargeting(s32 *mode, u8 *active) {
         }
         if (hitId >= 0) {
             hit = (ChopperGobj *)gameObjectsInfo[hitId].runtime;
-            if (hit->unk22 != 2 || hit->healthInfo->maxHealth <= 0) {
+            if (hit->unk22 != 2 || hit->healthInfo->health <= 0) {
                 dmg = (D_80106220 >> 6) & 0x3FF;
             } else {
                 fire = 0;
@@ -1357,7 +1357,7 @@ static void func_80144A00(s16 id) {
 static s32 func_80144B4C(s16 id) {
     s32 hp;
 
-    hp = gameObjectsInfo[id].runtime->healthInfo->maxHealth;
+    hp = gameObjectsInfo[id].runtime->healthInfo->health;
     if (hp > 0) {
         DamageGOBJ(-1, PLAYER_ID, id, hp, 0xF);
     }
@@ -1486,9 +1486,9 @@ void CHOPPERObjDispatch(SysMsg *msg) {
         s32 i;
         s32 *t;
 
-        if (D_8014561C->healthInfo->maxHealth > 0) {
+        if (D_8014561C->healthInfo->health > 0) {
             level = 0;
-            hp = D_8014561C->healthInfo->maxHealth;
+            hp = D_8014561C->healthInfo->health;
             for (i = 3, t = &D_80145768[3]; i > 0; i--, t--) {
                 if (hp < *t) {
                     level = i;

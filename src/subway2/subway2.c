@@ -48,13 +48,13 @@ static void func_801412D0(void) {
     bomb = D_801420B0;
     bombRt = gameObjectsInfo[bomb].runtime;
     health = gameObjectsInfo[D_801420B4].runtime->healthInfo;
+    health->armor = 1;
     health->health = 1;
-    health->maxHealth = 1;
     ObjectBigExplosionFX(bomb, pos, 0x1800, 5, 10);
     DamageRadius(bomb, pos, 0x1C2, 0x1E0, 0x60, 0x11, 0);
     health = bombRt->healthInfo;
+    health->armor = -1;
     health->health = -1;
-    health->maxHealth = -1;
     bombRt->flags23 |= 2;
     NPCHazmatStart(D_801420AC->id);
     SysPlayXA(0x8F, 0, 1);
@@ -188,7 +188,7 @@ static s32 func_801418BC(s16 id) {
             if (gameObjectsInfo[ref].runtime->flags1 & 0x80) {
                 ret = 0;
             }
-        } else if (D_801420B8 || D_801420BC || gameObjectsInfo[ref].runtime->healthInfo->maxHealth == -1) {
+        } else if (D_801420B8 || D_801420BC || gameObjectsInfo[ref].runtime->healthInfo->health == -1) {
             ret = 0;
         } else {
             found = ObjectInvisibleMatchToRefID(ref, 0x5D);
@@ -292,8 +292,8 @@ void iSubway2Init(s32 mode) {
             D_801420B4 = i;
             if (gObjectives == NULL || !(gObjectives->completed & 2)) {
                 health = rt->healthInfo;
+                health->armor = 0x7FFF;
                 health->health = 0x7FFF;
-                health->maxHealth = 0x7FFF;
             }
         } else if (type == GOBJ_TYPE_BOMB) {
             D_801420AC = ObjectMatchToRefID(i, GOBJ_TYPE_COP);
@@ -305,7 +305,7 @@ void iSubway2Init(s32 mode) {
                 D_801420AC->flags23 |= 2;
             }
             /* reads through D_801420AC even when it was just cleared */
-            if (D_801420AC->healthInfo->maxHealth <= 0) {
+            if (D_801420AC->healthInfo->health <= 0) {
                 gLevelInnocentsKilled++;
             }
         }

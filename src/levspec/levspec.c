@@ -392,7 +392,7 @@ void iChurchInit(void) {
         type = GOBJ_TYPE(i);
         if (type == CHURCH_TYPE_SCIENTIST) {
             D_80142B00++;
-            if (rt->healthInfo->maxHealth <= 0) {
+            if (rt->healthInfo->health <= 0) {
                 D_80142B04++;
             }
         } else if (type == CHURCH_TYPE_SUBJECT) {

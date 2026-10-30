@@ -16,8 +16,8 @@ typedef struct WeaponSlot {
 
 /* Memory card save block (gSaveData) */
 typedef struct SaveData {
-    /* 0x00 */ u16 maxHealth;
-    /* 0x02 */ u16 health;
+    /* 0x00 */ u16 health;
+    /* 0x02 */ u16 armor;
     /* 0x04 */ u8 level : 8;
     /* 0x05 */ u8 weapon : 8;
     /* 0x06 */ u8 radar : 1;
@@ -62,8 +62,8 @@ typedef struct ContinueData {
     /* 0x09C */ s32 orient[3];
     /* 0x0A8 */ s32 unkA8;
     /* 0x0AC */ s32 position[4];
-    /* 0x0BC */ u16 maxHealth;
-    /* 0x0BE */ u16 health;
+    /* 0x0BC */ u16 health;
+    /* 0x0BE */ u16 armor;
     /* 0x0C0 */ u16 generators[100];
     /* 0x188 */ u32 objAlive[20];
     /* 0x1D8 */ ContinueObject objects[CONTINUE_OBJECTS_MAX];
@@ -76,8 +76,8 @@ typedef struct PlayerSave {
     /* 0x00 */ s32 weapon;
     /* 0x04 */ u32 weaponsAvailable;
     /* 0x08 */ WeaponSlot weapons[WEAPON_SLOTS];
-    /* 0x70 */ u16 maxHealth;
-    /* 0x72 */ u16 health;
+    /* 0x70 */ u16 health;
+    /* 0x72 */ u16 armor;
 } PlayerSave;
 
 typedef struct SaveObjectives {
@@ -174,8 +174,8 @@ void SaveInternalTimer(s32 timer) {
 void SaveReturnToSOL(void) {
     s32 i;
 
-    D_80121B08.maxHealth = mSOLState.maxHealth;
     D_80121B08.health = mSOLState.health;
+    D_80121B08.armor = mSOLState.armor;
     D_80121B08.weapon = mSOLState.weapon;
     D_80121B08.weaponsAvailable = mSOLState.weaponsAvailable;
     for (i = 0; i < WEAPON_SLOTS; i++) {
@@ -191,16 +191,16 @@ s32 SavePlayerPreserve(void) {
         if (D_80121A08.highestLevel < D_80121A08.level) {
             D_80121A08.highestLevel = D_80121A08.level;
         }
-        mSOLState.maxHealth = gObjPlayer->healthInfo->maxHealth;
         mSOLState.health = gObjPlayer->healthInfo->health;
+        mSOLState.armor = gObjPlayer->healthInfo->armor;
         mSOLState.weapon = gCurrentWeapon;
         mSOLState.weaponsAvailable = gWeaponsAvailable[0];
         for (i = 0; i < WEAPON_SLOTS; i++) {
             mSOLState.weapons[i] = gWeaponState[i];
         }
     }
-    D_80121B08.maxHealth = gObjPlayer->healthInfo->maxHealth;
     D_80121B08.health = gObjPlayer->healthInfo->health;
+    D_80121B08.armor = gObjPlayer->healthInfo->armor;
     D_80121B08.weapon = gCurrentWeapon;
     D_80121B08.weaponsAvailable = gWeaponsAvailable[0];
     for (i = 0; i < WEAPON_SLOTS; i++) {
@@ -212,8 +212,8 @@ s32 SavePlayerPreserve(void) {
 s32 SavePlayerRestore(void) {
     s32 i;
 
-    gObjPlayer->healthInfo->maxHealth = D_80121B08.maxHealth;
     gObjPlayer->healthInfo->health = D_80121B08.health;
+    gObjPlayer->healthInfo->armor = D_80121B08.armor;
     gWeaponsAvailable[0] = D_80121B08.weaponsAvailable;
     for (i = 0; i < WEAPON_SLOTS; i++) {
         gWeaponState[i] = D_80121B08.weapons[i];
@@ -257,8 +257,8 @@ void SavePrepareMemoryCardSave(void) {
     for (i = 0; i < WEAPON_SLOTS - 1; i++) {
         D_80121A08.weapons[i] = D_80121B08.weapons[i + 1];
     }
-    D_80121A08.maxHealth = D_80121B08.maxHealth;
     D_80121A08.health = D_80121B08.health;
+    D_80121A08.armor = D_80121B08.armor;
     D_80121A08.weapon = D_80121B08.weapon;
     D_80121A08.flightControls = JoystickGetFlightControls() != 0;
     D_80121A08.radar = InterfaceRadarIsOn() != 0;
@@ -306,8 +306,8 @@ s32 SaveMemoryCardLoaded(void) {
     for (i = 0; i < WEAPON_SLOTS - 1; i++) {
         D_80121B08.weapons[i + 1] = D_80121A08.weapons[i];
     }
-    D_80121B08.maxHealth = D_80121A08.maxHealth;
     D_80121B08.health = D_80121A08.health;
+    D_80121B08.armor = D_80121A08.armor;
     for (i = 0; i < 8; i++) {
         gJoyMap[i] = D_80121A08.joyMap[i];
     }

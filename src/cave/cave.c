@@ -220,7 +220,7 @@ static s32 func_80141B6C(s16 id) {
     ref = gameObjectsInfo[id].refId;
     alive = 1;
     if (ref != -1) {
-        alive = gameObjectsInfo[ref].runtime->healthInfo->maxHealth > 0;
+        alive = gameObjectsInfo[ref].runtime->healthInfo->health > 0;
     }
     return alive;
 }
@@ -414,12 +414,12 @@ static void func_80142528(void) {
     s32 burned;
     GameObjectHealth *health;
 
-    if (!D_80143DD8 && !D_80143DDC && gameObjectsInfo[D_80143DC8].runtime->healthInfo->maxHealth > 0) {
+    if (!D_80143DD8 && !D_80143DDC && gameObjectsInfo[D_80143DC8].runtime->healthInfo->health > 0) {
         pos = ((CaveRuntime *)gObjPlayer)->move->pos;
         burned = pos.vy < D_80143DC0;
         if (burned) {
             health = ((CaveRuntime *)gObjPlayer)->healthInfo;
-            DamageGOBJ(-1, gPlayerOffset, gPlayerOffset, health->health + health->maxHealth, 0x11);
+            DamageGOBJ(-1, gPlayerOffset, gPlayerOffset, health->armor + health->health, 0x11);
             ParticleFireWaveDeath();
         }
         D_80143DD8 = 1;
@@ -486,7 +486,7 @@ static void func_801428E0(s16 id) {
         ParticleFireWaveDeath();
         ObjectBigExplosionFX(id, &pos, 0x1000, 5, 10);
         health = ((CaveRuntime *)gObjPlayer)->healthInfo;
-        DamageGOBJ(-1, gPlayerOffset, gPlayerOffset, health->health + health->maxHealth, 0x11);
+        DamageGOBJ(-1, gPlayerOffset, gPlayerOffset, health->armor + health->health, 0x11);
         if (SysSoundIsXAPlaying()) {
             SysStopXA();
         }
@@ -680,7 +680,7 @@ void iSiloInit(void) {
         npc = (CaveRuntime *)gameObjectsInfo[gLevelSpecificNpcID].runtime;
         if (npc->unk22 == 2) {
             gLevelSpecificNpcName = gRhoemerMsg;
-            npc->healthInfo->maxHealth = 0x7FFF;
+            npc->healthInfo->health = 0x7FFF;
             npc->flags23 |= 2;
         }
     }
@@ -730,7 +730,7 @@ void FALLINGObjDispatch(SysMsg *msg) {
     CaveMoveInfo *move;
     GameObjectHealth *health;
     s32 ref;
-    s16 maxHealth;
+    s16 hp;
     u8 done;
     u8 landed;
 
@@ -785,13 +785,13 @@ void FALLINGObjDispatch(SysMsg *msg) {
     case 18:
     case 20:
         health = rt->healthInfo;
-        if (health->maxHealth > 0) {
-            health->maxHealth = -1;
+        if (health->health > 0) {
+            health->health = -1;
             ref = gameObjectsInfo[rt->id].refId;
             if (ref != -1) {
                 do {
                     other = (CaveRuntime *)gameObjectsInfo[ref].runtime;
-                    other->healthInfo->maxHealth = -1;
+                    other->healthInfo->health = -1;
                     ref = gameObjectsInfo[other->id].refId;
                 } while (ref != -1);
             }
@@ -802,9 +802,9 @@ void FALLINGObjDispatch(SysMsg *msg) {
     case 26:
         if (FALLING_STATE(rt) == 2) {
             health = ((CaveRuntime *)gObjPlayer)->healthInfo;
-            maxHealth = health->maxHealth;
-            if (maxHealth > 0) {
-                DamageGOBJ(-1, rt->id, gPlayerOffset, health->health + maxHealth, 0xF);
+            hp = health->health;
+            if (hp > 0) {
+                DamageGOBJ(-1, rt->id, gPlayerOffset, health->armor + hp, 0xF);
             }
         }
         break;
@@ -835,7 +835,7 @@ void FALLINGObjDispatch(SysMsg *msg) {
         CollisionGobjBasicInit(rt, rt->move->pos.vy, 0x333, 0x800, 0x800, 0x333);
         break;
     case 42:
-        if (rt->healthInfo->maxHealth <= 0) {
+        if (rt->healthInfo->health <= 0) {
             PathGetPoint(rt, PathGetNumPoints(rt) - 1, &pos);
             EGSFrameSetPosition(rt->anim->frame, 0, &pos);
         }

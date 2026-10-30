@@ -206,7 +206,7 @@ static void func_801417CC(s16 reason) {
     func_80141744();
     if (!gMissionFailed && (gObjectives == NULL || !(gObjectives->completed & 1))) {
         phagan = gameObjectsInfo[gLevelSpecificNpcID].runtime;
-        if (phagan->healthInfo->maxHealth > 0) {
+        if (phagan->healthInfo->health > 0) {
             *(u8 *)&gameObjectsInfo[phagan->id].flags24 = 4;
             CASRequestAction(phagan->id, 0x25);
             phagan->npc->nameMsgId = 0x50;
@@ -497,7 +497,7 @@ static void func_801427AC(void) {
 
 /* Aramov tasered. */
 static void func_80142890(s16 id) {
-    if (id == gLevelSpecificNpcID2 && gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->maxHealth > 0 &&
+    if (id == gLevelSpecificNpcID2 && gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->health > 0 &&
         (gObjectives == NULL || !(gObjectives->completed & 8))) {
         func_801427AC();
         func_80142730();
@@ -559,7 +559,7 @@ static void func_80142BB4(s16 id) {
     ref = gameObjectsInfo[id].refId;
     if (ref != -1) {
         rt = gameObjectsInfo[ref].runtime;
-        rt->healthInfo->maxHealth = -1;
+        rt->healthInfo->health = -1;
         rt->flags23 |= 2;
     }
     GameCameraRequestCutToBehind();
@@ -595,13 +595,13 @@ static void func_80142CF0(void) {
 static void func_80142D58(s16 id, s32 flags) {
     if (id == gLevelSpecificNpcID2) {
         if (flags & 0x8100) {
-            if (gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->maxHealth > 0 &&
+            if (gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->health > 0 &&
                 (gObjectives == NULL || !(gObjectives->completed & 8))) {
                 func_801427AC();
                 func_80142730();
             }
         } else if (flags & 1) {
-            if (gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->maxHealth > 0) {
+            if (gameObjectsInfo[gLevelSpecificNpcID].runtime->healthInfo->health > 0) {
                 func_80142730();
             }
         } else {
@@ -674,7 +674,7 @@ void iMuseum2Init(void) {
             aramov->flags23 |= 1;
             if (gObjectives == NULL || !(gObjectives->completed & 8)) {
                 NPCInitHostageTaker(gLevelSpecificNpcID2);
-            } else if (aramov->healthInfo->maxHealth > 0) {
+            } else if (aramov->healthInfo->health > 0) {
                 CASRequestAction(gLevelSpecificNpcID2, 0x60);
                 aramov->npc->flags |= 0x1000000;
                 WeaponDrop(aramov, 0);
@@ -794,7 +794,7 @@ void TGTMUSEUMObjDispatch(SysMsg *msg) {
             list = &objActivationList[m->sector];
             for (i = 0; i < list->count; i++) {
                 other = (MuseumMover *)list->infos[i]->runtime;
-                if (((GameObjectRuntime *)other)->healthInfo->maxHealth > 0) {
+                if (((GameObjectRuntime *)other)->healthInfo->health > 0) {
                     t.vx = other->anim->frame->pos.vx;
                     t.vy = other->anim->frame->pos.vy;
                     t.vz = other->anim->frame->pos.vz;
@@ -874,12 +874,12 @@ void TGTMUSEUM2ObjDispatch(SysMsg *msg) {
         CobjRemoveWindowGobj(m);
         break;
     case 42:
-        if (m->healthInfo->maxHealth > 0) {
+        if (m->healthInfo->health > 0) {
             break;
         }
         m->flags1 |= 0x80;
     case 13:
-        if (m->healthInfo->maxHealth <= 0 && !(m->flags0 & 0x80)) {
+        if (m->healthInfo->health <= 0 && !(m->flags0 & 0x80)) {
             m->flags0 |= 0x80;
             m->flags23 |= 2;
         }

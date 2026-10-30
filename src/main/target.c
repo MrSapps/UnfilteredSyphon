@@ -239,7 +239,7 @@ void TargetAcquire(GameObjectRuntime *rt, s32 mode) {
         id = -1;
         if (rt->npc->flags & 0x20000000) {
             s32 ref = gameObjectsInfo[rt->id].refId;
-            if (gameObjectsInfo[ref].runtime->healthInfo->maxHealth > 0) {
+            if (gameObjectsInfo[ref].runtime->healthInfo->health > 0) {
                 id = ref;
             }
         }
