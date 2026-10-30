@@ -70,7 +70,7 @@ s32 TextIsStringShowing(u16 str);
 u8 TextComputeChecksum(char *str);
 void TextChangeStringDuration(u16 str, s32 ticks);
 s32 strlen(char *str);
-u8 LevelGameObjectHasModel(s16 id);
+u8 LevelGameObjectHasModel(s32 id);
 void EGSDisplayRemoveDamage(Gobj *obj);
 void EGSAnimShowDetailDef(GameObjectAnim *anim);
 char *StringSetUseMsg(s16 msgId);
@@ -88,6 +88,12 @@ void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
 s32 LevelDoEOL(u8 force);
 void func_8008E418(Gobj *door, s32 msg);
+u8 PickupObjectTake(u8 arg0);
+void CobjAddBulletCollisionBoxGobj(Gobj *obj, s32 arg1, s32 arg2, s32 arg3);
+void CobjAddCollisionBoxGobj(Gobj *obj, s32 arg1, s32 arg2, s32 arg3, s32 arg4);
+void CobjRemoveBulletCollisionBoxGobj(Gobj *obj);
+void CobjRemoveCollisionBoxGobj(Gobj *obj);
+void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 u8 PathHandleEx(Gobj *gobj, s32 scale, s32 orient, u8 pingPong, s16 first, s16 last, u8 *reachedEnd);
 void SysSetSongVolPan(s32 arg0, s32 song, Gobj *obj, s32 vol, s32 pan);
 
@@ -906,6 +912,77 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", ELEVATORObjDispatch);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", INTERACTObjDispatch);
 
+#ifdef NON_MATCHING
+/* regalloc: v0/v1 swapped when reading the placement position */
+void PICKUPObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    VECTOR32 playerPos;
+    Gobj *obj = gameObjectsInfo[msg->to].runtime;
+
+    switch (msg->id) {
+    case 6:
+        if (LevelGameObjectHasModel(msg->to)) {
+            CobjAddBulletCollisionBoxGobj(obj, 1, 0, 0);
+            CobjAddCollisionBoxGobj(obj, 1, 0, 1, 0);
+        }
+        break;
+    case 5:
+        if (LevelGameObjectHasModel(msg->to)) {
+            CobjRemoveBulletCollisionBoxGobj(obj);
+            CobjRemoveCollisionBoxGobj(obj);
+        }
+        break;
+    case 18:
+        if (!(obj->flags0 & 0x20)) {
+            if (LevelGameObjectHasModel(msg->to)) {
+                pos.vx = obj->anim->frame->pos.vx;
+                pos.vy = obj->anim->frame->pos.vy;
+                pos.vz = obj->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+            } else {
+                GameObjectInfo *info = &gameObjectsInfo[obj->id];
+
+                pos.vx = info->matrix.t[0];
+                pos.vy = info->matrix.t[1];
+                pos.vz = info->matrix.t[2];
+            }
+            playerPos = gObjPlayer->move->unk10C;
+            SysPostMessage(pos.vy < playerPos.vy + 0x69 ? 0x16 : 0x17, 4, obj->id, gPlayerOffset, 0, 0, 0, 0);
+            PickupObjectAddUseMsgs(obj, obj->flags1);
+        }
+        break;
+    case 19:
+        if (!(obj->flags0 & 0x20)) {
+            PickupRemoveUseMsg(obj->id);
+            SysPostMessage(0x19, 4, obj->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        break;
+    case 22:
+    case 23:
+    case 39:
+        if (!(obj->flags0 & 0x20) && msg->from == gPlayerOffset) {
+            PickupObjectTake(1);
+        }
+        break;
+    case 41:
+        *(s32 *)msg->data[0] = obj->flags0;
+        break;
+    case 42: {
+        s32 flags = *(s32 *)msg->data[0];
+
+        obj->flags0 = flags;
+        if ((flags & 0x20) && LevelGameObjectHasModel(msg->to) && (obj->anim->unk00[0xA] & 8)) {
+            EGSAnimShowDetailDef(obj->anim);
+        }
+        break;
+    }
+    case 2:
+        func_80149118(obj, msg);
+        break;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PICKUPObjDispatch);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", SWITCHObjDispatch);

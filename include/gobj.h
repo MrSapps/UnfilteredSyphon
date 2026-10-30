@@ -11,7 +11,9 @@ typedef struct VECTOR32 {
 /* Per-object movement bookkeeping (0x1B8 bytes, EGSMemMalloc'd). */
 typedef struct MoveInfo {
     /* 0x000 */ VECTOR32 pos;
-    /* 0x010 */ u8 unk010[0x11C];
+    /* 0x010 */ u8 unk010[0xFC];
+    /* 0x10C */ VECTOR32 unk10C; /* position (y grows downwards) */
+    /* 0x11C */ u8 unk11C[0x10];
     /* 0x12C */ s32 unk12C; /* height */
     /* 0x130 */ u8 unk130[0x44];
     /* 0x174 */ s32 unk174;
