@@ -74,23 +74,29 @@ typedef struct EGSListNode {
     /* 0x08 */ struct EGSListNode *next;
 } EGSListNode;
 
-/* Movie playback state (system.c static). */
-typedef struct SysMovie {
-    /* 0x00 */ s16 width;
-    /* 0x02 */ s16 height;
-    /* 0x04 */ u8 unk04[5];
-    /* 0x09 */ u8 doneMsgId; /* message posted when the movie ends (0x21: end of level) */
-    /* 0x0A */ u8 unk0A[2];
-    /* 0x0C */ s32 doneMsgFrom;
-    /* 0x10 */ s32 doneMsgTo;
-    /* 0x14 */ s32 bufferSize;
-    /* 0x18 */ u8 playing;
-} SysMovie;
+/* Movie request; SysPlayMovie copies the caller's descriptor into gMovieInfo. */
+typedef struct MovieInfo {
+    /* 0x00 */ char name[0x80]; /* bare name -> \\MOVIES\\<name>.STR;1, or a full path */
+    /* 0x80 */ s16 width;
+    /* 0x82 */ s16 height;
+    /* 0x84 */ s16 unk84;     /* passed to MovieOpen */
+    /* 0x86 */ s16 halfSize;  /* selects the smaller decode buffer */
+    /* 0x88 */ u8 trueColor;  /* 24-bit colour mode */
+    /* 0x89 */ u8 doneMsgId;  /* message posted when the movie ends (0x21: end of level) */
+    /* 0x8A */ u8 unk8A[2];
+    /* 0x8C */ s32 doneMsgFrom;
+    /* 0x90 */ s32 doneMsgTo;
+    /* 0x94 */ s32 bufferSize;
+    /* 0x98 */ u8 playing;
+    /* 0x99 */ u8 unk99[3];
+} MovieInfo; /* size 0x9C */
 
 /* system.c statics, still defined in the asm .bss */
 extern ExeTickTimer mExeTickTimers[SYS_EXE_TICK_TIMER_MAX];
 extern EGSListNode *exeTickTimerList;
-extern SysMovie mSysMovie;
+extern MovieInfo gMovieInfo;
+extern u8 gUsePCFiles;
+extern char D_8010F608[]; /* "" (.sdata) */
 extern char tcOverlay[];
 extern u8 D_801377E0[]; /* load address of texture-cache/menu/movie overlays */
 extern void (*gStallCallback)(void);
@@ -175,6 +181,18 @@ void EGSDisplayFlush(void);
 void EGSDeviceGraphicsSetResolution(s32 w, s32 h);
 void EGSDisplayAddMovie(void *camera, s32 arg1);
 void PrepareMovieSound(void);
+u8 StreamLock(void);
+u8 SysSoundIsXAPlaying(void);
+void SysStopMovie(void);
+void SysPlayMovieCB(void);
+void EGSDisplayFadeFull(void);
+void EGSDeviceGraphicsSetColorMode(s32 mode);
+s32 EGSFileSearchCD(void *pos, char *path);
+/* movie.ovl */
+void MovieSetStreamBufferNumSectors(s32 sectors);
+void MovieSetDoubleDecodeBuffers(s32);
+s32 MovieOpen(char *path, s32 arg1, s32 arg2, s32 arg3, void (*done)(void), void *buf, s32 bufSize);
+void MovieClose(void);
 extern void **gCamera;
 void func_801470B0(void);
 

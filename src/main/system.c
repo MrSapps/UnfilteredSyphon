@@ -12,6 +12,7 @@ SDATA_LOCAL(gStallLoaded)
 SDATA_LOCAL(gStallFaded)
 SDATA_LOCAL(exeTickTimerList)
 SDATA_LOCAL(gStallCallback)
+SDATA_LOCAL(gUsePCFiles)
 
 /* Functions missing from siphon.map were static in system.c. */
 static void SysEnterState(u32 state, int push);
@@ -453,7 +454,7 @@ void SysUnhalt(void) {
 }
 
 u8 SysGetMovieStatus(void) {
-    return mSysMovie.playing;
+    return gMovieInfo.playing;
 }
 
 void func_80015DDC(void) {
@@ -469,19 +470,78 @@ void func_80015DFC(void) {
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStopMovie);
 
 void SysPlayMovieCB(void) {
-    EGSDisplayMovieMalloc(D_80145BF0, mSysMovie.bufferSize + 0x11000);
+    EGSDisplayMovieMalloc(D_80145BF0, gMovieInfo.bufferSize + 0x11000);
     if (gSystemState != 4) {
         SysStatePush(3);
         SysSetMusicExciteLevel(1);
     }
-    mSysMovie.playing = 1;
+    gMovieInfo.playing = 1;
     EGSDisplayFlush();
-    EGSDeviceGraphicsSetResolution(mSysMovie.width, mSysMovie.height);
+    EGSDeviceGraphicsSetResolution(gMovieInfo.width, gMovieInfo.height);
     EGSDisplayAddMovie(*gCamera, 1);
     PrepareMovieSound();
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysPlayMovie);
+void SysPlayMovie(MovieInfo *info) {
+    s32 pos[6];
+    char path[56];
+    u8 *buf;
+    s32 err;
+
+    buf = D_80145BF0;
+    err = 5;
+    if (!StreamLock()) {
+        if (SysSoundIsXAPlaying()) {
+            SysStopXA();
+        } else {
+            PauseTerrainStream();
+            UnpauseTerrainStream();
+            StreamLock();
+        }
+    }
+    SysLoadTextureCacheOverlay("MOVIE.OVL", 0);
+    MovieSetStreamBufferNumSectors(25);
+    if (gMovieInfo.playing) {
+        SysStopMovie();
+        gMovieInfo.playing = 0;
+    }
+
+    /* absolute paths are used as-is, bare names live in \\MOVIES\\ */
+    sprintf(path, "%s%s.STR;1",
+            (info->name[0] != '\\' && info->name[0] != '/') ? "\\MOVIES\\" : D_8010F608, info->name);
+    gMovieInfo = *info;
+
+    if (gUsePCFiles) {
+        err = 5;
+    } else if (EGSFileSearchCD(pos, path) != 0) {
+        MovieSetDoubleDecodeBuffers(0);
+        if (info->trueColor) {
+            EGSDeviceGraphicsSetColorMode(1);
+        }
+        if (info->halfSize) {
+            gMovieInfo.bufferSize = 0x20F58;
+        } else {
+            gMovieInfo.bufferSize = 0x25D78;
+        }
+        err = MovieOpen(path, info->unk84, info->halfSize, -1, SysStopMovie, buf, gMovieInfo.bufferSize);
+    }
+
+    if (err == 0) {
+        if (gSystemState != SYS_STATE_TITLE) {
+            EGSDisplayFadeFull();
+        }
+        SysPlayMovieCB();
+        return;
+    }
+    gMovieInfo.playing = 0;
+    if (gSystemState != SYS_STATE_TITLE) {
+        EGSDisplayFadeFull();
+    }
+    if (gSystemState == SYS_STATE_MOVIE) {
+        SysStatePop();
+    }
+    SysStopMovie();
+}
 
 void SysExeTickQueueInit(void) {
     int i;
