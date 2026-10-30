@@ -173,7 +173,7 @@ u32 EGSMemAvail(void);
 void func_8001593C(void);
 void SysStall(char *overlay, s32 fadeSpeed, void (*callback)(void));
 extern void *gLevelRestartHeap;
-extern void *gObjPlayer;
+extern struct GameObjectRuntime *gObjPlayer; /* the player object */
 void StallOverlayCallback(void);
 void EGSDisplayMovieMalloc(void *buf, s32 size);
 void SysSetMusicExciteLevel(s32 level);

@@ -40,7 +40,7 @@ typedef struct LevelObjectives {
 
 extern LevelObjectives *gObjectives;
 extern u8 gMissionFailed;
-void LevelObjectiveComplete(s32 objective);
+void LevelObjectiveComplete(s16 objective);
 void LevelObjectiveAdd(s32 objective, s32 arg1);
 void WeaponAdd(s32 weapon, s32 count);
 void WeaponRemove(s32 weapon);

@@ -25,7 +25,9 @@ typedef struct GameObjectInfo {
 /* Per-level model/type table (gameObjectsModelInfo[], 0x14 bytes each). */
 typedef struct GameObjectModelInfo {
     /* 0x00 */ s16 type; /* index into gDispatchFunctions */
-    /* 0x02 */ u8 unk02[0x12];
+    /* 0x02 */ u8 unk02[2];
+    /* 0x04 */ u8 *model;
+    /* 0x08 */ u8 unk08[0xC];
 } GameObjectModelInfo; /* size 0x14 */
 
 typedef struct GameObjectDisplay {
