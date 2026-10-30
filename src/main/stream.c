@@ -256,7 +256,8 @@ void CheckStreamRequests(u8 noStart) {
         if (state == 0) {
             FlushStreamReqList(&gStreamReqListPause);
         }
-        /* volatile keeps the scheduler from hoisting the gSystemState reload above the stores */
+        /* IRQ-shared state: only these accesses are volatile in the original (a volatile
+         * declaration would also force reloads elsewhere in this function, which it does not do) */
         *(EGSListNode * volatile *)&gCurrentStreamReq = NULL;
         *(volatile u8 *)&gTerrainStreamPause = 0;
         D_8010FA1C = *(volatile int *)&gSystemState;
