@@ -50,6 +50,14 @@ typedef struct FakeFacePool {
 } FakeFacePool;
 
 extern FakeFacePool mCollisionFakeFacePool;
+
+/* The pool's faces+verts and flags as the reset loop addresses them. */
+typedef struct FakeFaceBlock {
+    /* 0x000 */ FakeFace faces[30];
+    /* 0x528 */ FakeVertex verts[30][4];
+} FakeFaceBlock;
+extern FakeFaceBlock D_8012CEC4; /* == mCollisionFakeFacePool.faces */
+extern u8 D_8012D7AC[30];        /* == mCollisionFakeFacePool.flags */
 extern s32 D_8010FAB4;              /* number of vertices in D_801212D8 */
 extern FakeVertex *D_801212D8[400]; /* vertices whose y is currently negated */
 
@@ -205,7 +213,35 @@ extern FriendlyAnim gCameraAnim;
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyInit);
 
+#ifdef NON_MATCHING
+/* original keeps i*32 and a verts base in registers (two vertex address forms); ours strength-reduces */
+void func_80086B24(void) {
+    s32 i, j;
+    FakeFace *f = D_8012CEC4.faces;
+    FakeVertex *verts = D_8012CEC4.verts[0];
+
+    for (i = 0; i < 30; i++, f++) {
+        f->face.count = 0;
+        for (j = 0; j < 4; j++) {
+            f->face.verts[j] = &verts[i * 4 + j];
+            verts[i * 4 + j].x = 0;
+            verts[i * 4 + j].y = 0;
+            verts[i * 4 + j].z = 0;
+        }
+        f->face.normalPtr = f->face.normal;
+        f->face.normal[0] = 0;
+        f->face.normal[1] = 0;
+        f->face.normal[2] = 0;
+        f->face.flags = &D_8012D7AC[i];
+        D_8012D7AC[i] = 0;
+        f->prev = NULL;
+        f->next = NULL;
+    }
+    CollisionClearFakeFaces();
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086B24);
+#endif
 
 void CollisionClearFakeFaces(void) {
     mCollisionFakeFacePool.count = 0;
