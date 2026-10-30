@@ -98,6 +98,10 @@ void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
 void func_80148440(Gobj *obj, s32 type);    /* in an overlay */
 void func_8008D548(Gobj *door, s32 type);
+s32 WeaponAddAmmo(s32 weapon, s32 rounds);
+void StringTakeAmmoMsg(char *buf, s16 count, s16 weapon, u8 arg3, u8 arg4);
+void StringTakeObjectMsg(char *buf, s32 count, s16 id);
+void PickUpInventory(s16 objId);
 s32 IsWideDoor(Gobj *obj);
 void EGSFrameRotateLocalYXZ(EGSFrame *frame, VECTOR32 *rot);
 void MovementRemoveGobj(Gobj *obj);
@@ -550,7 +554,141 @@ s32 PickupObjectIsNotMaxed(s32 objId) {
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectIsNotMaxed);
 #endif
 
+#ifdef NON_MATCHING
+/* logic complete; loop induction variables and the manual/auto test layout differ (369 vs 388 insns) */
+/* Take the pickups the player is standing on (auto = from walking over them, else on "use"). */
+u8 PickupObjectTake(u8 manual) {
+    VECTOR32 pos;
+    char flakMsg[0x40];
+    char takenMsg[0x40];
+    u8 took;
+    u8 msgShown;
+    u8 any;
+    char *msg;
+    s32 i;
+    PickupPending *p;
+    s32 type;
+    u8 consumed;
+    u8 armorTaken;
+    s32 weapon;
+    u32 *words;
+    s32 bit;
+    s32 misalign;
+    s32 added;
+    u8 notGrenade;
+    u8 notPistol;
+    s16 key;
+
+    any = 0;
+    if (gObjPlayer->healthInfo->health <= 0) {
+        return 0;
+    }
+    msg = flakMsg;
+    for (i = D_801101C0 - 1; i >= 0; i--) {
+        p = &D_80121990[i];
+        if (manual ? (p->objId == -1 || !(gameObjectsInfo[p->objId].runtime->flags0 & 0x20))
+                   : !p->showMsg) {
+            armorTaken = 0;
+            took = 0;
+            type = p->objId != -1 ? GOBJ_TYPE(p->objId) : -1;
+            consumed = 0;
+            if (type == -1 || gameObjectsInfo[p->objId].runtime->npcState == 2 || type == 0x63) {
+                consumed = 1;
+            }
+            weapon = 1;
+            if (p->weapon != 2) {
+                weapon = p->weapon;
+            }
+            if (weapon != 0) {
+                words = (u32 *)gWeaponsAvailable;
+                bit = weapon;
+                misalign = (u32)words & 3;
+                if (misalign) {
+                    bit = weapon + misalign * 8;
+                    words = (u32 *)((u32)words & ~3);
+                }
+                if (words[bit >> 5] & (1 << (bit & 0x1F))) {
+                    notGrenade = weapon != 0x13 && weapon != 0x14;
+                    notPistol = weapon != 6 && weapon != 7;
+                    added = WeaponAddAmmo(weapon, p->amount);
+                    if (added != 0) {
+                        took = 1;
+                        StringTakeAmmoMsg(takenMsg, added, WEAPON_FIELD(D_80105F64, s16, p->weapon), notGrenade,
+                                          notPistol);
+                    } else {
+                        StringMaxedAmmoMsg(takenMsg, WEAPON_FIELD(D_80105F64, s16, p->weapon), notGrenade, notPistol);
+                    }
+                } else {
+                    took = 1;
+                    WeaponAdd(weapon, p->amount);
+                    StringTakeObjectMsg(takenMsg, p->amount, WEAPON_FIELD(D_80105F64, s16, p->weapon));
+                    if (weapon == 0x12) {
+                        SysPlayXA(0xA3, 0, 1);
+                    }
+                }
+                iPickupObjectTakenMsg(takenMsg, p->weapon);
+            }
+            switch (p->armor) {
+            case 0:
+                break;
+            case 1:
+                if (gObjPlayer->healthInfo->armor < 600) {
+                    armorTaken = 1;
+                    StringTakeObjectMsg(flakMsg, 1, 0x18);
+                    if (consumed) {
+                        GameObjectHealth *health = gObjPlayer->healthInfo;
+                        s32 armor = health->armor + 250;
+
+                        if (armor > 600) {
+                            armor = 600;
+                        }
+                        health->armor = armor;
+                    } else {
+                        gObjPlayer->healthInfo->armor = 600;
+                    }
+                } else {
+                    StringUndamagedFlakJacket(flakMsg);
+                }
+                iPickupObjectTakenMsg(flakMsg, 0x1A);
+                break;
+            case 2:
+#line 825
+                ASSERT(p->objId != -1);
+                key = gameObjectsInfo[gameObjectsInfo[p->objId].runtime->id].refId;
+                armorTaken = 1;
+#line 828
+                ASSERT(key != -1);
+                StringTakeObjectMsg(msg, 1, 0x19);
+                WeaponAdd(0x17, 0);
+                if (key != -1) {
+                    SysPostMessage(0x1B, 5, p->objId, key, 0, 0, 0, 0);
+                }
+                TextStatusMessage(msg, 0);
+                break;
+            }
+            if (took || armorTaken) {
+                if (manual && p->objId != -1) {
+                    PickUpInventory(p->objId);
+                }
+                any = 1;
+            }
+            if (consumed) {
+                func_8008A62C(i);
+            }
+        }
+    }
+    if (any) {
+        pos.vx = gObjPlayer->anim->frame->pos.vx;
+        pos.vy = gObjPlayer->anim->frame->pos.vy;
+        pos.vz = gObjPlayer->anim->frame->pos.vz;
+        pos.vy = -pos.vy;
+        SysPlaySong(1, 0x14, 0, (s32)&pos);
+    }
+    return any;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectTake);
+#endif
 
 void *PickupSetKeyCallback(void (*cb)()) {
     void *old = D_8010FD00;
