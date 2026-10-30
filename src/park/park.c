@@ -43,7 +43,7 @@ void LevelSetDirectionPointerFlag(s32 flag);
 void LevelSetPointer(s32 id);
 void ObjectDetonateBomb(GameObjectRuntime *rt);
 void NPCCombatModeCallback(void (*cb)());
-void NPCInitHostageTaker(s16 id);
+void NPCInitHostageTaker(s32 id);
 void NPCShootHostage(s16 id);
 void SysSoundQueueXA(s32 arg0, s32 track);
 void JoystickDeactivate(void);

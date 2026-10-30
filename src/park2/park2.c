@@ -225,7 +225,7 @@ int rand(void);
 void NPCDoAction(BossRuntime *rt);
 void NPCDoDamage(BossRuntime *rt);
 void NPCActivate(u16 id);
-void NPCDeactivate(u16 id);
+void NPCDeactivate(s32 id);
 void NPCGobjInit(BossRuntime *rt);
 void EGSDisplayHMDCache(void *anim, s32 arg1);
 void EGSDisplayPointSourceOff(PointSource *ps);

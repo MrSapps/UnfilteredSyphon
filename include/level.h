@@ -23,7 +23,7 @@ void NPCCopKilledWashington(s16 id, s16 by, s32 refId, s32 arg3, s32 arg4);
 void ObjectBombDeath(s32 arg0, s32 arg1, s32 arg2, s32 id);
 void ObjectBigExplosionFX(s16 id, void *pos, s32 radius, s32 arg3, s32 arg4);
 void DamageRadius(s16 id, void *pos, s32 arg2, s32 arg3, s32 arg4, s32 arg5, s32 arg6);
-void NPCHazmatStart(s16 id);
+void NPCHazmatStart(s32 id);
 void SysPlayXA(s32 track, s32 arg1, s32 arg2);
 void InterfaceCountdownAbort(void);
 
@@ -93,13 +93,13 @@ void WeaponSetWeaponFiredCallback(void (*cb)());
 void LevelMissionFailed(s32 reason, s32 xa, u8 secondary);
 void StringMissionFailedMsg();
 void LevelObjectivesIncomplete(void *msg);
-void DamageDestroyImmediately(s32 arg0, s16 id);
+void DamageDestroyImmediately(s32 by, s32 id);
 void ObjectDoMovieEx(char *name, s32 arg1, s16 arg2, s16 arg3);
 s32 LevelMissionCtrMsg(char *msg, s32 extraTicks);
 void ObjectTeleportPlayer(s16 id, s32 arg1);
 void GameCameraRequestCutToBehind(void);
 void InterfaceSetAddLevelSpecificNPCCallback(void (*cb)());
-void NPCSetCopDeactivateCallback(void (*cb)());
+void *NPCSetCopDeactivateCallback(void (*cb)()); /* returns the previous callback */
 void ObjectSetMovieDoneCallback(void (*cb)());
 void CASRequestAction(s32 id, s32 action);
 void StringObjectiveObjectsRemaining2(void *buf, void *fmt, void *remaining, void *arg3, s32 done, s32 total);

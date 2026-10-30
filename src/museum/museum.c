@@ -127,7 +127,7 @@ void NPCCombatModeCallback(void (*cb)());
 void NPCSetAwarenessLevel(GameObjectRuntime *rt, s32 level, s32 arg2, s32 arg3);
 void SysSoundQueueXA(s32 arg0, s32 track);
 void JoystickDeactivate(void);
-void NPCInitHostageTaker(s16 id);
+void NPCInitHostageTaker(s32 id);
 void NPCShootHostage(s16 id);
 void NPCDropGun(s16 id);
 void SndSysCheckXADoneCallback(s32 arg);
