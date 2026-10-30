@@ -44,11 +44,17 @@ typedef struct DamageDisplayNode {
 } DamageDisplayNode;
 
 typedef struct DamageDisplay {
-    /* 0x00 */ u8 unk00[0x8C];
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ s32 index; /* camera index into anims' visibility words */
+    /* 0x18 */ u8 unk18[0x74];
     /* 0x8C */ DamageDisplayNode *anims;
 } DamageDisplay;
 
 extern VECTOR32 gExplosionPosition;
+extern VECTOR32 D_8011E8D8; /* position of the hit being applied */
+u8 GameCameraCheckMode(s32 mode);
+void ParticleTaser(VECTOR32 *pos);
+extern s32 particleTaserState;
 void NPCPutFireOnNPCMove(s32 id);
 void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
 
@@ -74,9 +80,13 @@ typedef struct GobjHealth {
 /* TargetInfo aim points */
 typedef struct DamageTarget {
     /* 0x00 */ s16 targetId;
-    /* 0x02 */ u8 unk02[0x62];
+    /* 0x02 */ u8 unk02[0x5A];
+    /* 0x5C */ s16 targetId2;
+    /* 0x5E */ u8 unk5E[6];
     /* 0x64 */ VECTOR32 targetPos; /* aim point on the target */
     /* 0x74 */ VECTOR32 aimPos;    /* aim point otherwise */
+    /* 0x84 */ VECTOR32 targetDir;
+    /* 0x94 */ VECTOR32 aimDir;
 } DamageTarget;
 #define GOBJ_HEALTH(g) ((GobjHealth *)(g)->healthInfo)
 
@@ -324,7 +334,107 @@ void DamageShowFlakJacketMsg(u16 id) {
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS2);
 
+#ifdef NON_MATCHING
+/* Register allocation: the original keeps the raw id in fp and re-extends it per use (all ten callee-saved registers busy) */
+/* Hit animation callback: work out where the pending damage hit and from which direction,
+ * then apply it now or queue it as a delayed bullet impact. */
+void DamageGobjCAS(s16 id, s32 action) {
+    VECTOR32 dir;
+    u8 aimed = 0;
+    DamagePacket *packet = NULL;
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    GobjHealth *health = GOBJ_HEALTH(gobj);
+    s32 from = health->lastAttacker;
+    s32 by = health->lastAttackerBy;
+    Gobj *attacker;
+    DamageTarget *target;
+    s32 delay;
+
+    if (((s32 *)gobj->anim)[((DamageDisplay *)*gCamera)->index] != 0 || gobj->id == gPlayerOffset) {
+        if (health->damageType == 0x892) {
+            D_8011E8D8.vx = gobj->anim->frame->pos.vx;
+            D_8011E8D8.vy = gobj->anim->frame->pos.vy;
+            D_8011E8D8.vz = gobj->anim->frame->pos.vz;
+            D_8011E8D8.vy = -D_8011E8D8.vy;
+            dir = ((DamageTarget *)gobj->target)->targetDir;
+        } else if (from != -1) {
+            attacker = gameObjectsInfo[from].runtime;
+            target = (DamageTarget *)attacker->target;
+            aimed = 1;
+            if ((from == gPlayerOffset && (GameCameraCheckMode(0xF) || GameCameraCheckMode(0x10))) ||
+                id == target->targetId) {
+                D_8011E8D8 = target->targetPos;
+                dir = target->targetDir;
+            } else if (id == target->targetId2) {
+                D_8011E8D8 = target->aimPos;
+                dir = target->aimDir;
+            } else {
+                D_8011E8D8.vx = gobj->anim->frame->pos.vx;
+                D_8011E8D8.vy = gobj->anim->frame->pos.vy;
+                D_8011E8D8.vz = gobj->anim->frame->pos.vz;
+                D_8011E8D8.vy = -D_8011E8D8.vy;
+                aimed = 0;
+                func_800669B0(&D_8011E8D8, attacker, &dir);
+            }
+        } else {
+            if ((u32)(gobj->npcState - 1) < 2) {
+                D_8011E8D8.vx = gobj->anim->frames[rand() % 15]->pos.vx;
+                D_8011E8D8.vy = gobj->anim->frames[rand() % 15]->pos.vy;
+                D_8011E8D8.vz = gobj->anim->frames[rand() % 15]->pos.vz;
+                D_8011E8D8.vy = -D_8011E8D8.vy;
+            } else {
+                D_8011E8D8.vx = gobj->anim->frame->pos.vx;
+                D_8011E8D8.vy = gobj->anim->frame->pos.vy;
+                D_8011E8D8.vz = gobj->anim->frame->pos.vz;
+                D_8011E8D8.vy = -D_8011E8D8.vy;
+            }
+            if (by != -1) {
+                func_800669B0(&D_8011E8D8, gameObjectsInfo[by].runtime, &dir);
+            } else {
+                dir.vx = (*(EGSFrame **)*gCamera)->pos.vx;
+                dir.vy = (*(EGSFrame **)*gCamera)->pos.vy;
+                dir.vz = (*(EGSFrame **)*gCamera)->pos.vz;
+                dir.vy = -dir.vy;
+                dir.vx -= D_8011E8D8.vx;
+                dir.vy -= D_8011E8D8.vy;
+                dir.vz -= D_8011E8D8.vz;
+            }
+        }
+        if (from == gPlayerOffset && gCurrentWeapon == 0xE && particleTaserState == 0) {
+            ParticleTaser(&D_8011E8D8);
+        } else if (from < 0) {
+            DamageGobjCAS2(id, from, by, health->unk0C, GOBJ_HEALTH(gobj)->material, aimed, &D_8011E8D8, &dir);
+        } else {
+            delay = ParticleDamageDelay(from, &D_8011E8D8);
+            if (delay > 0) {
+                packet = func_80066714();
+            }
+            if (packet != NULL) {
+                packet->delay = delay + 1;
+                packet->target = id;
+                packet->from = from;
+                packet->unk16 = by;
+                packet->kind = GOBJ_HEALTH(gobj)->material;
+                packet->unk1E = aimed;
+                packet->unk12 = health->unk0C;
+                packet->x = D_8011E8D8.vx;
+                packet->y = D_8011E8D8.vy;
+                packet->z = D_8011E8D8.vz;
+                packet->nx = dir.vx;
+                packet->ny = dir.vy;
+                packet->nz = dir.vz;
+            } else {
+                DamageGobjCAS2(id, from, by, health->unk0C, GOBJ_HEALTH(gobj)->material, aimed, &D_8011E8D8, &dir);
+            }
+            ParticleTracer(gameObjectsInfo[from].runtime, &D_8011E8D8, 0);
+        }
+        health->lastAttackerBy = -1;
+        health->lastAttacker = -1;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS);
+#endif
 
 void DamageDeathCAS(s16 id) {
     Gobj *gobj = gameObjectsInfo[id].runtime;

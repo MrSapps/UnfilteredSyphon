@@ -2,6 +2,7 @@
 #include "game.h"
 #include "gameobj.h"
 #include "gobj.h"
+#include "scratch.h"
 
 /* cobj.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F9C0)
@@ -118,7 +119,24 @@ extern s32 gTerrSectorCount;
 
 void EGSMath_VectorModulus(void *v, s32 *out);
 s32 EGSMathFIXMul(s32 a, s32 b);
-void InitBxv2(void *bxv, void *model, s32 id);
+/* Model bounds (first 0x20 bytes of a box model) */
+typedef struct CobjBounds {
+    /* 0x00 */ LOSVec min;
+    /* 0x10 */ LOSVec max;
+} CobjBounds;
+
+typedef struct BxvVert {
+    s16 vx, vy, vz, pad;
+} BxvVert;
+
+/* Rotated box for LOS/collision tests */
+typedef struct CobjBxv {
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ BxvVert verts[8]; /* verts[0].pad: radius */
+    /* 0x44 */ s32 unk44;
+} CobjBxv;
+
+void InitBxv2(CobjBxv *bxv, CobjBounds *model, s32 pad);
 s32 func_8007369C(CobjNode *node, CobjNode **list);
 s32 func_800736EC(CobjNode *src, CobjNode **list);
 s32 func_800737B8(Gobj *gobj, CobjNode **list);
@@ -385,7 +403,149 @@ s32 CobjHandleHotBoxXZ(CobjHotBoxModel **box, s32 arg1, u8 *out) {
 
 INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjHandleHotBox);
 
+typedef void (*CobjNodeCallback)(CobjNode *node, s32 kind, s32 arg);
+
+/* Collision query run by CobjLoop */
+typedef struct CobjQuery {
+    /* 0x00 */ s16 sector;
+    /* 0x04 */ s32 kind;
+    /* 0x08 */ u8 stopOnHit;
+    /* 0x0C */ void (*sectorFilter)(void *model, void *self, u8 *ok);
+    /* 0x10 */ u8 unk10[0x88];
+    /* 0x98 */ void (*nodeFilter)(CobjNode *node, void *self, u8 *ok);
+    /* 0x9C */ s32 arg;
+} CobjQuery;
+
+s32 HotboxCallback();
+extern u8 *gLevData;
+void EGSDisplayGetSectorRotBoxList(void *model, u32 *count, u32 **boxes);
+
+#ifdef NON_MATCHING
+/* Sector selection: the original tests -3/-2/-1 as a linear chain and indexes links without strength reduction */
+static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
+    CobjTerrSector *ts;
+
+    if (sector < gTerrSectorCount && sector >= 0) {
+        ts = &gTerrSector[sector];
+    } else {
+        ts = NULL;
+    }
+    return ts;
+}
+
+/* Run a collision query over the dummy sectors (game objects, rotated boxes), the query's
+ * sector and its neighbours. Kinds 0 and 4 of a terrain sector walk its rotated boxes. */
+s32 CobjLoop(CobjQuery *q) {
+    u8 ok;
+    CobjNode node;
+    u32 count;
+    u32 *boxes;
+    s32 i = -3;
+    u8 *links = gLevData + q->sector * 15 + 0x80;
+    CobjTerrSector *ts;
+    CobjNode *list;
+    u8 hasList;
+    u8 done;
+    u32 idx;
+    s32 off;
+    s32 kind;
+    u32 *box;
+
+    for (;;) {
+        switch (i) {
+        case -3:
+            ts = &gCobjDummySector_Gobj;
+            break;
+        case -2:
+            ts = &gCobjDummySector_RotBox;
+            break;
+        case -1:
+            ts = CobjGetTerrSector(q->sector);
+            break;
+        default:
+            ts = CobjGetTerrSector(links[i]);
+            break;
+        }
+        if (ts == NULL) {
+            return 1;
+        }
+        if (q->sectorFilter != NULL && ts->collisionModel != NULL) {
+            q->sectorFilter(&ts->collisionModel, &q->sectorFilter, &ok);
+        } else {
+            ok = 1;
+        }
+        hasList = 0;
+        idx = 0;
+        if (ok) {
+            kind = q->kind;
+            node.gobj = NULL;
+            node.type = 1;
+            node.unk05 = 1;
+            node.flags = 0;
+            node.pooled = 0;
+            node.unk0C = 0;
+            node.unk08 = 0;
+            node.next = NULL;
+            if (i >= -1 && (kind == 4 || kind == 0)) {
+                hasList = 1;
+                list = &node;
+                EGSDisplayGetSectorRotBoxList(ts->model, &count, &boxes);
+            } else {
+                list = (CobjNode *)ts->unk28[kind];
+            }
+            if (list != NULL) {
+                off = idx * 0x48;
+                do {
+                    done = 0;
+                    if (hasList) {
+                        for (; idx < count; idx++, off += 0x48) {
+                            box = (u32 *)((u8 *)boxes + off);
+                            node.gobj = (Gobj *)box;
+                            if (kind == 0) {
+                                if (*box & 1) {
+                                    node.unk0C = 0;
+                                    break;
+                                }
+                            } else if (kind == 4 && (*box & 0x10)) {
+                                node.unk0C = (s32)HotboxCallback;
+                                list->unk08 = (*box >> 9) & 1;
+                                break;
+                            }
+                        }
+                        if (idx >= count) {
+                            done = 1;
+                        }
+                    }
+                    if (done) {
+                        break;
+                    }
+                    if (q->nodeFilter != NULL) {
+                        ok = 0;
+                        q->nodeFilter(list, &q->nodeFilter, &ok);
+                        if ((CobjNodeCallback)list->unk0C != NULL) {
+                            if (ok ? list->unk08 == 0 : list->unk08 == 1) {
+                                ((CobjNodeCallback)list->unk0C)(list, q->kind, q->arg);
+                            }
+                        }
+                        if (ok && q->stopOnHit == 1) {
+                            return 1;
+                        }
+                    }
+                    if (hasList) {
+                        off += 0x48;
+                        idx++;
+                    } else {
+                        list = list->next;
+                    }
+                } while (list != NULL);
+            }
+        }
+        i++;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjLoop);
+#endif
 
 typedef struct LOSMtx {
     /* 0x00 */ s16 m[3][3];
@@ -498,7 +658,7 @@ s32 HMDLOSLoop(HMDLOSAnim *anim) {
             mtx = anim->frames[8];
         }
         owner.frame = mtx;
-        InitBxv2(bxv, box, 0);
+        InitBxv2((CobjBxv *)bxv, box, 0);
         LOSSetupGTE(mtx);
         hits <<= 1;
         if (LOSRotBoxV(bxv, losEndPointZ, &hit, &losRay)) {
@@ -584,10 +744,96 @@ s32 LOSGetSortOrder(void) {
     return -1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/cobj", InitBxv2);
+/* Build a box's 8 corners from its model bounds. pad > 0 grows the box on every axis,
+ * pad < 0 only along the thinnest axis (-666: doors, taller); 0/666: just the radius. */
+void InitBxv2(CobjBxv *bxv, CobjBounds *model, s32 pad) {
+    CobjBounds b;
+    LOSVec size;
+    BxvVert *v = bxv->verts;
+    s32 small;
+    u8 all;
+    s32 m;
+
+    b = *model;
+    small = 0;
+    if (pad != 0 && pad != GOBJ_ID_666) {
+        all = pad > 0;
+        if (!all) {
+            size.vx = b.max.vx - b.min.vx;
+            size.vy = b.max.vy - b.min.vy;
+            size.vz = b.max.vz - b.min.vz;
+            pad = -pad;
+            if (pad == GOBJ_ID_666) {
+                b.max.vy += 0xA0;
+                pad = 0x50;
+                all = 1;
+            }
+            m = size.vy;
+            if (size.vz < m) {
+                m = size.vz;
+            }
+            small = size.vx;
+            if (m < size.vx) {
+                small = m;
+            }
+        }
+        if (all || small == size.vx) {
+            b.max.vx += pad;
+            b.min.vx -= pad;
+        }
+        if (all || small == size.vy) {
+            b.max.vy += pad;
+            b.min.vy -= pad;
+        }
+        if (all || small == size.vz) {
+            b.max.vz += pad;
+            b.min.vz -= pad;
+        }
+    } else {
+        size.vx = b.max.vx - b.min.vx;
+        size.vy = b.max.vy - b.min.vy;
+        size.vz = b.max.vz - b.min.vz;
+        if (size.vy >= size.vz ? size.vx < size.vy : size.vx < size.vz) {
+            small = size.vy < size.vz ? size.vz : size.vy;
+        } else {
+            small = size.vx;
+        }
+        if (pad == 0) {
+            v[0].pad = (small >> 1) + 0xA0;
+        } else {
+            v[0].pad = small + 0xA0;
+        }
+    }
+    bxv->unk00 = 0x80;
+    bxv->unk44 = 0;
+    v[4].vx = b.min.vx;
+    v[4].vy = b.min.vy;
+    v[4].vz = b.min.vz;
+    v[5].vx = b.max.vx;
+    v[5].vy = b.min.vy;
+    v[5].vz = b.min.vz;
+    v[6].vx = b.min.vx;
+    v[6].vy = b.min.vy;
+    v[6].vz = b.max.vz;
+    v[7].vx = b.max.vx;
+    v[7].vy = b.min.vy;
+    v[7].vz = b.max.vz;
+    v[0].vx = b.min.vx;
+    v[0].vy = b.max.vy;
+    v[0].vz = b.min.vz;
+    v[1].vx = b.max.vx;
+    v[1].vy = b.max.vy;
+    v[1].vz = b.min.vz;
+    v[2].vx = b.min.vx;
+    v[2].vy = b.max.vy;
+    v[2].vz = b.max.vz;
+    v[3].vx = b.max.vx;
+    v[3].vy = b.max.vy;
+    v[3].vz = b.max.vz;
+}
 
 void InitBxv(u8 *model) {
-    InitBxv2(model + 0x30, model, (*(u32 *)(model + 0x28) & 0x8000) ? 0x29A : 0);
+    InitBxv2((CobjBxv *)(model + 0x30), (CobjBounds *)model, (*(u32 *)(model + 0x28) & 0x8000) ? 0x29A : 0);
 }
 
 void PreSortHits(void) {
@@ -645,6 +891,162 @@ void GTELOSFinish(void *query, u8 windows, u8 arg2) {
     LOSVerifyHits(query);
 }
 
+/* Line of sight query (fields used here) */
+typedef struct GTELOSQuery {
+    /* 0x00 */ s16 sector;
+    /* 0x02 */ u8 unk02[0xA2];
+    /* 0xA4 */ s32 unkA4;
+    /* 0xA8 */ u8 unkA8[4];
+    /* 0xAC */ LOSVec origin;
+    /* 0xBC */ LOSVec dir;
+} GTELOSQuery;
+
+typedef struct LOSRay {
+    /* 0x00 */ LOSVec origin;
+    /* 0x10 */ LOSVec dir;
+} LOSRay;
+
+/* Terrain sector bounds and box (sector model display) */
+typedef struct LOSSectorBounds {
+    /* 0x00 */ s32 minX;
+    /* 0x04 */ s32 minY;
+    /* 0x08 */ s32 minZ;
+    /* 0x0C */ s32 pad0C;
+    /* 0x10 */ s32 maxX;
+    /* 0x14 */ s32 maxY;
+    /* 0x18 */ s32 maxZ;
+    /* 0x1C */ s32 pad1C;
+    /* 0x20 */ s32 unk20; /* display sector */
+} LOSSectorBounds;
+
+typedef struct LOSTerrSectorModel {
+    /* 0x00 */ s32 unk00; /* loaded */
+    /* 0x04 */ u8 unk04[0xC];
+    /* 0x10 */ LOSSectorBounds *bounds;
+} LOSTerrSectorModel;
+
+/* Sector visibility state for EGSDisplayLOSSectorPolys */
+extern s32 sectorInfo;
+extern u8 D_80127F84;
+extern u8 D_80127F85;
+extern u8 D_80127F86;
+extern u8 D_80127F87;
+extern u8 D_80127F88;
+extern s32 D_80127F8C;
+extern s32 D_80127F90;
+extern LOSVec losEndPoint;
+extern u8 losFrame[];
+extern u8 gInvWSMatrix[];
+extern void *losInvMatrix;
+extern s16 losGCount;
+void GsSetProjection(s32 h);
+void EGSFrameSetPosition(void *frame, s32 arg1, LOSVec *pos);
+void EGSFrameSetOrientation(void *frame, s32 arg1, LOSVec *dir, s32 arg3);
+void LOSVectorNormal(LOSVec *in, LOSVec *out);
+void EGSDisplaySetAlternateViewpoint(void *frame);
+s16 EGSFastCalculateZ(s16 x, s16 y, s16 z);
+void EGSDisplayLOSSectorPolys(s32 sector, u8 steep, u8 arg2);
+
+/* GTELOSFinish(q, w, z) called on the scratchpad stack */
+#define GTELOS_FINISH(q, w, z)                                                            \
+    __asm__ volatile(SCRATCH_ENTER "move $4, %0\n\tmove $5, %1\n\tmove $6, %2\n\tjal GTELOSFinish\n\t" \
+                     SCRATCH_LEAVE                                                         \
+                     :                                                                     \
+                     : "r"(q), "r"(w), "r"(z)                                              \
+                     : SCRATCH_CLOBBERS)
+
+#ifdef NON_MATCHING
+/* Reload scheduling only: the endZ spill and its reload in the loop are placed differently */
+typedef struct GTELOSLevData {
+    /* 0x00 */ u8 unk00[0x80];
+    /* 0x80 */ u8 links[1][15]; /* per sector: linked sectors */
+} GTELOSLevData;
+
+static inline void GTELOSSectors(GTELOSQuery *query, LOSVec *origin, u8 windows, u8 steep, u8 arg2, s16 endX, s16 endZ,
+                                 s16 x, s16 z) {
+    s32 i;
+    u8 *link;
+    s32 sector;
+    LOSTerrSectorModel *model;
+    LOSHit *hit;
+
+    if (losEndPointZ != 0) {
+        sectorInfo = 0;
+        D_80127F84 = 1;
+        D_80127F85 = 1;
+        D_80127F86 = 0;
+        D_80127F87 = 0;
+        D_80127F8C = 0;
+        D_80127F88 = 0;
+        D_80127F90 = 0;
+        link = ((GTELOSLevData *)gLevData)->links[query->sector] - 1;
+        for (i = -1;; link++, i++) {
+            if (i < 0) {
+                sector = query->sector;
+            } else {
+                sector = *link;
+            }
+            if (sector > gTerrSectorCount) {
+                break;
+            }
+            model = (LOSTerrSectorModel *)gTerrSector[sector].model;
+            if (model->unk00 != 0 &&
+                ((model->bounds->minX < x && x < model->bounds->maxX && model->bounds->minZ < z && z < model->bounds->maxZ) ||
+                 (model->bounds->minX < endX && endX < model->bounds->maxX && model->bounds->minZ < endZ &&
+                  endZ < model->bounds->maxZ) ||
+                 (hit = &losHitArray[losHitCount], hit->owner = (LOSHitOwner *)model,
+                  LOSRotBoxV((u8 *)model->bounds + 0x30, losEndPointZ, hit, origin)))) {
+                EGSDisplayLOSSectorPolys(model->bounds->unk20, steep, arg2);
+            }
+        }
+        GTELOS_FINISH(query, windows, 0);
+    }
+}
+
+/* Line of sight: test the ray against the current sector and its neighbours, then objects. */
+void GTELOSLoop(GTELOSQuery *query, u8 windows, u8 arg2) {
+    LOSVec normal;
+    u8 steep = 0;
+    s32 endZ;
+    s32 endX;
+    s32 flag;
+    s32 i;
+    u8 *link;
+    s32 sector;
+    s16 x;
+    s16 z;
+    LOSTerrSectorModel *model;
+    LOSHit *hit;
+    LOSVec *origin;
+    LOSVec *dir;
+
+    flag = query->unkA4;
+    losSectorHitCount = 0;
+    GsSetProjection(0x1F4);
+    origin = &query->origin;
+    EGSFrameSetPosition(losFrame, 0, origin);
+    dir = &query->dir;
+    EGSFrameSetOrientation(losFrame, 0, dir, 0);
+    LOSVectorNormal(dir, &normal);
+    EGSDisplaySetAlternateViewpoint(losFrame);
+    losInvMatrix = gInvWSMatrix;
+    losEndPoint.vx = query->origin.vx + query->dir.vx;
+    losEndPoint.vy = query->origin.vy + query->dir.vy;
+    losEndPoint.vz = query->origin.vz + query->dir.vz;
+    losEndPointZ = EGSFastCalculateZ(losEndPoint.vx, losEndPoint.vy, losEndPoint.vz);
+    losHitCount = 0;
+    losGCount = 0;
+    *(LOSRay *)losRay = *(LOSRay *)&query->origin;
+    losBlocker = NULL;
+    if ((normal.vy >= 0 ? normal.vy : -normal.vy) >= 0xA29 || (flag == 0 && losEndPointZ < 0xC0)) {
+        steep = 1;
+    }
+    GTELOSSectors(query, origin, windows, steep, arg2, losEndPoint.vx, losEndPoint.vz, origin->vx, origin->vz);
+    /* load delay slot after restoring $sp; the shared exit starts with it */
+    __asm__ volatile("nop");
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cobj", GTELOSLoop);
+#endif
 
 /* D_800122F4: "s/cobj.c", now emitted by PreSortHits (see config/syms.d/main/cobj.ld) */
