@@ -59,14 +59,38 @@ typedef struct GameObjectRuntime {
     /* 0x02 */ s16 linkedId; /* related object (e.g. a bomb's target) */
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ GameObjectAnim *anim;
-    /* 0x0C */ u8 unk0C[0xC];
+    /* 0x0C */ void *unk0C;
+    /* 0x10 */ u32 *flagsPtr;
+    /* 0x14 */ struct TargetInfo *target;
     /* 0x18 */ GameObjectHealth *healthInfo;
     /* 0x1C */ struct NPCInfo *npc;
-    /* 0x20 */ u8 unk20[3];
+    /* 0x20 */ u8 unk20[2];
+    /* 0x22 */ u8 npcState; /* 2: NPC */
     /* 0x23 */ u8 flags23;
 } GameObjectRuntime;
 
 #define GOBJ_MODEL_FLAG_400000 0x400000
+
+/* Who/what an object is targeting (GameObjectRuntime.target). */
+typedef struct TargetInfo {
+    /* 0x00 */ s16 targetId; /* gameObjectsInfo index, -1 for none */
+    /* 0x02 */ u8 unk02[2];
+    /* 0x04 */ u32 flags;
+    /* 0x08 */ u8 unk08[0x50];
+    /* 0x58 */ s32 unk58;
+    /* 0x5C */ u8 unk5C[2];
+    /* 0x5E */ s16 unk5E;
+    /* 0x60 */ u8 unk60[0x4C];
+    /* 0xAC */ s32 unkAC;
+    /* 0xB0 */ s32 unkB0;
+    /* 0xB4 */ u8 unkB4[4];
+    /* 0xB8 */ s32 unkB8;
+    /* 0xBC */ s16 unkBC;
+    /* 0xBE */ u8 unkBE[2];
+    /* 0xC0 */ s32 unkC0;
+    /* 0xC4 */ u8 unkC4[0x10];
+    /* 0xD4 */ s32 threat; /* 0..0x1000 */
+} TargetInfo;
 
 /* Object id 666 is a fixed object with its own dispatch slot rather than a placed one. */
 #define GOBJ_ID_666 0x29A

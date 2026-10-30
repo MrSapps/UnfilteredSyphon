@@ -44,7 +44,7 @@ void LevelObjectiveComplete(s16 objective);
 void LevelObjectiveAdd(s32 objective, s32 arg1);
 void WeaponAdd(s32 weapon, s32 count);
 void WeaponRemove(s32 weapon);
-void TextStatusMessage(void *msg, s32 arg1);
+u16 TextStatusMessage(void *msg, s32 ticks); /* returns the text string id */
 void InterfaceStartCountdown(s32 seconds, s32 arg1, void (*done)());
 void SysPlaySong(s32 arg0, s32 song, s32 arg2, s32 arg3);
 
