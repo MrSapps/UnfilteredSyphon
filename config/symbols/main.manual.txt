@@ -1,3 +1,4 @@
 gSysMsgTable = 0x800FCB10; // size:0x0 (message id -> SysMsgDesc)
 mSysMsgQueue = 0x80110560; // size:0xAF4
 mSysMsgQueueNext = 0x80111054; // size:0xAF4
+SysEnterState = 0x80015A64; // type:func

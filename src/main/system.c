@@ -13,6 +13,9 @@ SDATA_LOCAL(gStallFaded)
 SDATA_LOCAL(exeTickTimerList)
 SDATA_LOCAL(gStallCallback)
 
+/* Functions missing from siphon.map were static in system.c. */
+static void SysEnterState(u32 state, int push);
+
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 
 void SysChangeLevel(u32 level) {
@@ -334,7 +337,7 @@ void StallFadeCallback(void) {
     gStallFaded = 1;
 }
 
-void SysStall(s32 level, s32 fadeSpeed, void (*callback)(void)) {
+void SysStall(char *overlay, s32 fadeSpeed, void (*callback)(void)) {
     char name[24];
 
     SysStatePush(9);
@@ -344,7 +347,7 @@ void SysStall(s32 level, s32 fadeSpeed, void (*callback)(void)) {
     GameSysSetLetterBoxMode(3);
     EGSDisplayFade(1, fadeSpeed, StallFadeCallback);
     SysStopXA();
-    sprintf(name, D_8010F634, level);
+    sprintf(name, D_8010F634, overlay);
     SysStreamTextureCacheOverlay(name, (void (*)(s32))StallOverlayCallback);
 }
 
@@ -354,25 +357,71 @@ void SysStallCheck(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_80015A64);
+static void SysEnterState(u32 state, int push) {
+    gSystemState = state;
+    switch (state) {
+    case SYS_STATE_GAME:
+        SysPauseSound(0);
+        UnpauseTerrainStream();
+        break;
+    case 1:
+    case 2:
+    case 5:
+    case 6:
+    case 8:
+    case SYS_STATE_STALL:
+        break;
+    case SYS_STATE_MOVIE:
+        PauseTerrainStream();
+        break;
+    case SYS_STATE_TITLE:
+        StreamSynchronous();
+        if (gLevelRestartHeap != NULL) {
+            gObjPlayer = NULL;
+            EGSDisplayStopLevel();
+            DrawSync(0);
+        }
+        SysLoadOverlay("TITLE.OVL", D_80140FE0, 1);
+        SysLoadTextureCacheOverlay("MOVIE.OVL", 0);
+        if (gLevelRestartHeap != NULL) {
+            EGSMemSetHeap(gLevelRestartHeap);
+            EGSDisplayResetOTs();
+            EGSDisplayMalloc(EGSMemAvail());
+        }
+        break;
+    case SYS_STATE_MENU:
+        if (push) {
+            SysStall(D_8010F63C, 14, func_8001593C);
+        }
+        break;
+    case SYS_STATE_COUNT:
+#line 1350
+        ASSERT(state < SYS_STATE_COUNT);
+        break;
+    default:
+#line 1355
+        ASSERT(0);
+        break;
+    }
+}
 
 void SysStatePush(int state) {
 #line 1364
     ASSERT(mSystemStateDepth < SYS_STATE_STACK_MAX);
     mSystemStateStack[++mSystemStateDepth] = state;
-    func_80015A64(state, 1);
+    SysEnterState(state, 1);
 }
 
 void SysStatePop(void) {
 #line 1379
     ASSERT(mSystemStateDepth > 0);
     mSystemStateDepth--;
-    func_80015A64(mSystemStateStack[mSystemStateDepth], 0);
+    SysEnterState(mSystemStateStack[mSystemStateDepth], 0);
 }
 
 void SysSetState(int state) {
     mSystemStateStack[mSystemStateDepth] = state;
-    func_80015A64(state, 1);
+    SysEnterState(state, 1);
 }
 
 void SysSaveScreen(void) {
@@ -508,4 +557,3 @@ void func_800164D0(void) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/system", jtbl_800100A8);

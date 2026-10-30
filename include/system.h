@@ -8,6 +8,14 @@
 #define SYS_MSG_PRIORITY_COUNT 5
 #define SYS_LEVEL_COUNT 20
 
+/* System states (gSystemState / state stack). */
+#define SYS_STATE_GAME 0
+#define SYS_STATE_MOVIE 3
+#define SYS_STATE_TITLE 4
+#define SYS_STATE_MENU 7
+#define SYS_STATE_STALL 9
+#define SYS_STATE_COUNT 10
+
 /* SysPostMessage priority that dispatches immediately instead of queueing. */
 #define SYS_MSG_IMMEDIATE 5
 
@@ -89,6 +97,7 @@ extern void (*gStallCallback)(void);
 extern void (*gSysMovieDoneCallback)(void);
 /* TODO: string literals; addressed directly until system.c's data moves to C */
 extern char D_8010F634[]; /* "%s.OVL" (.sdata) */
+extern char D_8010F63C[]; /* "MENU" (.sdata) */
 extern char D_80010078[]; /* "\\BIN\\%s;1", owned by asm SysLoadOverlay */
 extern u8 gStallLoaded;
 extern u8 gStallFaded;
@@ -116,7 +125,6 @@ void SysStopAllSongs(void);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
 void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer);
 void SysLoadTextureCacheOverlay(char *name, u8 arg1);
-void func_80015A64(int state, int push);
 
 /* EGS file API; open/read return 0 on success. */
 s32 EGSFileOpen(char *path, s32 *file);
@@ -149,6 +157,17 @@ void SysStopXA(void);
 void SysStreamTextureCacheOverlay(char *name, void (*done)(s32));
 void StreamOverlay(char *path, void *dst, s32 size, u32 tag, void (*done)(s32));
 void StallFadeCallback(void);
+void SysPauseSound(s32);
+void StreamSynchronous(void);
+void EGSDisplayStopLevel(void);
+void EGSMemSetHeap(void *heap);
+void EGSDisplayResetOTs(void);
+void EGSDisplayMalloc(u32 size);
+u32 EGSMemAvail(void);
+void func_8001593C(void);
+void SysStall(char *overlay, s32 fadeSpeed, void (*callback)(void));
+extern void *gLevelRestartHeap;
+extern void *gObjPlayer;
 void StallOverlayCallback(void);
 void EGSDisplayMovieMalloc(void *buf, s32 size);
 void SysSetMusicExciteLevel(s32 level);

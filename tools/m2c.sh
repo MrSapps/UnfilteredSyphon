@@ -9,4 +9,5 @@ printf '#include "common.h"\n#include "game.h"\n' > build/m2c_ctx_in.c
 for h in include/*.h; do printf '#include "%s"\n' "$(basename "$h")" >> build/m2c_ctx_in.c; done
 cpp -P -undef -D__GNUC__=2 -Dmips -DM2CTX -Iinclude build/m2c_ctx_in.c > "$ctx"
 asm=$(find asm -path "*nonmatchings/$tu/$fn.s" | head -1)
-.venv/bin/python3 tools/m2c/m2c.py --target mipsel-gcc-c --context "$ctx" "$@" "$asm"
+jt=$(grep -ho "jtbl_[0-9A-F]*" "$asm" | sort -u | while read j; do find asm -path "*nonmatchings/$tu/$j.s"; done)
+.venv/bin/python3 tools/m2c/m2c.py --target mipsel-gcc-c --context "$ctx" "$@" "$asm" $jt
