@@ -242,7 +242,6 @@ u8 PathHandleEx(Gobj *gobj, s32 unused, s32 orient, u8 pingPong, s16 first, s16 
 INCLUDE_ASM("asm/main/nonmatchings/path", PathHandleEx);
 #endif
 
-#ifdef NON_MATCHING
 /* Register allocation only: the original gives done/reachedEnd $s2/$s3 and
  * arg1/orient $s4/$s5. */
 u8 PathHandleOneWay(Gobj *gobj, s32 arg1, s32 orient, u8 *done, u8 *reachedEnd) {
@@ -260,11 +259,14 @@ u8 PathHandleOneWay(Gobj *gobj, s32 arg1, s32 orient, u8 *done, u8 *reachedEnd) 
     } else {
         ret = 0;
     }
-    *reachedEnd = 0;
-    *done = 1;
+    /* both arms identical; the test is needed for a match */
+    if (reachedEnd) {
+        *reachedEnd = 0;
+        *done = 1;
+    } else {
+        *reachedEnd = 0;
+        *done = 1;
+    }
 end:
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/path", PathHandleOneWay);
-#endif

@@ -475,18 +475,15 @@ void PickupObjectSet(s16 objId, u8 armor, u8 weapon, s16 amount, u8 showMsg) {
     }
 }
 
-#ifdef NON_MATCHING
-/* original loads &D_801219B0 before idx*2 */
 void iPickupObjectTakenMsg(char *msg, s32 idx) {
-    u16 *text = idx + D_801219B0;
     u8 show;
 
-    if (TextIsStringShowing(*text)) {
+    if (TextIsStringShowing(D_801219B0[idx])) {
         if (D_801219E8[idx] == TextComputeChecksum(msg)) {
-            TextChangeStringDuration(*text, strlen(msg) * 2 + 0x18);
+            TextChangeStringDuration(D_801219B0[idx], strlen(msg) * 2 + 0x18);
             show = 0;
         } else {
-            TextRemoveString(*text);
+            TextRemoveString(D_801219B0[idx]);
             show = 1;
         }
     } else {
@@ -497,9 +494,6 @@ void iPickupObjectTakenMsg(char *msg, s32 idx) {
         D_801219E8[idx] = TextComputeChecksum(msg);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", iPickupObjectTakenMsg);
-#endif
 
 
 
@@ -518,8 +512,6 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", iPickupObjectTakenMsg);
 
 
 
-#ifdef NON_MATCHING
-/* scheduling: notMaxed = 0 lands after the first argument setup in the original */
 s32 PickupObjectIsNotMaxed(s32 objId) {
     char flakMsg[0x40];
     char ammoMsg[0x40];
@@ -538,9 +530,9 @@ s32 PickupObjectIsNotMaxed(s32 objId) {
         ammoType = weapon;
     }
     if (ammoType != 0 && WeaponHasMaxAmmo(ammoType)) {
-        notMaxed = 0;
         StringMaxedAmmoMsg(ammoMsg, WEAPON_FIELD(D_80105F64, s16, weapon), ammoType != 0x13 && ammoType != 0x14,
                            ammoType != 6 && ammoType != 7);
+        notMaxed = 0;
         iPickupObjectTakenMsg(ammoMsg, weapon);
     }
     if (armor == 1 && gObjPlayer->healthInfo->armor >= 600) {
@@ -550,9 +542,6 @@ s32 PickupObjectIsNotMaxed(s32 objId) {
     }
     return notMaxed;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectIsNotMaxed);
-#endif
 
 #ifdef NON_MATCHING
 /* logic complete; loop induction variables and the manual/auto test layout differ (369 vs 388 insns) */
@@ -739,19 +728,19 @@ void KeyDroppedByNPC(Gobj *npc) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: original keeps a second copy of obj in v1 for the else path */
 void iKeyRestore(Gobj *obj) {
-    if (gameObjectsInfo[gameObjectsInfo[obj->id].refId].runtime->flags0 & 0x10) {
-        obj->flags0 &= ~0x20;
+    GameObjectInfo *infos;
+    Gobj *key;
+
+    key = obj;
+    infos = gameObjectsInfo;
+    if (infos[infos[key->id].refId].runtime->flags0 & 0x10) {
+        key->flags0 &= ~0x20;
         return;
     }
-    obj->flags0 |= 0x20;
+    key->flags0 |= 0x20;
     gLevelKeycardsTaken++;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", iKeyRestore);
-#endif
 
 void UseBeaconUpdate(Gobj *obj) {
     Gobj *light = iObjectFindNearbyLight(obj, 0x6F);
@@ -769,23 +758,15 @@ void UseBeaconUpdate(Gobj *obj) {
     }
 }
 
-#ifdef NON_MATCHING
-/* addu operand order of the model table lookup */
 void ObjectBombDamagedCallback(s16 id, s16 by) {
-    GameObjectInfo *info;
-
     if (!D_801101C4) {
-        info = &gameObjectsInfo[id];
-        if (!(info->runtime->flags1 & 0x80) && id != GOBJ_ID_666 &&
-            gameObjectsModelInfo[info->modelIndex].type == GOBJ_TYPE_BOMB) {
+        if (!(gameObjectsInfo[id].runtime->flags1 & 0x80) && id != GOBJ_ID_666 &&
+            gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type == GOBJ_TYPE_BOMB) {
             D_801101C4 = 1;
             SysPlayXA(0x81, 0, 1);
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", ObjectBombDamagedCallback);
-#endif
 
 #ifdef NON_MATCHING
 /* prologue: original copies xa (a1) to s0 before reason (a0) to s1 */

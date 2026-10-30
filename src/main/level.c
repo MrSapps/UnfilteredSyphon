@@ -97,23 +97,18 @@ s32 LevelGetGameObjectMatrix(s32 id, GOBJ_MATRIX *out) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* addu operand order of the gameObjectsInfo index differs (register lifetimes) */
 s32 LevelGetGameObjectStartPosition(s32 id, s32 *pos) {
-    GameObjectInfo *info;
+    s32 x;
 
     if (id >= gLevelGameObjCount || id < 0) {
         return 0;
     }
-    info = &gameObjectsInfo[id];
-    pos[0] = info->matrix.t[0];
-    pos[1] = info->matrix.t[1];
-    pos[2] = info->matrix.t[2];
+    x = 0;
+    pos[x] = gameObjectsInfo[id].matrix.t[0];
+    pos[1] = gameObjectsInfo[id].matrix.t[1];
+    pos[2] = gameObjectsInfo[id].matrix.t[2];
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelGetGameObjectStartPosition);
-#endif
 
 s32 LevelGetPathInfo(s32 id, s32 *start, s32 *path) {
     if (id >= gLevelGameObjCount || id < 0) {
@@ -237,22 +232,20 @@ void LevelDoEOLMovie(s32 unused) {
     SysPlayMovie(&info);
 }
 
-#ifdef NON_MATCHING
-/* s0/s1 allocation of extraTicks vs ticks swapped */
 /* Centred mission message; returns how long it stays up. */
 s32 LevelMissionCtrMsg(char *msg, s32 extraTicks) {
+    s32 lead;
     s32 ticks;
     u8 window;
 
-    ticks = (extraTicks + 24) + strlen(msg) * 2;
+    lead = 24;
+    ticks = strlen(msg) * 2;
+    ticks = extraTicks + lead + ticks;
     window = TextAddWindow(-140, -6, 280, 25);
     TextSetWindowJustification(window, 0);
     TextSetStringIntensity(TextAddString(window, msg, ticks, 0), 255, 255, 255);
     return ticks;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelMissionCtrMsg);
-#endif
 
 /* Wait for any XA voice-over to finish, then roll the end-of-level movie. */
 static void func_800172FC(void) {
@@ -489,10 +482,8 @@ void LevelRemoveContactMeiXingMsgForAddingObjectiveMsg(void) {
 }
 
 /* Index of an objective among those currently shown. */
-#ifdef NON_MATCHING
-/* loop register allocation differs */
 s16 LevelObjectiveID2DisplayedObjectiveID(s16 objective) {
-    s16 shown;
+    u32 shown;
     int i;
     s32 count;
 
@@ -508,14 +499,9 @@ s16 LevelObjectiveID2DisplayedObjectiveID(s16 objective) {
     }
     return shown;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelObjectiveID2DisplayedObjectiveID);
-#endif
 
-#ifdef NON_MATCHING
-/* loop register allocation differs */
 s16 LevelParameterID2DisplayedParameterID(s16 param) {
-    s16 shown;
+    s32 shown;
     int i;
     s32 count;
 
@@ -531,9 +517,6 @@ s16 LevelParameterID2DisplayedParameterID(s16 param) {
     }
     return shown;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelParameterID2DisplayedParameterID);
-#endif
 
 void LevelSetLevelSpecificNpcID(s16 id) {
     gLevelSpecificNpcID = id;

@@ -91,16 +91,19 @@ u8 _LOSPointAlongDirection(LOSRequest *req) {
 INCLUDE_ASM("asm/main/nonmatchings/los", _LOSPointAlongDirection);
 #endif
 
-#ifdef NON_MATCHING
 /* Scheduling only: the original stores each EGSMathFIXMul result after the next
  * call's argument loads (looks like an extra pre-reload scheduling pass). */
 u8 _LOSPointAlongAngleDirectionYXZ(LOSRequest *req) {
     LOSVector to;
     LOSVector dir = D_80011B80;
+    s32 x;
+    s32 dist;
 
     EGSGeometry_VectorRotateYXZ(&dir, req->angles, &dir);
-    dir.vx = EGSMathFIXMul(dir.vx, req->distance);
-    dir.vy = EGSMathFIXMul(dir.vy, req->distance);
+    x = EGSMathFIXMul(dir.vx, req->distance);
+    dist = req->distance;
+    dir.vx = x;
+    dir.vy = EGSMathFIXMul(dir.vy, dist);
     dir.vz = EGSMathFIXMul(dir.vz, req->distance);
     to.vx = req->from->vx + dir.vx;
     to.vy = req->from->vy + dir.vy;
@@ -109,9 +112,6 @@ u8 _LOSPointAlongAngleDirectionYXZ(LOSRequest *req) {
     req->toObj = (LOSGobj *)-1;
     return _LOSPoint2Point(req);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/los", _LOSPointAlongAngleDirectionYXZ);
-#endif
 
 u8 _LOSGobj2Gobj(LOSRequest *req) {
     LOSVector from;
@@ -177,8 +177,10 @@ u8 _LOSGobjAlongAngleDirectionYXZ(LOSRequest *req) {
     }
     LOSGetGobjLOSTestPoint(req->fromObj, &from);
     EGSGeometry_VectorRotateYXZ(&dir, req->angles, &dir);
-    dir.vx = EGSMathFIXMul(dir.vx, req->distance);
-    dir.vy = EGSMathFIXMul(dir.vy, req->distance);
+    x = EGSMathFIXMul(dir.vx, req->distance);
+    dist = req->distance;
+    dir.vx = x;
+    dir.vy = EGSMathFIXMul(dir.vy, dist);
     dir.vz = EGSMathFIXMul(dir.vz, req->distance);
     to.vx = from.vx + dir.vx;
     to.vy = from.vy + dir.vy;
