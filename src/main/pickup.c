@@ -87,7 +87,7 @@ void iPickupObjectTakenMsg(char *msg, s32 idx);
 void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
 s32 LevelDoEOL(u8 force);
-void func_8008E418(Gobj *door, s32 msg);
+void func_8008E418(Gobj *door, s32 type);
 u8 PickupObjectTake(u8 arg0);
 void CobjAddBulletCollisionBoxGobj(Gobj *obj, s32 arg1, s32 arg2, s32 arg3);
 void CobjAddCollisionBoxGobj(Gobj *obj, s32 arg1, s32 arg2, s32 arg3, s32 arg4);
@@ -96,6 +96,8 @@ void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
+void func_801487D4(Gobj *obj, s32 type);    /* in an overlay */
+u8 PathObjectIsAtClosestPoint(Gobj *obj, Gobj *other, s32 arg2, s32 arg3, s32 arg4);
 void func_80143424(Gobj *obj);              /* in an overlay */
 void func_8014236C(Gobj *obj);              /* in an overlay */
 void func_801422A0(s16 id);                 /* in an overlay */
@@ -150,8 +152,9 @@ void PickupRemoveUseMsg(s16 objId);
 void UseObject(s16 objId);
 void *UseSetComputerCallback(void (*cb)());
 
-/* used again within a tick of the last use */
-#define DOOR_RECENT(door) ((u32)((door)->unk04 + 1) < (u32)gExeTick ? 0 : 1)
+/* flags1 bits 0-6: countdown timer */
+#define GOBJ_TIMER(obj) ((obj)->flags1 & 0x7F)
+#define GOBJ_SET_TIMER(obj, t) ((obj)->flags1 = ((obj)->flags1 & 0x80) | ((t) & 0x7F))
 #define GOBJ_WORD20(obj) (*(u32 *)&(obj)->unk20)
 #define INFO_WORD24(info) (*(u32 *)&(info)->flags24)
 #define INFO_PICKUP(info) (*(u8 *)&(info)->flags24) /* bit 7: armor, bits 0-5: weapon id */
@@ -791,7 +794,7 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C3A4);
 #endif
 
 /* Door opens: the position computed here is never used. */
-void func_8008C534(Gobj *obj, s32 openerId) {
+void func_8008C534(Gobj *obj, s32 type) {
     VECTOR32 pos;
 
     pos.vx = obj->anim->frame->pos.vx;
@@ -801,7 +804,7 @@ void func_8008C534(Gobj *obj, s32 openerId) {
     SysPlaySong(0, 0x15, (s32)obj, 0);
     SysPlaySong(0, 0x11, (s32)obj, 0);
     obj->flags0 |= 8;
-    func_8008E418(obj, openerId);
+    func_8008E418(obj, type);
 }
 
 #ifdef NON_MATCHING
@@ -865,7 +868,6 @@ void iSwitchReactivate(Gobj *obj) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 
-INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DF0);
 
 
 #ifdef NON_MATCHING
@@ -1175,15 +1177,15 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008D548);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", DOORObjDispatch);
 
-#ifdef NON_MATCHING
-/* the original tests the last-use tick as a value (sltu; xori; beqz); its ASSERT owns the "s/pickup.c" string */
 /* Door update: run the open/close path and post the open/close messages. */
-void func_8008E418(Gobj *door, s32 msg) {
+void func_8008E418(Gobj *door, s32 type) {
     u8 done;
     u8 ok;
+    u8 recent; /* used again within a tick of the last use */
+    s32 timer;
 
     if (door->flags0 & 8) {
-        if (msg != 0x40) {
+        if (type != 0x40) {
             ok = PathHandleEx(door, (s32)&gObjPathScaleVector, 1, 1, -1, -1, &done);
         } else {
             ok = PathHandleEx(door, (s32)&gObjPathScaleVector, 1, 1, 0,
@@ -1193,7 +1195,8 @@ void func_8008E418(Gobj *door, s32 msg) {
         ASSERT(ok == 1);
         if (!done) {
             SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
-            if (DOOR_RECENT(door)) {
+            recent = (u32)(door->unk04 + 1) >= (u32)gExeTick;
+            if (recent) {
                 if (!(door->flags0 & 2) && (door->flags0 & 1)) {
                     SysPostMessage(0x25, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
                     door->flags0 |= 2;
@@ -1205,38 +1208,184 @@ void func_8008E418(Gobj *door, s32 msg) {
             SysSetSongVolPan(0, 0x15, door, -1, -1);
             return;
         }
-        if ((door->flags0 & 2) && DOOR_RECENT(door)) {
-            SysPostMessage(0x26, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
-            door->flags0 &= ~2;
+        if (door->flags0 & 2) {
+            recent = (u32)(door->unk04 + 1) >= (u32)gExeTick;
+            if (recent) {
+                SysPostMessage(0x26, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
+                door->flags0 &= ~2;
+            }
         }
         SysStopSong(0, 0x15);
         SysPlaySong(0, 0x12, (s32)door, 0);
         door->flags0 = (door->flags0 & ~8) | 1;
-        if ((door->flags0 & 0x80) && msg == 0x40) {
+        if ((door->flags0 & 0x80) && type == 0x40) {
             door->flags0 &= ~0x80;
             door->move->unk174 = 0;
             return;
         }
-        if (msg == 0xD) {
+        if (type == 0xD) {
             door->flags0 ^= 4;
             if (door->flags0 & 4) {
                 door->flags1 = (door->flags1 & 0x80) | 0x3C;
                 SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
-            } else if (DOOR_RECENT(door) && gObjPlayer->healthInfo->health > 0) {
-                LevelDoEOL(0);
+            } else {
+                recent = (u32)(door->unk04 + 1) >= (u32)gExeTick;
+                if (recent && gObjPlayer->healthInfo->health > 0) {
+                    LevelDoEOL(0);
+                }
             }
             door->unk04 = gExeTick;
         }
-    } else if ((door->flags0 & 4) && msg == 0xD) {
-        door->flags1 = (door->flags1 & 0x80) | (((door->flags1 & 0x7F) - 1) & 0x7F);
-        SysPostMessage((door->flags1 & 0x7F) ? 0xA : 0x23, 4, door->id, door->id, 0, 0, 0, 0);
+    } else if ((door->flags0 & 4) && type == 0xD) {
+        timer = GOBJ_TIMER(door) - 1;
+        GOBJ_SET_TIMER(door, timer);
+        SysPostMessage(GOBJ_TIMER(door) ? 0xA : 0x23, 4, door->id, door->id, 0, 0, 0, 0);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008E418);
-#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", ELEVATORObjDispatch);
+void ELEVATORObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    VECTOR32 riderPos;
+    Gobj *lift = gameObjectsInfo[msg->to].runtime;
+    s32 type = GOBJ_TYPE(lift->id);
+    Gobj *rider;
+    char *str;
+    s32 ticks;
+    u8 recent; /* used again within a tick of the last use */
+
+    switch (msg->id) {
+    case 10:
+        if (lift->move != NULL && gObjPlayer->healthInfo->health > 0) {
+            func_8008E418(lift, type);
+        }
+        break;
+    case 6:
+        CobjAddCollisionBoxGobj(lift, 1, 0, 1, 1);
+        break;
+    case 5:
+        CobjRemoveCollisionBoxGobj(lift);
+        break;
+    case 18:
+        if (PathObjectIsAtClosestPoint(lift, gObjPlayer, 0, 1, 1)) {
+            PickupAddUseMsg(lift->id, 2);
+            SysPostMessage(0x23, 3, lift->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        break;
+    case 19:
+        SysPostMessage(0x19, 3, lift->id, gPlayerOffset, 0, 0, 0, 0);
+        PickupRemoveUseMsg(lift->id);
+        break;
+    case 26:
+        lift->unk04 = gExeTick;
+        if (type != 0xD && (lift->flags0 & 8)) {
+            rider = gameObjectsInfo[msg->from].runtime;
+            if (lift->flags0 & 1) {
+                pos.vx = lift->anim->frame->pos.vx;
+                pos.vy = lift->anim->frame->pos.vy;
+                pos.vz = lift->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+                riderPos.vx = rider->anim->frame->pos.vx;
+                riderPos.vy = rider->anim->frame->pos.vy;
+                riderPos.vz = rider->anim->frame->pos.vz;
+                riderPos.vy = -riderPos.vy;
+                if (riderPos.vy + 0x69 < pos.vy) {
+                    MoveInfo *move = lift->move;
+
+                    lift->unk04 = 0;
+                    lift->flags0 &= ~1;
+                    if (move->unk17C == 0) {
+                        move->unk174 = 0;
+                        move->unk17C = 1;
+                    } else {
+                        move->unk174 = 1;
+                        move->unk17C = 0;
+                    }
+                }
+            }
+        }
+        break;
+    case 27:
+        if (lift->flags0 & 0x10) {
+            lift->flags0 &= ~0x10;
+        }
+        break;
+    case 20:
+        if (type != 0xD) {
+            if (lift->flags0 & 0x10) {
+                lift->flags0 &= ~0x10;
+            }
+            if (!(lift->flags0 & 8) &&
+                !PathObjectIsAtClosestPoint(lift, gameObjectsInfo[msg->from].runtime, 0, 1, 0)) {
+                func_8008C534(lift, type);
+            }
+        } else if (!(*(u32 *)lift & 0xC)) {
+            func_8008C534(lift, 0xD);
+        }
+        break;
+    case 35:
+    case 39:
+        if (!(lift->flags0 & 0x10)) {
+            if (!(lift->flags0 & 8)) {
+                UseObject(lift->id);
+                if (type == 0x40 && GOBJ_TYPE(msg->from) == 0x41) {
+                    lift->flags0 |= 0x80;
+                    lift->move->unk17C = 0;
+                    lift->move->unk174 = (lift->flags1 & 0x7F) - 1;
+                }
+                recent = (u32)(lift->unk04 + 1) >= (u32)gExeTick;
+                if (recent) {
+                    if (type == 0xD) {
+                        SysPlayXA(0xA9, 0, 1);
+                    }
+                    SysPostMessage(0x25, 5, lift->id, gPlayerOffset, 0, 0, 0, 0);
+                    lift->flags0 |= 2;
+                    func_8008C534(lift, type);
+                } else {
+                    func_8008C534(lift, type);
+                }
+            }
+        } else if (D_8010FCF8 != NULL && (u32)gExeTick > (u32)D_801101B8) {
+            str = D_8010FCF8(lift->id, type);
+            if (str != NULL) {
+                ticks = strlen(str) * 2 + 0x18;
+                TextStatusMessage(str, ticks);
+                ticks += gExeTick;
+                if ((u32)D_801101B8 < (u32)ticks) {
+                    D_801101B8 = ticks;
+                }
+            }
+        }
+        break;
+    case 41:
+        pos.vx = lift->anim->frame->pos.vx;
+        pos.vy = lift->anim->frame->pos.vy;
+        pos.vz = lift->anim->frame->pos.vz;
+        pos.vy = -pos.vy;
+        *(s32 *)msg->data[0] = pos.vy;
+        *(s16 *)msg->data[1] = lift->flags0 | (lift->move->unk174 << 8);
+        break;
+    case 42:
+        pos.vx = lift->anim->frame->pos.vx;
+        pos.vy = lift->anim->frame->pos.vy;
+        pos.vz = lift->anim->frame->pos.vz;
+        pos.vy = -pos.vy;
+        pos.vy = *(s32 *)msg->data[0];
+        EGSFrameSetPosition(lift->anim->frame, 0, &pos);
+        lift->flags0 = ((u8 *)msg->data[1])[0];
+        lift->move->unk174 = ((u8 *)msg->data[1])[1];
+        lift->move->unk17C = lift->move->unk174 != 0;
+        if (type == 0x40 && PathObjectIsAtPoint(lift, PathGetNumPoints(lift) - 1)) {
+            lift->move->unk17C = 1;
+        }
+        if (lift->flags0 & 8) {
+            SysPostMessage(0xA, 4, lift->id, lift->id, 0, 0, 0, 0);
+        }
+        break;
+    case 2:
+        func_801487D4(lift, type);
+        break;
+    }
+}
 
 void INTERACTObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
