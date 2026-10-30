@@ -1,0 +1,2 @@
+textureCache = 0x801377E8;
+DecDCTvlcSize2 = 0x801392F0;

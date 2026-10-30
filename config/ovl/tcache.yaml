@@ -1,0 +1,42 @@
+name: tcache.ovl
+sha1: 611e6bab4a17a7a9d9fe42a5eeda7d36892d8813
+options:
+  basename: tcache
+  target_path: orig/bin/tcache.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/tcache
+  src_path: src/tcache
+  build_path: build
+  asset_path: assets/tcache
+  ld_script_path: build/tcache.ld
+  ld_dependencies: True
+  elf_path: build/tcache.elf
+
+  symbol_addrs_path:
+    - config/symbols/tcache.txt
+    - config/symbols/tcache.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.tcache.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.tcache.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - { start: 0x0, type: bin, name: tcache, vram: 0x801377E0 }
+  - [0x9800]

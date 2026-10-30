@@ -1,0 +1,3 @@
+#!/bin/sh
+D="$(dirname "$(readlink -f "$0")")/../binutils/usr"
+LD_LIBRARY_PATH="$D/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$D/bin/mipsel-linux-gnu-ld" "$@"

@@ -1,0 +1,52 @@
+name: museum.ovl
+sha1: 3ae60bd9b193b16b263866d7f9984f2b32a76427
+options:
+  basename: museum
+  target_path: orig/bin/museum.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/museum
+  src_path: src/museum
+  build_path: build
+  asset_path: assets/museum
+  ld_script_path: build/museum.ld
+  ld_dependencies: True
+  elf_path: build/museum.elf
+
+  symbol_addrs_path:
+    - config/symbols/museum.txt
+    - config/symbols/museum.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.museum.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.museum.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: museum
+    type: code
+    start: 0x0
+    vram: 0x80140FE0
+    bss_size: 0xE8
+    subsegments:
+      - [0x0, rodatabin, header]
+      - [0x4, rodata, rdata]
+      - [0x628, asm, text]
+      - [0x2DDC, data, data]
+      - { start: 0x2FA0, type: bss, vram: 0x80143F80, name: bss }
+  - [0x2FA0]

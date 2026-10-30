@@ -1,0 +1,3 @@
+CatacombRescueCheatZoomPoint = 0x801417AC; // type:func
+iCatacombsInit = 0x80141F28; // type:func
+iChurchInit = 0x80142674; // type:func

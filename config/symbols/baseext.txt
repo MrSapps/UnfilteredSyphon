@@ -1,0 +1,14 @@
+iBaseextDetonateExplosives = 0x80141AA4; // type:func
+iBaseextExplosivesDeath = 0x80141B00; // type:func
+BaseextAlert = 0x80142298; // type:func
+iBaseextInit = 0x80142B0C; // type:func
+iBaseext2Init = 0x80143258; // type:func
+BunkerMissileAction = 0x80143424; // type:func
+seq_hans_death = 0x8014356C; // type:func
+iBunkerInit = 0x80143CBC; // type:func
+ALERTLIGHTObjDispatch = 0x80144114; // type:func
+SPOTLIGHTObjDispatch = 0x801443E8; // type:func
+baseextBriefings = 0x80144A0C;
+bunkerBriefings = 0x80144A28;
+baseext2Briefings = 0x80144A44;
+mFileBuffer = 0x80145098;

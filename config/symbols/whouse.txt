@@ -1,0 +1,5 @@
+InwhouseTimerEndCallback = 0x80141530; // type:func
+iInwhouseInit = 0x80141620; // type:func
+iWhouseInit = 0x80141E18; // type:func
+whouseBriefings = 0x801426B4;
+inwhouseBriefings = 0x801426CC;

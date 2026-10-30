@@ -1,0 +1,49 @@
+name: init.ovl
+sha1: 71876a85e5794fffeae72362e4c3a126623d18d9
+options:
+  basename: init
+  target_path: orig/bin/init.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/init
+  src_path: src/init
+  build_path: build
+  asset_path: assets/init
+  ld_script_path: build/init.ld
+  ld_dependencies: True
+  elf_path: build/init.elf
+
+  symbol_addrs_path:
+    - config/symbols/init.txt
+    - config/symbols/init.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.init.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.init.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: init
+    type: code
+    start: 0x0
+    vram: 0x80145BF0
+    subsegments:
+      - [0x0, rodata, rdata]
+      - [0x344, asm, text]
+      - [0x5E40, data, data]
+  - [0x5EE8]

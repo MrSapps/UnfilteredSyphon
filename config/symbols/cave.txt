@@ -1,0 +1,11 @@
+iCaveInit = 0x80141D48; // type:func
+iCave2Init = 0x80141F48; // type:func
+SiloMissileStart = 0x801422A0; // type:func
+SiloMissileAction = 0x8014236C; // type:func
+iSubwayInit = 0x80142E90; // type:func
+iSiloInit = 0x80142EFC; // type:func
+FALLINGObjDispatch = 0x801435DC; // type:func
+caveBriefings = 0x80143C00;
+cave2Briefings = 0x80143C1C;
+siloBriefings = 0x80143C38;
+museumBriefings = 0x80143DC4;

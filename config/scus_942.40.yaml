@@ -1,0 +1,91 @@
+name: SCUS_942.40 (Syphon Filter, Nov 11 1998 prototype)
+sha1: d326c637edb5eb4c596ba9e2cd5764e8e3d46bef
+options:
+  basename: scus_942.40
+  target_path: orig/scus_942.40
+  base_path: ..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/main
+  src_path: src/main
+  build_path: build
+  asset_path: assets/main
+  ld_script_path: build/scus_942.40.ld
+  ld_dependencies: True
+  elf_path: build/scus_942.40.elf
+
+  symbol_addrs_path:
+    - config/symbols/main.txt
+    - config/symbols/main.manual.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.main.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.main.txt
+
+  find_file_boundaries: True
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: header
+    type: header
+    start: 0x0
+
+  - name: main
+    type: code
+    start: 0x800
+    vram: 0x80010000
+    bss_size: 0x27874
+    subsegments:
+      - [0x800, rodata, rdata]
+      - [0x4C08, asm, text_80014408]
+      - [0x67298, textbin, gLOSFace]   # data in .text (hand-written asm)
+      - [0x67414, textbin, gTestHit]   # data in .text (hand-written asm)
+      - [0x67418, textbin, gTestRay]   # data in .text (hand-written asm)
+      - [0x6741C, asm, text_80076C1C]
+      - [0x833EC, textbin, pchan_hog]   # gPCHan = common/pchan.hog linked into .text
+      - [0xAAAEC, asm, text_800BA2EC]
+      - [0xB309C, textbin, gEmergencyRA]   # data in .text (hand-written asm)
+      - [0xB30A0, asm, text_800C28A0]
+      - [0xBDAF8, textbin, gSortInfo]   # data in .text (hand-written asm)
+      - [0xBDAFC, asm, text_800CD2FC]
+      - [0xBE2AC, textbin, lowColor]   # data in .text (hand-written asm)
+      - [0xBE2EC, textbin, gFlashlightShift]   # data in .text (hand-written asm)
+      - [0xBE2F0, textbin, gFlashlightIntensity]   # data in .text (hand-written asm)
+      - [0xBE2F4, textbin, gFlashIntensity]   # data in .text (hand-written asm)
+      - [0xBE2F8, textbin, gAmbientLight]   # data in .text (hand-written asm)
+      - [0xBE2FC, textbin, gCollidePolys]   # data in .text (hand-written asm)
+      - [0xBE300, asm, text_800CDB00]
+      - [0xC1170, textbin, gTotal]   # data in .text (hand-written asm)
+      - [0xC1174, textbin, gIn]   # data in .text (hand-written asm)
+      - [0xC1178, asm, text_800D0978]
+      - [0xED0E4, data, data]
+      - [0xFFE00, sdata, sdata]
+      - { start: 0x100768, type: sbss, vram: 0x8010FF68, name: sbss }
+      - { type: bss, vram: 0x801104A0, name: bss }
+
+  - name: bss_pad
+    type: pad
+    start: 0x100768
+
+  - name: hogs
+    type: code
+    start: 0x140800
+    vram: 0x80150000
+    subsegments:
+      - [0x140800, bin, INTRFACEHog]
+      - [0x1687C0, bin, SPFXHog]
+      - [0x1A723C, bin, tail_pad]
+
+  - [0x1A7800]

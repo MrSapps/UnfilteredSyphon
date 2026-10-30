@@ -1,0 +1,52 @@
+name: subway2.ovl
+sha1: 8edb69f6adfaadacbc839a07989eef8ba7337818
+options:
+  basename: subway2
+  target_path: orig/bin/subway2.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/subway2
+  src_path: src/subway2
+  build_path: build
+  asset_path: assets/subway2
+  ld_script_path: build/subway2.ld
+  ld_dependencies: True
+  elf_path: build/subway2.elf
+
+  symbol_addrs_path:
+    - config/symbols/subway2.txt
+    - config/symbols/subway2.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.subway2.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.subway2.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: subway2
+    type: code
+    start: 0x0
+    vram: 0x80140FE0
+    bss_size: 0x14
+    subsegments:
+      - [0x0, rodatabin, header]
+      - [0x4, rodata, rdata]
+      - [0x2F0, asm, text]
+      - [0x1060, data, data]
+      - { start: 0x10CC, type: bss, vram: 0x801420AC, name: bss }
+  - [0x10CC]

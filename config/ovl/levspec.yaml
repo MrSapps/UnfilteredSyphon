@@ -1,0 +1,52 @@
+name: levspec.ovl
+sha1: 5f344108a423cc1aab347a01058894e240aa052b
+options:
+  basename: levspec
+  target_path: orig/bin/levspec.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/levspec
+  src_path: src/levspec
+  build_path: build
+  asset_path: assets/levspec
+  ld_script_path: build/levspec.ld
+  ld_dependencies: True
+  elf_path: build/levspec.elf
+
+  symbol_addrs_path:
+    - config/symbols/levspec.txt
+    - config/symbols/levspec.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.levspec.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.levspec.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: levspec
+    type: code
+    start: 0x0
+    vram: 0x80140FE0
+    bss_size: 0x90
+    subsegments:
+      - [0x0, rodatabin, header]
+      - [0x4, rodata, rdata]
+      - [0x7CC, asm, text]
+      - [0x19B8, data, data]
+      - { start: 0x1AA0, type: bss, vram: 0x80142A80, name: bss }
+  - [0x1AA0]

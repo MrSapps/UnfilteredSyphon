@@ -1,0 +1,5 @@
+ChopperTargeting = 0x801442B4; // type:func
+iChopperLevelInit = 0x80144BD0; // type:func
+CHOPPERObjDispatch = 0x80144FA0; // type:func
+chopperPreSwitchBriefings = 0x801454D8;
+chopperPos = 0x801457A0;

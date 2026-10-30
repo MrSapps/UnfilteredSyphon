@@ -1,0 +1,5 @@
+iMuseum2Init = 0x80142E88; // type:func
+PlaneFallSetup = 0x80143324; // type:func
+TGTMUSEUMObjDispatch = 0x8014365C; // type:func
+TGTMUSEUM2ObjDispatch = 0x80143B9C; // type:func
+museum2Briefings = 0x80143DF4;

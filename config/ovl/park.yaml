@@ -1,0 +1,52 @@
+name: park.ovl
+sha1: 9be2b8f5e549c7ac6ddd95817811c04c48c609a6
+options:
+  basename: park
+  target_path: orig/bin/park.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/park
+  src_path: src/park
+  build_path: build
+  asset_path: assets/park
+  ld_script_path: build/park.ld
+  ld_dependencies: True
+  elf_path: build/park.elf
+
+  symbol_addrs_path:
+    - config/symbols/park.txt
+    - config/symbols/park.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.park.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.park.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: park
+    type: code
+    start: 0x0
+    vram: 0x80140FE0
+    bss_size: 0x78
+    subsegments:
+      - [0x0, rodatabin, header]
+      - [0x4, rodata, rdata]
+      - [0x3D8, asm, text]
+      - [0x1860, data, data]
+      - { start: 0x20C4, type: bss, vram: 0x801430A4, name: bss }
+  - [0x20C4]

@@ -1,0 +1,20 @@
+# Map symbols whose address is valid in several overlays; resolved by hand.
+# ADDR     name                        module
+801377E8 textureCache                  tcache
+8013800C mChurch2MapLocations          menu
+8013B1D0 funcEvSpIOEx                  menu
+80141AA4 iBaseextDetonateExplosives    baseext   # real prologue only in baseext
+801422A0 SiloMissileStart              cave      # silo level is hosted by cave.ovl
+801429B8 church2Briefings              park
+801429D4 catacombsBriefings            park
+80143C00 caveBriefings                 cave
+80143C1C cave2Briefings                cave
+80143C38 siloBriefings                 cave
+80143DF4 museum2Briefings              museum
+80144A0C baseextBriefings              baseext
+80144A28 bunkerBriefings               baseext
+80144A44 baseext2Briefings             baseext
+80145098 mFileBuffer                   baseext
+80145584 subwayBriefings               subway
+801455A0 subway3Briefings              subway
+801455D0 mFlamethrowerEndNormal        subway

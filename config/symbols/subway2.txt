@@ -1,0 +1,2 @@
+iSubway2Init = 0x80141C74; // type:func
+subway2Briefings = 0x80142048;

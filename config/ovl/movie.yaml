@@ -1,0 +1,52 @@
+name: movie.ovl
+sha1: 36500a1e39a787565a774ad920c07d10acb5fb1f
+options:
+  basename: movie
+  target_path: orig/bin/movie.ovl
+  base_path: ../..
+  platform: psx
+  compiler: PSYQ
+
+  asm_path: asm/movie
+  src_path: src/movie
+  build_path: build
+  asset_path: assets/movie
+  ld_script_path: build/movie.ld
+  ld_dependencies: True
+  elf_path: build/movie.elf
+
+  symbol_addrs_path:
+    - config/symbols/movie.txt
+    - config/symbols/movie.manual.txt
+    - config/symbols/main.ext.txt
+  undefined_funcs_auto_path: config/undefined_funcs_auto.movie.txt
+  undefined_syms_auto_path: config/undefined_syms_auto.movie.txt
+
+  gp_value: 0x8010F600
+  use_legacy_include_asm: False
+  migrate_rodata_to_functions: True
+  asm_jtbl_label_macro: jlabel
+  section_order: [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
+  ld_bss_is_noload: True
+  ld_align_segment_vram_end: False
+  ld_align_section_vram_end: False
+  create_asm_dependencies: True
+  subalign: 4
+  disasm_unknown: True
+  string_encoding: ASCII
+  data_string_encoding: ASCII
+  rodata_string_guesser_level: 2
+  data_string_guesser_level: 2
+segments:
+  - name: movie
+    type: code
+    start: 0x0
+    vram: 0x801377E0
+    bss_size: 0x13C
+    subsegments:
+      - [0x0, rodatabin, header]
+      - [0x4, rodata, rdata]
+      - [0x200, asm, text]
+      - [0x43A0, data, data]
+      - { start: 0x53C4, type: bss, vram: 0x8013CBA4, name: bss }
+  - [0x53C4]
