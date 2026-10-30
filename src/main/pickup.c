@@ -42,8 +42,8 @@ typedef struct PickupPending {
 #define PICKUP_PENDING_MAX 4
 #define PICKUP_TAKEN_MSG_COUNT 27 /* one per weapon/item id, 0x1A is the flak jacket */
 
-extern void (*D_8010FCF8)();          /* locked-door string callback */
-extern void (*D_8010FCFC)();          /* use string callback */
+extern char *(*D_8010FCF8)();         /* locked-door string callback */
+extern char *(*D_8010FCFC)();         /* use string callback */
 extern void (*D_8010FD00)();          /* key callback */
 extern void (*D_8010FD04)();          /* bomb callback */
 extern void (*D_8010FD08)();          /* computer callback */
@@ -72,6 +72,14 @@ s32 strlen(char *str);
 u8 LevelGameObjectHasModel(s16 id);
 void EGSDisplayRemoveDamage(Gobj *obj);
 void EGSAnimShowDetailDef(GameObjectAnim *anim);
+char *StringSetUseMsg(s16 msgId);
+u16 TextAddMarker(u16 objId, char *str, s32 arg2, s32 arg3);
+void DamageKillAllPeople(s32 by, s32 type);
+void ParticleSmoke(s32 arg0, VECTOR32 *pos, void *dir, s32 arg3, s32 arg4);
+void InterfaceDeleteBomb(void);
+
+extern char D_8010FCEC[]; /* "" */
+extern s32 gExploDir;
 
 void PickupAddUseMsg(s16 objId, s16 msgId);
 void PickupRemoveUseMsg(s16 objId);
@@ -190,7 +198,48 @@ void func_8008A62C(s32 idx) {
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008A62C);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupAddUseMsg);
+void PickupAddUseMsg(s16 objId, s16 msgId) {
+    char *str = NULL;
+    s32 i;
+    Gobj *obj;
+    s32 type;
+    u8 state;
+
+    for (i = 0; i < D_801101BC; i++) {
+        if (objId == D_80121978[i].objId) {
+            return;
+        }
+    }
+    if (D_801101BC < USE_MSG_MAX) {
+        D_80121978[D_801101BC].objId = objId;
+        D_80121978[D_801101BC].msgId = msgId;
+        obj = gameObjectsInfo[objId].runtime;
+        type = GOBJ_TYPE(objId);
+        state = obj->npcState;
+        if (state != 0xB) {
+            if ((state != 0xD || (*(u32 *)obj & 0xA) != 0xA) &&
+                (gPlayerFlashlight ||
+                 (type != 0x78 && type != 0x57 && type != 0x79 && type != 0x7A && type != 0x7B && type != 0x7C))) {
+                if (state != 9 || !(obj->flags0 & 0x10)) {
+                    if (D_8010FCFC != NULL) {
+                        str = D_8010FCFC(objId, msgId, obj);
+                    }
+                } else if (D_8010FCF8 != NULL) {
+                    str = D_8010FCF8(objId, GOBJ_TYPE(objId), obj);
+                }
+            } else {
+                str = D_8010FCEC;
+            }
+        } else if (!gPlayerFlashlight && type == 0x4F) {
+            str = D_8010FCEC;
+        }
+        if (str == NULL) {
+            str = StringSetUseMsg(msgId);
+        }
+        D_80121978[D_801101BC].textId = strlen(str) ? TextAddMarker(objId, str, -1, 0) : 0xFFFF;
+        D_801101BC++;
+    }
+}
 
 void PickupRemoveUseMsg(s16 objId) {
     s32 i;
@@ -379,15 +428,81 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", UseKey);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", KeyDroppedByNPC);
 
+#ifdef NON_MATCHING
+/* regalloc: original keeps a second copy of obj in v1 for the else path */
+void iKeyRestore(Gobj *obj) {
+    if (gameObjectsInfo[gameObjectsInfo[obj->id].refId].runtime->flags0 & 0x10) {
+        obj->flags0 &= ~0x20;
+        return;
+    }
+    obj->flags0 |= 0x20;
+    gLevelKeycardsTaken++;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", iKeyRestore);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", UseBeaconUpdate);
 
+#ifdef NON_MATCHING
+/* addu operand order of the model table lookup */
+void ObjectBombDamagedCallback(s16 id, s16 by) {
+    GameObjectInfo *info;
+
+    if (!D_801101C4) {
+        info = &gameObjectsInfo[id];
+        if (!(info->runtime->flags1 & 0x80) && id != GOBJ_ID_666 &&
+            gameObjectsModelInfo[info->modelIndex].type == GOBJ_TYPE_BOMB) {
+            D_801101C4 = 1;
+            SysPlayXA(0x81, 0, 1);
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", ObjectBombDamagedCallback);
+#endif
 
+#ifdef NON_MATCHING
+/* prologue: original copies xa (a1) to s0 before reason (a0) to s1 */
+void ObjectBombDeath(s32 reason, s32 xa, s32 secondary, s32 id) {
+    s32 track = xa;
+
+    if (!D_801101C8) {
+        D_801101C8 = 1;
+        if (SysSoundIsXAPlaying()) {
+            SysStopXA();
+        }
+    } else {
+        track = -1;
+    }
+    gDeviceDetonated = 1;
+    if (!gMissionFailed) {
+        gMissionFailed = 1;
+        LevelMissionFailed((s16)reason, track, secondary);
+    }
+    DamageKillAllPeople(gPlayerOffset, 0x12);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", ObjectBombDeath);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", ObjectDetonateBomb);
+void ObjectDetonateBomb(Gobj *obj) {
+    VECTOR32 pos;
+
+    pos.vx = obj->anim->frame->pos.vx;
+    pos.vy = obj->anim->frame->pos.vy;
+    pos.vz = obj->anim->frame->pos.vz;
+    pos.vy = -pos.vy;
+    ParticleSmoke(-1, &pos, &gExploDir, 0x1000, 1);
+    InterfaceDeleteBomb();
+    PickupRemoveUseMsg(obj->id);
+    if (obj->healthInfo->health > 0) {
+        obj->healthInfo->health = 0;
+    }
+    if (obj->anim->unk00[0xA] & 8) {
+        EGSAnimShowDetailDef(obj->anim);
+    }
+}
 
 void *UseSetBombCallback(void (*cb)()) {
     void *old = D_8010FD04;
@@ -403,7 +518,15 @@ void *UseSetComputerCallback(void (*cb)()) {
 
 
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", IsWideDoor);
+s32 IsWideDoor(Gobj *obj) {
+    s32 *box = (s32 *)obj->anim->model;
+    s32 wide = 0;
+
+    if (box[4] - box[0] > 0xE0 || box[6] - box[2] > 0xE0) {
+        wide = 1;
+    }
+    return wide;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C058);
 
