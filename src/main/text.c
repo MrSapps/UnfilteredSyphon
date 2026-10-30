@@ -775,7 +775,93 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
     }
 }
 
+#ifdef NON_MATCHING
+/* regalloc: original spills str and keeps sum in s7; logic matches */
+/* Swap in new text for a live string, keeping its position; returns the new id. */
+u16 TextReplaceString(u16 id, char *str) {
+    TextString *s;
+    TextChar *ch;
+    TextChar *last;
+    s32 x;
+    s32 y;
+    s32 x0;
+    s32 len;
+    s32 i;
+    s32 n;
+    u8 sum;
+
+    TEXT_GET_STRING(s, id & 0xFF);
+    n = 0;
+    sum = 0;
+    if (s == NULL || gSystemTick >= s->endTick) {
+        return 0;
+    }
+    ch = s->chars;
+    x = ch->x;
+    y = ch->y;
+    len = strlen(str);
+    x0 = x;
+    for (i = 0; i < len; i++) {
+        sum += str[i];
+        switch (str[i]) {
+            case ' ':
+                x += 4;
+                break;
+            case '\t':
+                x += 25;
+                break;
+            case '\n':
+                x = x0;
+                y += ch->h;
+                break;
+            default:
+                ch->x = x;
+                ch->y = y;
+                if (str[i] == '%') {
+                    i++;
+                    x += func_80086710(&str[i], ch);
+                    if (str[i] == 'l' || str[i] == 'r' || str[i] == 's') {
+                        i++;
+                    }
+                } else {
+                    x += (u8)func_80086474(str[i], ch, s->flags >> 7);
+                }
+                n++;
+                ch++;
+                break;
+        }
+    }
+    while (n < s->length) {
+        EGSDisplayDeleteSprite(gTextCamera, ch);
+        s->length--;
+        ch++;
+    }
+    while (s->length < n) {
+        last = &s->chars[s->length];
+        if (last->unk28 == 0) {
+            last->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gTextCamera + 0x90), last);
+        }
+        last->y = y;
+        if (s->length != 0) {
+            last->r = last[-1].r;
+            last->g = last[-1].g;
+            last->b = last[-1].b;
+        } else {
+            last->r = s->r;
+            last->g = s->g;
+            last->b = s->b;
+        }
+        last->scalex = 0x1000;
+        last->scaley = 0x1000;
+        s->length++;
+    }
+    func_80082CE8(s);
+    s->serial = sum;
+    return (sum << 8) | (id & 0xFF);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/text", TextReplaceString);
+#endif
 
 /* Fade a string chain's characters by a quarter. */
 static void func_80085F24(TextString *s) {

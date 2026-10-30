@@ -140,7 +140,7 @@ s32 EGSFileRead(s32 file, void *buf, u32 size, s32 *nread);
 void EGSFileClose(s32 *file);
 void *EGSMemMalloc(u32 size);
 void EGSMemRegisterVariableOverlayEnd(void *end);
-void EGSListAdd(EGSListNode **list, void *data);
+EGSListNode *EGSListAdd(EGSListNode **list, void *data);
 int sprintf(char *, const char *, ...);
 int DrawSync(int);
 int SysIsPaused(void);
