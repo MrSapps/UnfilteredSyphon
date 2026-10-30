@@ -82,6 +82,19 @@ Gobj *ObjectMatchToRefID(s16 id, s32 type);
 void PlayerUseCAS();
 Gobj *iObjectFindNearbyLight(Gobj *obj, s32 type);
 
+void iPickupObjectTakenMsg(char *msg, s32 idx);
+u8 WeaponHasMaxAmmo(s32 weapon);
+void StringMaxedAmmoMsg(char *buf, s16 weapon, u8 arg2, u8 arg3);
+void StringUndamagedFlakJacket(char *buf);
+
+/* Weapon table, 0x20 bytes per weapon id; fields are addressed through these symbols. */
+#define WEAPON_FIELD(sym, type, w) (*(type *)((u8 *)(sym) + ((w) << 5)))
+extern u8 D_80105F55[]; /* rounds per clip */
+extern u8 D_80105F56[]; /* pickup amount for single-item weapons */
+extern u8 D_80105F58[]; /* flags; bits 0-2: clips per pickup - 1 */
+extern u8 D_80105F64[]; /* s16 name message id */
+extern s16 D_8010FCF0[]; /* armor pickup message ids */
+
 extern char D_8010FCEC[]; /* "" */
 extern s32 gCurrentWeapon;
 extern s32 gExploDir;
@@ -313,7 +326,26 @@ void PickupSetDataIDs(u8 data, s16 *armor, s16 *weapon) {
     *weapon = data & 0x3F;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectAddUseMsgs);
+void PickupObjectAddUseMsgs(Gobj *obj, u8 data) {
+    s16 armor;
+    s16 weapon;
+    s32 amount;
+
+    PickupSetDataIDs(data, &armor, &weapon);
+    amount = 0;
+    if (armor) {
+        PickupAddUseMsg(obj->id, D_8010FCF0[armor]);
+    }
+    if (weapon) {
+        PickupAddUseMsg(obj->id, WEAPON_FIELD(D_80105F64, s16, weapon));
+        if (weapon != 0x13 && weapon != 0x14 && weapon != 0x10) {
+            amount = WEAPON_FIELD(D_80105F55, u8, weapon) * ((WEAPON_FIELD(D_80105F58, s32, weapon) & 7) + 1);
+        } else {
+            amount = WEAPON_FIELD(D_80105F56, u8, weapon);
+        }
+    }
+    PickupObjectSet(obj->id, armor, weapon, amount, 1);
+}
 
 #ifdef NON_MATCHING
 /* PickupRemoveUseMsg gets objId (s2) in the original, the equal 'to' (a3) here */
@@ -419,7 +451,41 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", iPickupObjectTakenMsg);
 
 
 
+#ifdef NON_MATCHING
+/* scheduling: notMaxed = 0 lands after the first argument setup in the original */
+s32 PickupObjectIsNotMaxed(s32 objId) {
+    char flakMsg[0x40];
+    char ammoMsg[0x40];
+    s16 armor;
+    s16 weapon;
+    s32 ammoType;
+    s32 notMaxed = 1;
+    Gobj *obj = gameObjectsInfo[objId].runtime;
+
+    if (gObjPlayer->healthInfo->health <= 0) {
+        return 0;
+    }
+    PickupSetDataIDs(obj->flags1, &armor, &weapon);
+    ammoType = 1;
+    if (weapon != 2) {
+        ammoType = weapon;
+    }
+    if (ammoType != 0 && WeaponHasMaxAmmo(ammoType)) {
+        notMaxed = 0;
+        StringMaxedAmmoMsg(ammoMsg, WEAPON_FIELD(D_80105F64, s16, weapon), ammoType != 0x13 && ammoType != 0x14,
+                           ammoType != 6 && ammoType != 7);
+        iPickupObjectTakenMsg(ammoMsg, weapon);
+    }
+    if (armor == 1 && gObjPlayer->healthInfo->armor >= 600) {
+        StringUndamagedFlakJacket(flakMsg);
+        iPickupObjectTakenMsg(flakMsg, 0x1A);
+        notMaxed = 0;
+    }
+    return notMaxed;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectIsNotMaxed);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectTake);
 
