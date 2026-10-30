@@ -13,7 +13,10 @@ typedef struct MoveInfo {
     /* 0x000 */ VECTOR32 pos;
     /* 0x010 */ u8 unk010[0x70];
     /* 0x080 */ VECTOR32 rot; /* rotation angles */
-    /* 0x090 */ u8 unk090[0x60];
+    /* 0x090 */ u8 unk090[0x10];
+    /* 0x0A0 */ VECTOR32 unkA0; /* angular velocity */
+    /* 0x0B0 */ u8 unk0B0[0x30];
+    /* 0x0E0 */ VECTOR32 unkE0;
     /* 0x0F0 */ VECTOR32 unkF0; /* angular push, applied by the movement update */
     /* 0x100 */ u8 unk100[9];
     /* 0x109 */ u8 unk109;

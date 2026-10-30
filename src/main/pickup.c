@@ -98,6 +98,10 @@ void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
 void func_80148440(Gobj *obj, s32 type);    /* in an overlay */
 void func_8008D548(Gobj *door, s32 type);
+s32 IsWideDoor(Gobj *obj);
+void EGSFrameRotateLocalYXZ(EGSFrame *frame, VECTOR32 *rot);
+void MovementRemoveGobj(Gobj *obj);
+extern VECTOR32 D_80107840;
 void func_8008C194(Gobj *obj);
 void func_8008C058(Gobj *obj, s32 openerId);
 void ObjectRemoveAndIgnoreBulletHoles(Gobj *obj);
@@ -1181,7 +1185,141 @@ void COMPUTERObjDispatch(SysMsg *msg) {
     }
 }
 
+#ifdef NON_MATCHING
+/* control flow written out; tail sharing of the open/close finish differs */
+/* Per-tick door movement: sliding/path doors, lifts, and the swinging panel (type 0x3E). */
+void func_8008D548(Gobj *door, s32 type) {
+    switch (type) {
+    case 0x60:
+    case 0x71:
+    case 0x76:
+    case 0x49:
+    case 0xA:
+    case 0x6:
+        if (door->move != NULL) {
+            u8 done;
+
+            PathHandleEx(door, 0, 1, 1, -1, -1, &done);
+            if (!done) {
+                break;
+            }
+            door->flags0 = (door->flags0 ^ 1) & ~8;
+        } else {
+            VECTOR32 step = { 0, (door->flags0 & 2) ? 0xAA : -0xAA, 0 };
+            VECTOR32 rot;
+            u8 wide;
+
+            rot = step;
+            wide = IsWideDoor(door);
+            if (wide) {
+                rot.vy = (door->flags0 & 2) ? 0x44 : -0x44;
+            }
+            EGSFrameRotateLocalYXZ(door->anim->frame, &rot);
+            GOBJ_SET_TIMER(door, GOBJ_TIMER(door) - 1);
+            if (GOBJ_TIMER(door)) {
+                break;
+            }
+            door->flags0 = (door->flags0 ^ 3) & ~8;
+            GOBJ_SET_TIMER(door, 0);
+            door->flags1 |= wide ? 0xF : 6;
+        }
+        if (!(door->flags1 & 0x80)) {
+            door->unk20[0] |= 0x80;
+        }
+        func_8008C2FC(door);
+        func_8008C3A4(door);
+        return;
+    case 0x7:
+    case 0x3B:
+        if (door->move != NULL) {
+            u8 done;
+
+            if (!GOBJ_TIMER(door)) {
+                PathHandleEx(door, 0, 1, 1, -1, -1, &done);
+                if (!done) {
+                    break;
+                }
+                door->flags0 ^= 5;
+                if (door->flags0 & 1) {
+                    done = 0;
+                    GOBJ_SET_TIMER(door, 0x48);
+                } else {
+                    door->flags0 &= ~8;
+                    if (!(door->flags1 & 0x80)) {
+                        door->unk20[0] |= 0x80;
+                    }
+                    func_8008C3A4(door);
+                }
+                func_8008C2FC(door);
+            } else {
+                GOBJ_SET_TIMER(door, GOBJ_TIMER(door) - 1);
+                if (!GOBJ_TIMER(door)) {
+                    func_8008C194(door);
+                }
+                done = 0;
+            }
+            if (done) {
+                return;
+            }
+            break;
+        }
+        return;
+    case 0x3E: {
+        VECTOR32 rot = door->move->rot;
+        VECTOR32 vel;
+        u8 done = 0;
+
+        if ((door->flags1 & 7) == 2) {
+            if (rot.vx > 0) {
+                rot.vy = 0;
+                rot.vz = 0;
+                rot.vx = 0xAAAAA;
+            } else {
+                rot.vy = 0;
+                rot.vz = 0;
+                rot.vx = -0x44444;
+                door->move->unk13C = 0xA66;
+                door->move->unkE0 = D_80107840;
+                door->flags1 = (door->flags1 & ~7) | 3;
+            }
+            door->move->unkF0.vx += rot.vx;
+            door->move->unkF0.vy += rot.vy;
+            door->move->unkF0.vz += rot.vz;
+        } else if ((door->flags1 & 7) == 3) {
+            if (rot.vx >= 0xE4) {
+                vel = door->move->unkA0;
+                vel.vx = -vel.vx;
+                door->move->unkE0 = vel;
+                door->flags1 = (door->flags1 & ~7) | 4;
+            }
+        } else {
+            if (rot.vx <= 0) {
+                vel = door->move->unkA0;
+                vel.vx = -vel.vx;
+                door->move->unkE0 = vel;
+                door->move->unk13C = 0x1000;
+            }
+            vel = door->move->unkA0;
+            if (vel.vx > 0 && rot.vx > 0) {
+                done = 1;
+                door->flags0 ^= 1;
+                MovementRemoveGobj(door);
+                func_8008C3A4(door);
+            }
+        }
+        if (done) {
+            return;
+        }
+        break;
+    }
+    default:
+        return;
+    }
+    SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008D548);
+#endif
 
 #ifdef NON_MATCHING
 /* type switch in case 24 has more cases (0x61/0x54) in the original; early part 4 insns off */
