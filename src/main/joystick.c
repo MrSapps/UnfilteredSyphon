@@ -53,23 +53,32 @@ typedef struct JoyInput {
     /* 0x30 */ s32 state; /* 0: up, 1: first pressed, 2: second pressed */
 } JoyInput;
 
-/* Aiming input (JoyController.aim). */
-typedef struct JoyAim {
-    /* 0x00 */ u8 unk00[0x10];
-    /* 0x10 */ VECTOR32 stick;
-    /* 0x20 */ u8 unk20[0x14];
-    /* 0x34 */ s32 counter;
-} JoyAim; /* size 0x38 */
+
+/* Combined directional input per stick (JoyController.sticks, 0x3C bytes). */
+typedef struct JoyStickState {
+    /* 0x00 */ VECTOR32 dir;
+    /* 0x10 */ VECTOR32 unit;
+    /* 0x20 */ s32 len;
+    /* 0x24 */ s32 srcX; /* JoyDirInfo index the x part came from, -1: none */
+    /* 0x28 */ s32 srcZ;
+    /* 0x2C */ u8 unk2C[8];
+    /* 0x34 */ s32 counter; /* aim stick (sticks[3]): hold counter */
+    /* 0x38 */ u8 unk38[4];
+} JoyStickState;
 
 /* Per-object joystick controller state. */
 typedef struct JoyController {
-    /* 0x000 */ u8 unk000[0x30];
+    /* 0x000 */ u8 unk000[0x14];
+    /* 0x014 */ s32 bitA;
+    /* 0x018 */ u8 downA;
+    /* 0x019 */ u8 pad019[3];
+    /* 0x01C */ s32 bitB;
+    /* 0x020 */ u8 downB;
+    /* 0x021 */ u8 pad021[0xF];
     /* 0x030 */ s32 unk030;
     /* 0x034 */ u8 unk034[4];
     /* 0x038 */ JoyDirInfo *dirs;
-    /* 0x03C */ u8 unk03C[0xB4];
-    /* 0x0F0 */ struct JoyAim aim;
-    /* 0x128 */ u8 unk128[4];
+    /* 0x03C */ JoyStickState sticks[4];
     /* 0x12C */ struct JoyDirDefault *dirDefaults; /* 4 per set, indexed by JoyDirInfo.type */
     /* 0x130 */ s32 prevAimState;
     /* 0x134 */ u32 aimState; /* 0..5 */
@@ -101,6 +110,21 @@ static inline u8 JoyTestBit(u8 *bits, s32 n) {
     word = n >> 5;
     bit = 1 << (n & 0x1F);
     return (((u32 *)bits)[word] & bit) != 0;
+}
+
+/* As JoyTestBit, but the raw masked word. */
+static inline u32 JoyBitMask(u8 *bits, s32 n) {
+    u32 misalign = (u32)bits & 3;
+    s32 word;
+    s32 bit;
+
+    if (misalign != 0) {
+        n += misalign * 8;
+        bits = (u8 *)((u32)bits & ~3);
+    }
+    word = n >> 5;
+    bit = 1 << (n & 0x1F);
+    return ((u32 *)bits)[word] & bit;
 }
 
 extern JoyBtnInfo mJoyBtnInfo[][JOY_BUTTONS];
@@ -734,9 +758,9 @@ void func_80038720(JoyController *joy) {
     u8 still = 0;
     u32 state = joy->aimState;
     Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
-    VECTOR32 v = joy->aim.stick;
+    VECTOR32 v = joy->sticks[3].unit;
     s32 type = (*(JoyCharMove **)((u8 *)gobj->move + 0x1A8))->type;
-    JoyAim *aim = &joy->aim;
+    JoyStickState *aim = &joy->sticks[3];
     s32 lowY;
     s32 highY;
     u32 next;
@@ -796,7 +820,92 @@ INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80038720);
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800389E0);
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_8003915C);
+void func_80036D24(JoyController *joy);
+void func_800374E8(JoyController *joy);
+void func_800389E0(JoyController *joy);
+void func_80038720(JoyController *joy);
+
+/* Per-frame update of a joystick controller from the raw pad data. */
+void func_8003915C(JoyController *joy, u8 *pad) {
+    JoyDirInfo *dirs = joy->dirs;
+    JoyStickState *sticks = joy->sticks;
+    s32 i;
+    s32 j;
+    u32 xbit;
+    u32 zbit;
+    u8 both;
+
+    joy->downA = JoyTestBit(pad + 4, joy->bitA);
+    joy->downB = JoyTestBit(pad + 4, joy->bitB);
+    func_8003642C((JoyInput *)joy, (u32 *)pad);
+    for (i = 0; i < 4; i++) {
+        sticks[i].dir.vx = 0;
+        sticks[i].dir.vy = 0;
+        sticks[i].dir.vz = 0;
+        sticks[i].srcZ = -1;
+        sticks[i].srcX = -1;
+    }
+    func_80036520((VECTOR32 *)(pad + 0xC), 0, (VECTOR32 *)&dirs[2].unk08);
+    if (joy->unk030 == 1) {
+        dirs[3].unk08 = 0x1000;
+    } else if (joy->unk030 == 2) {
+        dirs[3].unk08 = -0x1000;
+    } else {
+        dirs[3].unk08 = 0;
+    }
+    dirs[3].unk0C = 0;
+    dirs[3].unk10 = 0;
+    if (pad[2]) {
+        func_80036520((VECTOR32 *)(pad + 0x1C), 1, (VECTOR32 *)&dirs[1].unk08);
+        func_80036520((VECTOR32 *)(pad + 0x2C), 1, (VECTOR32 *)&dirs[0].unk08);
+    } else {
+        dirs[1].unk08 = 0;
+        dirs[1].unk0C = 0;
+        dirs[1].unk10 = 0;
+        dirs[0].unk08 = 0;
+        dirs[0].unk0C = 0;
+        dirs[0].unk10 = 0;
+    }
+    func_80036768(joy);
+    func_80036848(joy);
+    for (i = 0; i < 4; i++) {
+        for (j = 0; j < 4; j++) {
+            xbit = JoyBitMask((u8 *)&dirs[i].unk00, j);
+            zbit = JoyBitMask((u8 *)&dirs[i].unk04, j);
+            both = 0;
+            if (xbit && zbit && (dirs[i].unk08 != 0 || dirs[i].unk10 != 0)) {
+                both = 1;
+            }
+            if (both || (xbit && dirs[i].unk08 != 0)) {
+                sticks[j].dir.vx = dirs[i].unk08;
+                sticks[j].srcX = i;
+            }
+            if (both || (zbit && dirs[i].unk10 != 0)) {
+                sticks[j].dir.vz = dirs[i].unk10;
+                sticks[j].srcZ = i;
+            }
+        }
+    }
+    for (i = 0; i < 4; i++) {
+        EGSMath_VectorModulus(&sticks[i].dir, &sticks[i].len);
+        if (sticks[i].len != 0) {
+            GTEMath_VectorNormal(&sticks[i].dir, &sticks[i].unit);
+        } else {
+            sticks[i].unit.vx = 0;
+            sticks[i].unit.vy = 0;
+            sticks[i].unit.vz = 0;
+        }
+        if (sticks[i].len > 0x1000) {
+            sticks[i].dir = sticks[i].unit;
+        }
+    }
+    ((void (*)(JoyController *))func_8003699C)(joy);
+    func_800369A4((u8 *)joy);
+    func_80038720(joy);
+    func_80036D24(joy);
+    func_800374E8(joy);
+    func_800389E0(joy);
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", JoystickGobjTurn);
 
