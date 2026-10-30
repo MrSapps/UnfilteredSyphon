@@ -60,19 +60,42 @@ def transform(text, first_jtbl):
     return "".join(out)
 
 
+# Once a function is C, splat stops emitting its .s and with it the jump table,
+# but the table still sits in the TU's rodata. Every table ever seen is kept here.
+JTBLS = Path(__file__).parent.parent / "config/jtbls.txt"
+
+
+def load_jtbls():
+    known = set()
+    if JTBLS.exists():
+        for line in JTBLS.read_text().splitlines():
+            if line and not line.startswith("#"):
+                known.add(tuple(line.split()))
+    return known
+
+
 def main():
     n = 0
+    known = load_jtbls()
+    seen = set(known)
     for root in sys.argv[1:] or ["asm"]:
+        mod = Path(root).name
         for tu in Path(root).glob("nonmatchings/*"):
-            files = [p for p in tu.glob("*.s") if not p.read_text().startswith(TAG)]
+            texts = {p: p.read_text() for p in tu.glob("*.s")}
+            for t in texts.values():
+                for m in re.findall(r"dlabel jtbl_([0-9A-F]{8})", t):
+                    seen.add((mod, tu.name, m))
+            files = [p for p in texts if not texts[p].startswith(TAG)]
             if not files:
                 continue
-            texts = {p: p.read_text() for p in tu.glob("*.s")}
-            jtbls = [int(m, 16) for t in texts.values() for m in re.findall(r"dlabel jtbl_([0-9A-F]{8})", t)]
+            jtbls = [int(a, 16) for m, t, a in seen if m == mod and t == tu.name]
             first = min(jtbls) if jtbls else None
             for p in files:
                 p.write_text(transform(texts[p], first))
                 n += 1
+    if seen != known:
+        JTBLS.write_text(JTBLS.read_text().split("\n", 1)[0] + "\n"
+                         + "".join(" ".join(k) + "\n" for k in sorted(seen)))
     print(f"split_parts: tagged {n} files")
 
 
