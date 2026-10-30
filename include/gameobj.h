@@ -61,7 +61,7 @@ typedef struct GameObjectRuntime {
     /* 0x00 */ u8 flags0;
     /* 0x01 */ u8 flags1;
     /* 0x02 */ s16 id; /* gameObjectsInfo index, -1 when the pool entry is free */
-    /* 0x04 */ u8 unk04[4];
+    /* 0x04 */ s32 unk04; /* per-type: last-use tick (doors), state, ... */
     /* 0x08 */ GameObjectAnim *anim;
     /* 0x0C */ struct MoveInfo *move;
     /* 0x10 */ struct CASState *cas; /* character animation system; flags first */

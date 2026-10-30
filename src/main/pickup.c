@@ -3,6 +3,7 @@
 #include "level.h"
 #include "gameobj.h"
 #include "gobj.h"
+#include "game.h"
 
 /* pickup.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010FCF8)
@@ -86,7 +87,11 @@ void iPickupObjectTakenMsg(char *msg, s32 idx);
 void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
 s32 LevelDoEOL(u8 force);
-void func_8008E418(Gobj *obj, s32 openerId);
+void func_8008E418(Gobj *door, s32 msg);
+u8 PathHandleEx(Gobj *gobj, s32 scale, s32 orient, u8 pingPong, s16 first, s16 last, u8 *reachedEnd);
+void SysSetSongVolPan(s32 arg0, s32 song, Gobj *obj, s32 vol, s32 pan);
+
+extern VECTOR32 gObjPathScaleVector;
 u8 WeaponHasMaxAmmo(s32 weapon);
 void StringMaxedAmmoMsg(char *buf, s16 weapon, u8 arg2, u8 arg3);
 void StringUndamagedFlakJacket(char *buf);
@@ -108,6 +113,8 @@ void PickupRemoveUseMsg(s16 objId);
 void UseObject(s16 objId);
 void *UseSetComputerCallback(void (*cb)());
 
+/* used again within a tick of the last use */
+#define DOOR_RECENT(door) ((u32)((door)->unk04 + 1) < (u32)gExeTick ? 0 : 1)
 #define GOBJ_WORD20(obj) (*(u32 *)&(obj)->unk20)
 #define INFO_WORD24(info) (*(u32 *)&(info)->flags24)
 #define INFO_PICKUP(info) (*(u8 *)&(info)->flags24) /* bit 7: armor, bits 0-5: weapon id */
@@ -823,6 +830,7 @@ INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 
 INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DF0);
 
+
 INCLUDE_ASM("asm/main/nonmatchings/pickup", AUTOPICKUPObjDispatch);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", BOMBObjDispatch);
@@ -833,7 +841,66 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008D548);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", DOORObjDispatch);
 
+#ifdef NON_MATCHING
+/* the original tests the last-use tick as a value (sltu; xori; beqz); its ASSERT owns the "s/pickup.c" string */
+/* Door update: run the open/close path and post the open/close messages. */
+void func_8008E418(Gobj *door, s32 msg) {
+    u8 done;
+    u8 ok;
+
+    if (door->flags0 & 8) {
+        if (msg != 0x40) {
+            ok = PathHandleEx(door, (s32)&gObjPathScaleVector, 1, 1, -1, -1, &done);
+        } else {
+            ok = PathHandleEx(door, (s32)&gObjPathScaleVector, 1, 1, 0,
+                              (door->flags0 & 0x80) ? (door->flags1 & 0x7F) - 1 : 1, &done);
+        }
+#line 2510
+        ASSERT(ok == 1);
+        if (!done) {
+            SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
+            if (DOOR_RECENT(door)) {
+                if (!(door->flags0 & 2) && (door->flags0 & 1)) {
+                    SysPostMessage(0x25, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
+                    door->flags0 |= 2;
+                }
+            } else if (door->flags0 & 2) {
+                SysPostMessage(0x26, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
+                door->flags0 &= ~2;
+            }
+            SysSetSongVolPan(0, 0x15, door, -1, -1);
+            return;
+        }
+        if ((door->flags0 & 2) && DOOR_RECENT(door)) {
+            SysPostMessage(0x26, 5, door->id, gPlayerOffset, 0, 0, 0, 0);
+            door->flags0 &= ~2;
+        }
+        SysStopSong(0, 0x15);
+        SysPlaySong(0, 0x12, (s32)door, 0);
+        door->flags0 = (door->flags0 & ~8) | 1;
+        if ((door->flags0 & 0x80) && msg == 0x40) {
+            door->flags0 &= ~0x80;
+            door->move->unk174 = 0;
+            return;
+        }
+        if (msg == 0xD) {
+            door->flags0 ^= 4;
+            if (door->flags0 & 4) {
+                door->flags1 = (door->flags1 & 0x80) | 0x3C;
+                SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
+            } else if (DOOR_RECENT(door) && gObjPlayer->healthInfo->health > 0) {
+                LevelDoEOL(0);
+            }
+            door->unk04 = gExeTick;
+        }
+    } else if ((door->flags0 & 4) && msg == 0xD) {
+        door->flags1 = (door->flags1 & 0x80) | (((door->flags1 & 0x7F) - 1) & 0x7F);
+        SysPostMessage((door->flags1 & 0x7F) ? 0xA : 0x23, 4, door->id, door->id, 0, 0, 0, 0);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008E418);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", ELEVATORObjDispatch);
 
