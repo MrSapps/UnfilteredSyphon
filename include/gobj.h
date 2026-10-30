@@ -36,8 +36,15 @@ typedef struct Gobj {
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ EGSAnimNode *anim;
     /* 0x0C */ MoveInfo *move;
-    /* 0x10 */ u8 unk10[0x14];
+    /* 0x10 */ struct CASState *cas; /* character animation system state */
+    /* 0x14 */ u8 unk14[0x10];
 } Gobj; /* size 0x24 */
+
+typedef struct CASState {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ u8 active;
+    /* 0x09 */ u8 mode;
+} CASState;
 
 #define GOBJ_POOL_SIZE 100
 #define GOBJ_MOVE_REQUEST_MAX 30

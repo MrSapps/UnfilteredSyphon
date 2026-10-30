@@ -64,7 +64,9 @@ extern void (*gSysMovieDoneCallback)(void);
 typedef struct NPCInfo {
     /* 0x00 */ u8 unk00[0x20];
     /* 0x20 */ s32 flags;
-    /* 0x24 */ u8 unk24[0x23];
+    /* 0x24 */ u8 unk24[0x18];
+    /* 0x3C */ s32 casAction; /* CAS action in progress, 0 when done */
+    /* 0x40 */ u8 unk40[7];
     /* 0x47 */ u8 nameMsgId;
     /* 0x48 */ u8 unk48;
 } NPCInfo;

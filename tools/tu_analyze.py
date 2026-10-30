@@ -29,6 +29,7 @@ def functions(elf="build/scus_942.40.elf"):
     shdrs = [st.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize) for i in range(shnum)]
     funcs = {}
     SHF_EXECINSTR = 4
+    linker_marker = re.compile(r"_(TEXT|DATA|RODATA|BSS|SDATA|SBSS)_(START|END|SIZE)$|_VRAM(_END)?$|_ROM_(START|END)$")
     for sh in shdrs:
         if sh[1] != 2:
             continue
@@ -40,9 +41,14 @@ def functions(elf="build/scus_942.40.elf"):
             # cc1 2.7.2 doesn't mark C functions with .type, so accept untyped text symbols too
             if nm and (styp == 2 or (styp == 0 and in_text)):
                 name = data[strtab + nm : data.index(b"\0", strtab + nm)].decode()
-                if not name.startswith(("__maspsx", ".", "$", "jtbl_")) and "NON_MATCHING" not in name:
-                    funcs.setdefault(value, name)
-    return [[n, a] for a, n in sorted(funcs.items())]
+                if name.startswith(("__maspsx", ".", "$", "jtbl_", "gcc2_compiled")) or "NON_MATCHING" in name:
+                    continue
+                if linker_marker.search(name):
+                    continue
+                # prefer properly typed function symbols
+                if value not in funcs or (styp == 2 and funcs[value][1] != 2):
+                    funcs[value] = (name, styp)
+    return [[n, a] for a, (n, _) in sorted(funcs.items())]
 
 
 def main():
