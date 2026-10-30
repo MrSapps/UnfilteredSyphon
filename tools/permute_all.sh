@@ -13,7 +13,7 @@ for f in $FILES; do
     for fn in $(python3 - "$f" <<'PY'
 import re, sys
 t = open(sys.argv[1]).read()
-for m in re.finditer(r"#ifdef NON_MATCHING\n(?:/\*.*?\*/\n)?(?:static )?[^\n(]*?\b(\w+)\(", t, re.S):
+for m in re.finditer(r"#ifdef NON_MATCHING\n(?:/\*.*?\*/\n)?(?:INCLUDE_PART1\(.*?\)\n)?(?:static )?[^\n(]*?\b(\w+)\(", t, re.S):
     print(m.group(1))
 PY
     ); do

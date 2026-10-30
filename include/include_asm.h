@@ -37,6 +37,9 @@ __asm__(".include \"include/labels.inc\"\n");
 #ifndef INCLUDE_RODATA
 #define INCLUDE_RODATA(FOLDER, NAME)
 #endif
+#ifndef INCLUDE_PART1
+#define INCLUDE_PART1(FOLDER, NAME)
+#endif
 
 #endif /* !defined(M2CTX) && !defined(PERMUTER) */
 

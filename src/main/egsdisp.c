@@ -2,11 +2,6 @@
 #include "game.h"
 #include "egsframe.h"
 
-/* include_asm.h has no INCLUDE_PART1 stub for m2c/permuter builds */
-#ifndef INCLUDE_PART1
-#define INCLUDE_PART1(FOLDER, NAME)
-#endif
-
 /* small data (still assembled from asm) */
 SDATA_LOCAL(D_8010FE40)
 SDATA_LOCAL(D_8010FE44)
