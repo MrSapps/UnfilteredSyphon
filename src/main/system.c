@@ -1,13 +1,7 @@
 #include "common.h"
 #include "system.h"
 
-INCLUDE_ASM("asm/main/nonmatchings/system", main);
-
-INCLUDE_ASM("asm/main/nonmatchings/system", MainLoop);
-
 INCLUDE_ASM("asm/main/nonmatchings/system", SysChangeLevel);
-
-INCLUDE_RODATA("asm/main/nonmatchings/system", jtbl_80010000);
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 

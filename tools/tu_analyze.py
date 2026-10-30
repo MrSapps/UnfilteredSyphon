@@ -19,19 +19,26 @@ BASE = 0x80010000
 RDATA = (0x80010000, 0x80014408)
 
 
-def functions():
-    funcs = []
-    for p in sorted(Path("asm/main").glob("text_*.s")):
-        for line in p.read_text().splitlines():
-            m = re.match(r"glabel (\S+)", line)
-            if m:
-                funcs.append([m.group(1), None])
-            elif funcs and funcs[-1][1] is None:
-                a = re.match(r"\s*/\* \w+ (\w{8}) ", line)
-                if a:
-                    funcs[-1][1] = int(a.group(1), 16)
-    funcs.sort(key=lambda f: f[1])
-    return funcs
+def functions(elf="build/scus_942.40.elf"):
+    """(name, addr) for every function symbol in the linked main ELF, address order."""
+    import struct as st
+
+    data = Path(elf).read_bytes()
+    shoff, = st.unpack_from("<I", data, 0x20)
+    shentsize, shnum = st.unpack_from("<HH", data, 0x2E)
+    shdrs = [st.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize) for i in range(shnum)]
+    funcs = {}
+    for sh in shdrs:
+        if sh[1] != 2:
+            continue
+        strtab = shdrs[sh[6]][4]
+        for off in range(sh[4], sh[4] + sh[5], 16):
+            nm, value, _, info, _, _ = st.unpack_from("<IIIBBH", data, off)
+            if info & 0xF == 2 and nm:  # STT_FUNC
+                name = data[strtab + nm : data.index(b"\0", strtab + nm)].decode()
+                if not name.startswith("__maspsx"):
+                    funcs.setdefault(value, name)
+    return [[n, a] for a, n in sorted(funcs.items())]
 
 
 def main():

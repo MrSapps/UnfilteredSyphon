@@ -1,0 +1,76 @@
+# Translation units of SCUS_942.40 .text, in link order.
+#   <text start> <name> <c|asm> [rodata=<addr>|rodata=none]
+# Evidence (see tools/rdata_blocks.py): s/<file>.c assert strings, the {1,1,1,0}
+# header constant that opens each game TU's .rdata, SYS<Module>Init stubs, and
+# function-name prefixes from siphon.map. Names without an assert string are guesses.
+
+80014408 main      c
+80014884 system    c   rodata=80010028
+80016550 game      c   rodata=800100D4
+80016D1C level     c   rodata=80010140
+80017C48 camera    c   rodata=8001018C
+8001B000 gamecam   c   rodata=800101E4
+80023FD8 physics   c
+80024538 path      c
+80024F10 playcas   c   rodata=800102D0
+80025078 player    c   rodata=8001040C
+80029274 cas       c   rodata=80010F50
+8002B2B4 object    c   rodata=80010F60
+800303B8 sniper    c   rodata=8001148C
+800323EC target    c   rodata=8001149C
+800353D0 joystick  c   rodata=800114B8
+80039DEC sprite    c
+8003A980 los       c
+8003B758 interface c   rodata=80011B90
+80045EB0 weapon    c   rodata=80011E8C
+80048A04 movement  c   rodata=80011FC0
+8004C4A4 particle  c   rodata=80011FE0
+80057FF0 npc       c   rodata=80012070
+800667FC damage    c   rodata=80012144
+80069EAC sound     c   rodata=800121E4
+8006B860 collision c
+80072CEC cobj      c   rodata=800122D4   # opens with the CollisionPhysics helpers; s/cobj.c follows the header consts
+80076A98 losgte    asm
+8007792C gtegeo    c
+80079950 animate   c   rodata=8001231C
+8007EEC0 terrain   c   rodata=8001233C
+80081BD0 stream    c   rodata=80012380
+8008275C hotbox    c   rodata=800123A8
+800835F4 text      c   rodata=800123D8
+80086894 friendly  c
+80089C54 strings   c   rodata=80012874
+8008A36C pickup    c   rodata=80012DE0
+80090254 save      c   rodata=80013344
+80091344 shadow    c   rodata=80013360
+80092BEC pchan_hog textbin
+800BA2EC snddrv    c
+800C15E0 egsgte    asm
+800C28A0 egsdisp   c
+800C9EA0 egshmd    c
+800CCE80 egssort   asm
+800D0E74 egsdev    c
+800D26AC egsanim   c
+800D2E08 egsmath   c
+800D5178 egsframe  c
+800D77A8 egsdebug  c
+800D7944 egstex    c
+800D7FA8 egsmem    c
+800D8124 egsmisc   c
+800D87C0 egsfile   c
+800D94C8 egshog    c
+800D9EAC egsgeom   c
+
+# Psy-Q libraries (to be matched against the original library objects)
+800DD908 lib_sn    asm
+800DDB34 lib_etc   asm
+800DE864 lib_gpu   asm
+800E1C74 lib_gs    asm
+800E3FF4 lib_gte   asm
+800E649C lib_c     asm
+800E6E74 lib_cd    asm
+800EB040 lib_snd   asm
+800F89C4 lib_math  asm
+800F9414 lib_ds    asm
+800F9474 lib_pad   asm
+800FC094 lib_card  asm
+800FC494 lib_pad2  asm
