@@ -7,22 +7,34 @@
  * function that maspsx strips again (see tools/maspsx/README.md).
  */
 #if !defined(M2CTX) && !defined(PERMUTER)
-#define INCLUDE_ASM(FOLDER, NAME)                                  \
-    void __maspsx_include_asm_hack_##NAME() {                     \
-        __asm__(".text # maspsx-keep\n"                            \
+/*
+ * Each nonmatching .s is tagged by tools/split_parts.py: INC_PART 1 holds its
+ * strings/consts (emitted in place, like cc1's data), INC_PART 2 its code and jump
+ * tables (emitted with the buffered function bodies).
+ */
+#define INCLUDE_PART1(FOLDER, NAME)                                 \
+    __asm__(".pushsection .rodata\n"                               \
+            ".set INC_PART, 1\n"                                   \
+            ".include \"" FOLDER "/" #NAME ".s\"\n"                \
+            ".popsection\n");
+#define INCLUDE_PART2(FOLDER, NAME, HACK)                           \
+    void HACK() {                                                  \
+        __asm__(".pushsection .text # maspsx-keep\n"               \
                 "\t.align\t2 # maspsx-keep\n"                     \
                 "\t.set noreorder # maspsx-keep\n"                 \
                 "\t.set noat # maspsx-keep\n"                      \
+                ".set INC_PART, 2 # maspsx-keep\n"                 \
                 ".include \"" FOLDER "/" #NAME ".s\" # maspsx-keep\n" \
                 "\t.set reorder # maspsx-keep\n"                   \
-                "\t.set at # maspsx-keep\n");                      \
+                "\t.set at # maspsx-keep\n"                        \
+                ".popsection # maspsx-keep\n");                    \
     }
-#define INCLUDE_RODATA(FOLDER, NAME)                               \
-    void __maspsx_include_asm_hack_rodata_##NAME() {              \
-        __asm__(".section .rodata # maspsx-keep\n"                 \
-                ".include \"" FOLDER "/" #NAME ".s\" # maspsx-keep\n" \
-                ".text # maspsx-keep\n");                          \
-    }
+#define INCLUDE_ASM(FOLDER, NAME)  \
+    INCLUDE_PART1(FOLDER, NAME)    \
+    INCLUDE_PART2(FOLDER, NAME, __maspsx_include_asm_hack_##NAME)
+#define INCLUDE_RODATA(FOLDER, NAME) \
+    INCLUDE_PART1(FOLDER, NAME)      \
+    INCLUDE_PART2(FOLDER, NAME, __maspsx_include_asm_hack_rodata_##NAME)
 #endif
 
 #include "include_asm.h"

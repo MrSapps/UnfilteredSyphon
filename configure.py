@@ -79,6 +79,7 @@ def split(mod):
     subprocess.check_call(
         [sys.executable, "-m", "splat", "split", MODULES[mod]["yaml"]], cwd=ROOT
     )
+    subprocess.check_call([sys.executable, "tools/split_parts.py", f"asm/{mod}"], cwd=ROOT)
     m = MODULES[mod]
     patch_ld(ROOT / f"build/{m.get('ld_name', m['target'])}.ld")
 
@@ -170,7 +171,10 @@ def main():
             for o in objs:
                 src = source_for(o)
                 if src.endswith(".c"):
-                    n.build(o, "cc", src, variables=dict(origname=f"s/{Path(src).name}"))
+                    # INCLUDE_ASM'd files aren't seen by cpp's depfile
+                    incs = re.findall(r'INCLUDE_(?:ASM|RODATA)\("([^"]+)", (\w+)\)', (ROOT / src).read_text())
+                    n.build(o, "cc", src, implicit=[f"{d}/{f}.s" for d, f in incs],
+                            variables=dict(origname=f"s/{Path(src).name}"))
                 elif src.endswith(".s"):
                     n.build(o, "as", src, implicit=["include/macro.inc"])
                 else:
@@ -180,6 +184,7 @@ def main():
                 for p in (
                     f"config/undefined_syms_auto.{mod}.txt",
                     f"config/undefined_funcs_auto.{mod}.txt",
+                    f"config/{mod}.syms.ld",
                 )
                 if (ROOT / p).exists()
             ]

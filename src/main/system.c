@@ -1,17 +1,25 @@
 #include "common.h"
 #include "system.h"
-
-INCLUDE_ASM("asm/main/nonmatchings/system", SysChangeLevel);
+#include "gameobj.h"
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 
-INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010038);
+void SysChangeLevel(u32 level) {
+#line 329
+    ASSERT(level < SYS_LEVEL_COUNT);
+    gContinueLevel[0] = 0;
+    SysHalt(4);
+    gSysInfo.level = level;
+}
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010044);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysInit);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", CopyMsgToSysQueue);
+void CopyMsgToSysQueue(SysMsg *msg) {
+    EGSMiscMemcpy(&mSysMsgQueue.msgs[mSysMsgQueue.count], msg, sizeof(SysMsg) / 4);
+    mSysMsgQueue.count++;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysExecute);
 
@@ -19,7 +27,16 @@ INCLUDE_ASM("asm/main/nonmatchings/system", SysPostMessage);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", func_800153BC);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysFlushMsgQueue);
+void SysFlushMsgQueue(void) {
+    int i;
+
+    for (i = 0; i < SYS_MSG_QUEUE_MAX; i++) {
+        mSysMsgQueue.msgs[i].id = 0;
+        mSysMsgQueueNext.msgs[i].id = 0;
+    }
+    mSysMsgQueue.count = 0;
+    mSysMsgQueueNext.count = 0;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadData);
 
