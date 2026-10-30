@@ -83,6 +83,9 @@ void PlayerUseCAS();
 Gobj *iObjectFindNearbyLight(Gobj *obj, s32 type);
 
 void iPickupObjectTakenMsg(char *msg, s32 idx);
+void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
+void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
+s32 LevelDoEOL(u8 force);
 u8 WeaponHasMaxAmmo(s32 weapon);
 void StringMaxedAmmoMsg(char *buf, s16 weapon, u8 arg2, u8 arg3);
 void StringUndamagedFlakJacket(char *buf);
@@ -509,7 +512,34 @@ s32 UseKey(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", KeyDroppedByNPC);
+void KeyDroppedByNPC(Gobj *npc) {
+    VECTOR32 pos;
+    Gobj *key;
+    GameObjectInfo *info;
+    s32 ref = gameObjectsInfo[npc->id].refId;
+
+    if (ref != -1) {
+        key = ObjectMatchToRefID(ref, 0x63);
+        if (key->id != npc->id && !(*(u32 *)key & 0x22)) {
+            key->flags0 |= 2;
+            gameObjectsInfo[key->id].matrix = *(GOBJ_MATRIX *)npc->anim->frames[2];
+            info = &gameObjectsInfo[key->id];
+            info->matrix.m[0][0] = 0;
+            info->matrix.m[2][0] = 0;
+            info->matrix.m[1][1] = 0;
+            info->matrix.m[1][2] = 0;
+            MatrixNormal_0(&info->matrix, &info->matrix);
+            info->matrix.t[1] = -(npc->move->unk12C + 0x28);
+            key->anim->frame = (EGSFrame *)&info->matrix;
+            pos.vx = info->matrix.t[0];
+            pos.vy = -info->matrix.t[1];
+            pos.vz = info->matrix.t[2];
+            EGSFrameSetPosition(key->anim->frame, 0, &pos);
+            key->anim->unk00[8] &= ~8;
+            SysPostMessage(6, 5, key->id, key->id, 0, 0, 0, 0);
+        }
+    }
+}
 
 #ifdef NON_MATCHING
 /* regalloc: original keeps a second copy of obj in v1 for the else path */
@@ -653,7 +683,28 @@ void func_8008C058(Gobj *obj, s32 openerId) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C194);
+void func_8008C194(Gobj *obj) {
+    VECTOR32 pos;
+    s32 type = GOBJ_TYPE(obj->id);
+
+    pos.vx = obj->anim->frame->pos.vx;
+    pos.vy = obj->anim->frame->pos.vy;
+    pos.vz = obj->anim->frame->pos.vz;
+    pos.vy = -pos.vy;
+    if (type != 7 && type != 0x3B) {
+        if (!(obj->flags1 & 0x80)) {
+            SysPlaySong(0, 0x1E, 0, (s32)&pos);
+            if (obj->flags0 & 0x40) {
+                SysPlaySong(0, 0x15, (s32)obj, 0);
+            }
+        } else {
+            SysPlaySong(0, 0x13, 0, (s32)&pos);
+        }
+    } else {
+        SysPlaySong(0, 0x1E, 0, (s32)&pos);
+        SysPlaySong(0, 0x15, (s32)obj, 0);
+    }
+}
 
 void func_8008C2FC(Gobj *obj) {
     s32 type = GOBJ_TYPE(obj->id);
@@ -663,7 +714,36 @@ void func_8008C2FC(Gobj *obj) {
     }
 }
 
+#ifdef NON_MATCHING
+/* block layout: the original enters the loop at its test and places the LevelDoEOL exit first */
+/* Elevator: walk the linked objects for the next floor's object (type 0xE ends the level). */
+s32 func_8008C3A4(Gobj *obj) {
+    s16 floors = 1;
+    s32 ref = (u16)obj->id;
+    Gobj *rt;
+    s16 type;
+
+    while ((s16)(ref = gameObjectsInfo[(s16)ref].refId) != -1) {
+        type = GOBJ_TYPE((s16)ref);
+        if (type == 0xE) {
+            LevelDoEOL(0);
+            return 1;
+        }
+        if (type != 0x22) {
+            if (++floors >= 3) {
+                return 0;
+            }
+            rt = gameObjectsInfo[(s16)ref].runtime;
+            if (rt == NULL || rt->npcState != obj->npcState) {
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C3A4);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C534);
 

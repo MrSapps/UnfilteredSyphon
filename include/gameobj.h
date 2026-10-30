@@ -46,6 +46,8 @@ typedef struct GameObjectAnim {
     /* 0x00 */ u8 unk00[0xC];
     /* 0x0C */ struct EGSFrame *frame;
     /* 0x10 */ GameObjectModel *model;
+    /* 0x14 */ u8 unk14[4];
+    /* 0x18 */ struct EGSFrame **frames; /* per-bone frames (5 handles) */
 } GameObjectAnim;
 
 typedef struct GameObjectHealth {
