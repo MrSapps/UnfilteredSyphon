@@ -43,7 +43,7 @@ typedef struct TextChar {
 /* A string shown in a text window (0x1C bytes); ids are (serial << 8) | index. */
 typedef struct TextString {
     /* 0x00 */ TextChar *chars;
-    /* 0x04 */ u8 unk04[4];
+    /* 0x04 */ u32 startTick;
     /* 0x08 */ u32 endTick; /* -1: forever */
     /* 0x0C */ u16 length;
     /* 0x0E */ u16 xOffset;
@@ -78,7 +78,8 @@ extern TextString D_80120BE0[TEXT_STRING_MAX];
 extern TextWindow D_80121158[TEXT_WINDOW_MAX];
 extern void *gTextCamera;
 extern EGSListNode *D_8010FA50; /* persistent strings */
-extern s32 D_8010FAA8;          /* tick of the last TextUpdate */
+extern s32 D_8010FAA8;
+extern s32 D_8010FAAC;          /* tick of the last typing click */
 typedef struct TextRect {
     s16 x, y, w, h;
 } TextRect;
@@ -180,7 +181,7 @@ void TextInitialize(s32 createCamera) {
     for (i = 0; i < TEXT_STRING_MAX; i++, s++) {
         s->length = 0;
         s->endTick = 0;
-        *(s32 *)s->unk04 = 0;
+        s->startTick = 0;
         s->chars = NULL;
         s->next = NULL;
         s->flags = 0;
@@ -881,7 +882,75 @@ static void func_80085F24(TextString *s) {
     }
 }
 
+/* Move a colour channel a quarter of the way to its target (at least one step). */
+#define TEXT_FADE(cur, target)                    \
+    d = ((target) - (cur)) / 4;                   \
+    if ((u8)d) {                                  \
+        cur += d;                                 \
+    } else if ((cur) < (target)) {                \
+        cur++;                                    \
+    } else if ((cur) > (target)) {                \
+        cur--;                                    \
+    }
+
+#ifdef NON_MATCHING
+/* regalloc: original keeps t in s0 and rematerialises shown after the click */
+/* Typewriter reveal; returns 1 while the string is still appearing. */
+s32 func_80085F98(TextString *s) {
+    s32 t;
+    s32 shown;
+    s32 lead;
+    s32 count;
+    s32 i;
+    s32 j;
+    s32 d;
+    TextChar *ch;
+
+    t = gSystemTick - s->startTick;
+    if (!(s->flags & 2)) {
+        t = t * s->speed;
+        t = (t >= 0) ? t >> 12 : -(-t >> 12);
+    }
+    shown = s->length;
+    if (s->length >= t) {
+        shown = t;
+        if (s->length != 0 && gSystemTick != D_8010FAAC &&
+            ((s->flags & 4) || gSystemState == 7 || gSystemState == 4)) {
+            D_8010FAAC = gSystemTick;
+            SysPlaySong(1, 10, 0, 0);
+        }
+    }
+    lead = s->speed >> 12;
+    if (shown + lead >= 0 && shown < s->length) {
+        count = (s->flags & 2) ? 1 : lead;
+        for (i = 0; i < count; i++) {
+            j = shown + i;
+            if (j >= s->length) {
+                break;
+            }
+            if (j >= 0) {
+                s->chars[j].r = 0xFF;
+                s->chars[j].g = 0xFF;
+                s->chars[j].b = 0xFF;
+            }
+        }
+    }
+    ch = s->chars;
+    for (i = 0; i < shown; i++, ch++) {
+        TEXT_FADE(ch->r, s->r)
+        TEXT_FADE(ch->g, s->g)
+        TEXT_FADE(ch->b, s->b)
+    }
+    ch--;
+    /* the original compares b with g and g with b */
+    if (shown != s->length || ch->r != s->r || ch->b != s->g || ch->g != s->b) {
+        return 1;
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/text", func_80085F98);
+#endif
 
 #ifdef NON_MATCHING
 /*
