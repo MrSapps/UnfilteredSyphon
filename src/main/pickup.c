@@ -96,6 +96,12 @@ void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
+void func_80143424(Gobj *obj);              /* in an overlay */
+void func_8014236C(Gobj *obj);              /* in an overlay */
+void func_801422A0(s16 id);                 /* in an overlay */
+void func_80148CB4(Gobj *obj, s16 type);    /* in an overlay */
+s32 PathGetNumPoints(Gobj *obj);
+u8 PathObjectIsAtPoint(Gobj *obj, s32 point);
 void func_80148120(Gobj *obj);              /* in an overlay */
 Gobj *ObjectMatchToRefIDByCatID(s16 id, s32 cat);
 void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
@@ -1232,7 +1238,150 @@ INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008E418);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", ELEVATORObjDispatch);
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", INTERACTObjDispatch);
+void INTERACTObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    VECTOR32 other;
+    Gobj *obj = gameObjectsInfo[msg->to].runtime;
+    s32 type = GOBJ_TYPE(obj->id);
+    char *str;
+    u16 flags;
+    u8 show;
+
+    switch (msg->id) {
+    case 10:
+        if (obj->move != NULL) {
+            if (type == 0x64) {
+                func_80143424(obj);
+            } else {
+                func_8014236C(obj);
+            }
+        }
+        break;
+    case 6:
+        if (type == 0x59) {
+            InterfaceAddBomb(obj->id);
+        } else if (type != 0x58 || (obj->flags0 & 0x20)) {
+            CobjAddBulletCollisionBoxGobj(obj, 1, 0, type == 0x58 || type == 0x64);
+            CobjAddCollisionBoxGobj(obj, 1, 0, 1, 0);
+        }
+        break;
+    case 5:
+        if (type == 0x59) {
+            InterfaceDeleteBomb();
+        } else if (type != 0x58 || (obj->flags0 & 0x20)) {
+            CobjRemoveBulletCollisionBoxGobj(obj);
+            CobjRemoveCollisionBoxGobj(obj);
+        }
+        break;
+    case 18:
+        obj->flags0 |= 0x40;
+        if (!(obj->flags0 & 0x20)) {
+            PickupAddUseMsg(obj->id, 3);
+            if (!(obj->flags0 & 0x10)) {
+                pos.vx = obj->anim->frame->pos.vx;
+                pos.vy = obj->anim->frame->pos.vy;
+                pos.vz = obj->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+                other = gObjPlayer->move->unk10C;
+                SysPostMessage((pos.vy < other.vy + 0x69 && type != 0x6C) ? 0x24 : 0x14, 4, obj->id, gPlayerOffset,
+                               0, 0, 0, 0);
+            } else if (D_8010FCF8 != NULL && type == 0x58) {
+                str = D_8010FCF8(obj->id, 0x58);
+                if (str != NULL) {
+                    TextStatusMessage(str, 0);
+                }
+            }
+        }
+        break;
+    case 19:
+        obj->flags0 &= ~0x40;
+        if (!(obj->flags0 & 0x20)) {
+            PickupRemoveUseMsg(obj->id);
+            if (!(obj->flags0 & 0x10)) {
+                SysPostMessage(0x19, 3, obj->id, gPlayerOffset, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 20:
+    case 36:
+    case 39:
+        if (!(obj->flags0 & 0x20)) {
+            obj->flags0 |= 0x20;
+            gObjectInteractionCallback(obj->id);
+            pos.vx = obj->anim->frame->pos.vx;
+            pos.vy = obj->anim->frame->pos.vy;
+            pos.vz = obj->anim->frame->pos.vz;
+            pos.vy = -pos.vy;
+            SysPlaySong(1, 0x14, 0, (s32)&pos);
+            if (type != 0x58) {
+                if (obj->anim->unk00[0xA] & 8) {
+                    EGSAnimShowDetailDef(obj->anim);
+                }
+                EGSDisplayRemoveDamage(obj);
+                if (type == 0x59) {
+                    UseBeaconUpdate(obj);
+                }
+            } else {
+                obj->anim->unk00[8] &= ~8;
+                CobjAddBulletCollisionBoxGobj(obj, 1, 0, 1);
+                CobjAddCollisionBoxGobj(obj, 1, 0, 1, 0);
+            }
+            UseObject(obj->id);
+        }
+        break;
+    case 41:
+        if (obj->move != NULL && (type == 0x64 || type == 0x6C)) {
+            other.vx = obj->anim->frame->pos.vx;
+            other.vy = obj->anim->frame->pos.vy;
+            other.vz = obj->anim->frame->pos.vz;
+            other.vy = -other.vy;
+            *(s32 *)msg->data[0] = other.vy;
+        } else {
+            *(s32 *)msg->data[0] = 0;
+        }
+        *(u16 *)msg->data[1] = obj->flags0;
+        break;
+    case 42:
+        flags = *(u16 *)msg->data[1];
+        obj->flags0 = flags;
+        if (obj->move != NULL) {
+            if (type == 0x64) {
+                if (flags & 8) {
+                    obj->move->unk174 = PathGetNumPoints(obj) - 1;
+                    obj->move->unk17C = 0;
+                    SysPostMessage(0xA, 4, obj->id, obj->id, 0, 0, 0, 0);
+                }
+            } else if (type == 0x6C) {
+                if (flags & 8) {
+                    func_801422A0(obj->id);
+                } else if (obj->unk04 <= other.vy) { /* reads other before it is set */
+                    obj->flags23 = (obj->flags23 & ~4) | 2;
+                }
+            } else {
+                break;
+            }
+            other.vx = obj->anim->frame->pos.vx;
+            other.vy = obj->anim->frame->pos.vy;
+            other.vz = obj->anim->frame->pos.vz;
+            other.vy = -other.vy;
+            other.vy = *(s32 *)msg->data[0];
+            EGSFrameSetPosition(obj->anim->frame, 0, &other);
+        }
+        if (type != 0x58 && (obj->anim->unk00[0xA] & 8)) {
+            show = (*(u32 *)obj & 0x28) == 0x20;
+            if (type == 0x64 && show && obj->move != NULL && !PathObjectIsAtPoint(obj, PathGetNumPoints(obj) - 1)) {
+                show = 0;
+            }
+            if (show) {
+                EGSAnimShowDetailDef(obj->anim);
+            }
+        }
+        break;
+    case 2:
+        func_80148CB4(obj, type);
+        break;
+    }
+}
 
 #ifdef NON_MATCHING
 /* regalloc: v0/v1 swapped when reading the placement position */
