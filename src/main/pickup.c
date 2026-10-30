@@ -86,6 +86,7 @@ void iPickupObjectTakenMsg(char *msg, s32 idx);
 void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
 s32 LevelDoEOL(u8 force);
+void func_8008E418(Gobj *obj, s32 openerId);
 u8 WeaponHasMaxAmmo(s32 weapon);
 void StringMaxedAmmoMsg(char *buf, s16 weapon, u8 arg2, u8 arg3);
 void StringUndamagedFlakJacket(char *buf);
@@ -745,7 +746,19 @@ s32 func_8008C3A4(Gobj *obj) {
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C3A4);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C534);
+/* Door opens: the position computed here is never used. */
+void func_8008C534(Gobj *obj, s32 openerId) {
+    VECTOR32 pos;
+
+    pos.vx = obj->anim->frame->pos.vx;
+    pos.vy = obj->anim->frame->pos.vy;
+    pos.vz = obj->anim->frame->pos.vz;
+    pos.vy = -pos.vy;
+    SysPlaySong(0, 0x15, (s32)obj, 0);
+    SysPlaySong(0, 0x11, (s32)obj, 0);
+    obj->flags0 |= 8;
+    func_8008E418(obj, openerId);
+}
 
 #ifdef NON_MATCHING
 /* regalloc: the original loads the pickup byte into v0 and copies it to a2 */
