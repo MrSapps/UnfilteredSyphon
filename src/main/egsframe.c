@@ -867,24 +867,24 @@ int EGSFrameLookAtPoint_WithReferenceUpDirection(EGSFrame *frame, EGSFrame *ref,
     return ret;
 }
 
-#ifdef NON_MATCHING
-/* original spills the product to the stack and keeps the >0x7FFF test in a1 */
-int EGSFrameScale(MATRIX *m, VECTOR *scale) {
-    s32 v;
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-#define SCALE_ELEM(i, j, s)                                                                         \
-    v = EGSMathFIXMul(m->m[i][j], scale->s);                                                        \
-    m->m[i][j] = ((v > 0x7FFF ? 0x7FFF : v) < -0x7FFF) ? -0x7FFF : (v > 0x7FFF ? 0x7FFF : v);
-    SCALE_ELEM(0, 0, vx)
-    SCALE_ELEM(1, 0, vx)
-    SCALE_ELEM(2, 0, vx)
-    SCALE_ELEM(0, 1, vy)
-    SCALE_ELEM(1, 1, vy)
-    SCALE_ELEM(2, 1, vy)
-    SCALE_ELEM(0, 2, vz)
-    SCALE_ELEM(1, 2, vz)
-    SCALE_ELEM(2, 2, vz)
-#undef SCALE_ELEM
+static inline s32 iClampFix(s32 v) {
+    return (MIN(v, 0x7FFF) < -0x7FFF) ? -0x7FFF : MIN(v, 0x7FFF);
+}
+
+#ifdef NON_MATCHING
+/* original spills each product to an unused 0x10(sp) slot (inline/macro temp?), frame 0x28 */
+int EGSFrameScale(MATRIX *m, VECTOR *scale) {
+    m->m[0][0] = iClampFix(EGSMathFIXMul(m->m[0][0], scale->vx));
+    m->m[1][0] = iClampFix(EGSMathFIXMul(m->m[1][0], scale->vx));
+    m->m[2][0] = iClampFix(EGSMathFIXMul(m->m[2][0], scale->vx));
+    m->m[0][1] = iClampFix(EGSMathFIXMul(m->m[0][1], scale->vy));
+    m->m[1][1] = iClampFix(EGSMathFIXMul(m->m[1][1], scale->vy));
+    m->m[2][1] = iClampFix(EGSMathFIXMul(m->m[2][1], scale->vy));
+    m->m[0][2] = iClampFix(EGSMathFIXMul(m->m[0][2], scale->vz));
+    m->m[1][2] = iClampFix(EGSMathFIXMul(m->m[1][2], scale->vz));
+    m->m[2][2] = iClampFix(EGSMathFIXMul(m->m[2][2], scale->vz));
     return 0;
 }
 #else
