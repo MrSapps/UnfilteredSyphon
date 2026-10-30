@@ -13,6 +13,7 @@ extern s16 D_801420B4;                /* device object id */
 extern u8 D_801420B8;                 /* countdown running */
 extern u8 D_801420BC;                 /* bomb armed */
 extern void *D_80142070;              /* status messages */
+extern void *D_80142080;
 extern s32 D_80142074;
 extern s32 D_80142078;
 extern s32 D_8014207C;
@@ -71,11 +72,52 @@ static void func_8014165C(s16 id) {
     }
 }
 
+#ifdef NON_MATCHING
+/* two addu operand orders differ */
+static s32 func_801417B0(s16 id) {
+    int type;
+    s32 ref;
+    int found;
+
+    if (id != GOBJ_ID_666) {
+        type = gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type;
+        if (type == 0x24 || type == 0x7B) {
+            ref = gameObjectsInfo[id].refId;
+            if (ref != -1) {
+                found = ObjectInvisibleMatchToRefID(ref, 0x5D);
+                if (found != ref && (gameObjectsInfo[(s16)found].flags24 & 0x20)) {
+                    SysPlayXA(0x92, 0, 1);
+                }
+            }
+            TextStatusMessage(D_80142080, 0);
+            return 1;
+        }
+    }
+    return 3;
+}
+#else
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801417B0);
+#endif
 
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801418BC);
 
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_80141AC0);
+static void func_80141AC0(s16 id) {
+    int i;
+    s32 count;
+
+    if ((s16)gameObjectsInfo[id].refId != -1) {
+        LevelObjectiveAdd(0, id);
+        LevelObjectiveAdd(1, -1);
+        if (gObjectives != NULL) {
+            count = gObjectives->count;
+            for (i = 0; i < count; i++) {
+                if (gObjectives != NULL) {
+                    gObjectives->unk24 |= 1 << i;
+                }
+            }
+        }
+    }
+}
 
 static s32 func_80141B78(void) {
     return D_80142074;

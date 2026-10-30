@@ -27,10 +27,14 @@ void SysPlayXA(s32 track, s32 arg1, s32 arg2);
 void InterfaceCountdownAbort(void);
 
 typedef struct LevelObjectives {
-    /* 0x00 */ u8 unk00[0x10];
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ s32 count;
+    /* 0x0C */ u8 unk0C[4];
     /* 0x10 */ u32 completed; /* bit per objective */
     /* 0x14 */ u8 unk14[4];
     /* 0x18 */ s32 unk18;
+    /* 0x1C */ u8 unk1C[8];
+    /* 0x24 */ u32 unk24; /* bit per objective */
 } LevelObjectives;
 
 extern LevelObjectives *gObjectives;
@@ -42,6 +46,9 @@ void WeaponRemove(s32 weapon);
 void TextStatusMessage(void *msg, s32 arg1);
 void InterfaceStartCountdown(s32 seconds, s32 arg1, void (*done)());
 void SysPlaySong(s32 arg0, s32 song, s32 arg2, s32 arg3);
+
+int ObjectInvisibleMatchToRefID(s16 id, s32 type);
+extern u8 gPlayerFlashlight;
 
 extern s32 gPlayerOffset; /* object id of the player */
 extern u8 gDeviceDetonated;

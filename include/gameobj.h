@@ -6,8 +6,10 @@
 /* Per-level table of placed game objects (gameObjectsInfo[], 0x4C bytes each). */
 typedef struct GameObjectInfo {
     /* 0x00 */ s32 modelIndex; /* index into gameObjectsModelInfo */
-    /* 0x04 */ u8 unk04[0x2C];
-    /* 0x30 */ s32 unk30;
+    /* 0x04 */ u8 unk04[0x20];
+    /* 0x24 */ u16 flags24;
+    /* 0x26 */ u8 unk26[0xA];
+    /* 0x30 */ s32 refId; /* linked object id, -1 if none */
     /* 0x34 */ struct GameObjectRuntime *runtime;
     /* 0x38 */ u8 unk38[0x14];
 } GameObjectInfo; /* size 0x4C */
