@@ -474,46 +474,40 @@ fail:
 }
 
 #ifdef NON_MATCHING
-/* return value kept in v1 and copied, the original builds it in v0 */
+/* gcc peels the first loop iteration (i and the flag are known); the original keeps i = 0 and the flag in registers */
 s32 MovieWaitTillFinishDrawFrame(void) {
     u32 i = 0;
-    s32 err;
 
     if (!gMovieOpenFlag) {
         return 0x1C;
     }
-    err = 0;
-    if (!D_8013BBC3) {
-        while (i++ <= 1000000 && !D_8013BBC3) {
-        }
-        err = 0;
-        if (!D_8013BBC3) {
-            D_8013BBC3 = 1;
-            err = 0x27;
-        }
+    if (D_8013BBC3) {
+        return 0;
     }
-    return err;
+    while (i++ <= 1000000 && !D_8013BBC3) {
+    }
+    if (!D_8013BBC3) {
+        D_8013BBC3 = 1;
+        return 0x27;
+    }
+    return 0;
 }
 #else
 INCLUDE_ASM("asm/movie/nonmatchings/movie", MovieWaitTillFinishDrawFrame);
 #endif
 
-#ifdef NON_MATCHING
-/* return value kept in v1 and copied, the original builds it in v0 */
 s32 MoviePause(void) {
     if (!gMovieOpenFlag) {
         return 0x1C;
     }
-    if (!D_8013BBC5) {
-        StSetMask(1, 0, D_8013BB8C);
-        EGSFileStreamPause(1);
-        D_8013BBC5 = 1;
+    if (D_8013BBC5) {
+        return 0;
     }
+    StSetMask(1, 0, D_8013BB8C);
+    EGSFileStreamPause(1);
+    D_8013BBC5 = 1;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", MoviePause);
-#endif
 
 s32 MovieUnpause(void) {
     if (gMovieOpenFlag) {
@@ -540,25 +534,23 @@ s32 MovieClose(void) {
 }
 
 #ifdef NON_MATCHING
-/* return value kept in v1 and copied, the original builds it in v0 */
+/* gcc peels the first loop iteration (i and the flag are known); the original keeps i = 0 and the flag in registers */
 s32 EGSMovieWaitTillFinishDrawFrame(void) {
     u32 i = 0;
-    s32 err;
 
     if (!gMovieOpenFlag) {
         return 0x1C;
     }
-    err = 0;
-    if (!D_8013BBC3) {
-        while (i++ <= 1000000 && !D_8013BBC3) {
-        }
-        err = 0;
-        if (!D_8013BBC3) {
-            D_8013BBC3 = 1;
-            err = 0x27;
-        }
+    if (D_8013BBC3) {
+        return 0;
     }
-    return err;
+    while (i++ <= 1000000 && !D_8013BBC3) {
+    }
+    if (!D_8013BBC3) {
+        D_8013BBC3 = 1;
+        return 0x27;
+    }
+    return 0;
 }
 #else
 INCLUDE_ASM("asm/movie/nonmatchings/movie", EGSMovieWaitTillFinishDrawFrame);

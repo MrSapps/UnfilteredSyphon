@@ -25,7 +25,7 @@ extern u8 gEliminateRhoemerMsg[];
 
 static void func_801412D0();
 static void func_80141400(s16 id, s16 by);
-static void func_8014145C();
+static void func_8014145C(s32 id, s16 by);
 static s32 func_801415A0();
 static void func_80141624(void);
 static void func_8014165C(s16 id);
@@ -139,12 +139,11 @@ static void func_8014165C(s16 id) {
     }
 }
 
-#ifdef NON_MATCHING
-/* two addu operand orders differ */
 static s32 func_801417B0(s16 id) {
     int type;
     s32 ref;
     int found;
+    GameObjectInfo *info;
 
     if (id != GOBJ_ID_666) {
         type = gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type;
@@ -152,8 +151,11 @@ static s32 func_801417B0(s16 id) {
             ref = gameObjectsInfo[id].refId;
             if (ref != -1) {
                 found = ObjectInvisibleMatchToRefID(ref, 0x5D);
-                if (found != ref && (gameObjectsInfo[(s16)found].flags24 & 0x20)) {
-                    SysPlayXA(0x92, 0, 1);
+                if (found != ref) {
+                    info = &gameObjectsInfo[(s16)found];
+                    if (info->flags24 & 0x20) {
+                        SysPlayXA(0x92, 0, 1);
+                    }
                 }
             }
             TextStatusMessage(D_80142080, 0);
@@ -162,15 +164,11 @@ static s32 func_801417B0(s16 id) {
     }
     return 3;
 }
-#else
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801417B0);
-#endif
 
-#ifdef NON_MATCHING
-/* addu operand order of the flags24 lookups differs (as in func_801417B0). */
 static s32 func_801418BC(s16 id) {
     s32 ref;
     s32 ret;
+    GameObjectInfo *info;
     int type;
     int found;
 
@@ -179,7 +177,8 @@ static s32 func_801418BC(s16 id) {
     if (ref != -1) {
         type = GOBJ_TYPE(ref);
         if (type == 0x5D) {
-            if (gameObjectsInfo[(s16)ref].flags24 & 0x20) {
+            info = &gameObjectsInfo[(s16)ref];
+            if (info->flags24 & 0x20) {
                 ret = 0;
             } else if (!gPlayerFlashlight) {
                 ret = 0;
@@ -192,16 +191,16 @@ static s32 func_801418BC(s16 id) {
             ret = 0;
         } else {
             found = ObjectInvisibleMatchToRefID(ref, 0x5D);
-            if (found != ref && (gameObjectsInfo[(s16)found].flags24 & 0x20)) {
-                ret = 0;
+            if (found != ref) {
+                info = &gameObjectsInfo[(s16)found];
+                if (info->flags24 & 0x20) {
+                    ret = 0;
+                }
             }
         }
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801418BC);
-#endif
 
 static void func_80141AC0(s16 id) {
     int i;
