@@ -8,6 +8,7 @@ import rabbitizer
 
 sys.path.insert(0, str(Path(__file__).parent))
 from tu_analyze import functions  # noqa: E402
+from fingerprint import mask  # noqa: E402
 
 rabbitizer.config.regNames_gprAbiNames = rabbitizer.Abi.O32
 
@@ -34,7 +35,7 @@ def main():
     for i, (x, y) in enumerate(zip(words(built, ba, n), words(orig, oa, n))):
         dx = rabbitizer.Instruction(x, ba + 4 * i).disassemble()
         dy = rabbitizer.Instruction(y, oa + 4 * i).disassemble()
-        print(f"{'  ' if x == y else '!!'} {i*4:4X}  {dx:40s} {dy}")
+        print(f"{'  ' if x == y else ('~~' if mask(x) == mask(y) else '!!')} {i*4:4X}  {dx:40s} {dy}")
 
 
 if __name__ == "__main__":

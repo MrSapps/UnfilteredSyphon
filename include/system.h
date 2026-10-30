@@ -96,7 +96,7 @@ void EGSDeviceCdInit(void);
 void EGSDeviceControllerInit(void);
 void EGSDeviceControllerVibrate(int, int, int);
 void EGSDeviceRender(void);
-void EGSDisplayInit(s32);
+void EGSDisplayInit();
 void EGSDisplayReinitCameras(void);
 void EGSMiscMemcpy(void *dst, void *src, s32 words);
 void BreakDraw(void);

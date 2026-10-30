@@ -37,6 +37,17 @@
     INCLUDE_PART2(FOLDER, NAME, __maspsx_include_asm_hack_rodata_##NAME)
 #endif
 
+/*
+ * aspsx only uses $gp for small data *defined in the same file*. Until a TU's
+ * .sdata/.sbss is migrated into its C file, SDATA_LOCAL(sym) tells maspsx that sym
+ * lives in this file's small data (the block is skipped by the assembler).
+ */
+#if !defined(M2CTX) && !defined(PERMUTER)
+#define SDATA_LOCAL(sym) __asm__(".if 0\n.sdata\n" #sym ":\n.word 0\n.text\n.endif\n");
+#else
+#define SDATA_LOCAL(sym)
+#endif
+
 #include "include_asm.h"
 
 typedef signed char s8;

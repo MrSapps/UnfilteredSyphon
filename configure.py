@@ -138,7 +138,7 @@ def main():
             f" | {CC1} {CFLAGS} -o -"
             " | sed 's/^\\t\\.rdata$$/\\t.section .rodata/'"
             f" | {sys.executable} {MASPSX}"
-            " | ${cross}as $asflags -G8 -o $out -",
+            " | ${cross}as $asflags -o $out -",  # -G0: maspsx decides what is gp-relative
             description="CC $in",
             depfile="$out.d",
             deps="gcc",

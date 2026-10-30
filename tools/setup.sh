@@ -16,7 +16,8 @@ fi
 
 [ -d tools/m2c ] || git clone -q --depth 1 https://github.com/matt-kempster/m2c.git tools/m2c
 [ -d tools/asm-differ ] || git clone -q --depth 1 https://github.com/simonlindholm/asm-differ.git tools/asm-differ
-[ -d tools/maspsx ] || git clone -q --depth 1 https://github.com/mkst/maspsx.git tools/maspsx
+# maspsx ships a wine-based ASPSX.EXE test suite; drop it so editors never run it
+[ -d tools/maspsx ] || { git clone -q --depth 1 https://github.com/mkst/maspsx.git tools/maspsx && rm -rf tools/maspsx/aspsx tools/maspsx/tests; }
 
 echo "Copy the original files into orig/: scus_942.40, siphon.map, bin/*.ovl"
 echo "Then: . .venv/bin/activate && python3 tools/map2syms.py && python3 configure.py && ninja"

@@ -2,6 +2,12 @@
 #include "system.h"
 #include "gameobj.h"
 
+/* system.c's small data, still assembled from asm/main/data/sdata.sdata.s */
+SDATA_LOCAL(mSystemStateDepth)
+SDATA_LOCAL(gSystemState)
+SDATA_LOCAL(gSysHaltState)
+SDATA_LOCAL(D_8010F622)
+
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 
 void SysChangeLevel(u32 level) {
@@ -12,9 +18,74 @@ void SysChangeLevel(u32 level) {
     gSysInfo.level = level;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010044);
+void SysInit(u8 mode) {
+    int i;
+    GameObjectRuntime *rt;
+    GameObjectModel *model;
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysInit);
+    gSystemTick = 0;
+    EGSDebugInit(0);
+    EGSMemInit(0x801FF000);
+    EGSDebugInit(0);
+
+    if (mode == 3) {
+        for (i = 0; i < gLevelGameObjCount; i++) {
+            rt = gameObjectsInfo[i].runtime;
+            model = NULL;
+            if (rt != NULL) {
+                if (rt->anim != NULL) {
+                    model = rt->anim->model;
+                }
+                if (model != NULL && (model->flags & GOBJ_MODEL_FLAG_400000)) {
+                    model->display->unk10 = 0;
+                }
+            }
+        }
+    }
+
+    if (mode == 1) {
+#line 471
+        ASSERT(EGSDeviceGraphicsInit(384, 240, 0) == 0);
+        EGSDeviceCounterInitSystemClock();
+        EGSDeviceCdInit();
+        SysLoadTextureCacheOverlay("MOVIE.OVL", 0);
+        EGSDeviceControllerInit();
+        EGSDisplayInit();
+        if (mSystemStateDepth != mode) {
+            mSystemStateDepth = mode;
+        }
+    } else {
+        EGSDisplayInit();
+        EGSDisplayReinitCameras();
+        EGSDeviceRender();
+        EGSDeviceRender();
+        PauseTerrainStream();
+        UnpauseTerrainStream();
+        BreakDraw();
+    }
+
+    SysLoadOverlay("INIT.OVL", D_80145BF0, 0);
+    SYSCasInit();
+    SYSCameraInit();
+    SYSMovementInit();
+    SYSGameInit();
+    ShadowInit();
+
+    for (i = 0; i < SYS_MSG_QUEUE_MAX; i++) {
+        mSysMsgQueue.msgs[i].id = 0;
+    }
+    mSysMsgQueue.count = 0;
+
+    GameSysTableHook();
+    gLevelReady = 0;
+    SysPostMessage(1, SYS_MSG_IMMEDIATE, SYS_MSG_GLOBAL, SYS_MSG_GLOBAL, mode, 0, 0, 0);
+    if (mode != 1) {
+        TerrainUpdateActivation(1);
+    } else {
+        SysStatePush(4);
+    }
+    D_8010F622 = 0xFF;
+}
 
 void CopyMsgToSysQueue(SysMsg *msg) {
     EGSMiscMemcpy(&mSysMsgQueue.msgs[mSysMsgQueue.count], msg, sizeof(SysMsg) / 4);

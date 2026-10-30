@@ -24,3 +24,6 @@
 /tools/asm-differ/
 /tools/maspsx/
 __pycache__/
+
+# Editor
+/.vscode/
