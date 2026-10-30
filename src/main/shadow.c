@@ -41,10 +41,20 @@ typedef struct ShadowBox {
     /* 0x08 */ s16 z;
 } ShadowBox;
 
+typedef struct ShadowFrame {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+} ShadowFrame;
+
+/* View of GameObjectAnim */
 typedef struct ShadowAnim {
-    /* 0x00 */ u8 unk00[0x10];
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ u32 flags; /* 0x10: no shadow */
+    /* 0x0C */ ShadowFrame *frame;
     /* 0x10 */ ShadowModel *model;
-    /* 0x14 */ u8 unk14[8];
+    /* 0x14 */ u8 unk14[4];
+    /* 0x18 */ ShadowFrame **frames; /* per-bone frames */
     /* 0x1C */ ShadowBox *box;
 } ShadowAnim;
 
@@ -55,13 +65,14 @@ typedef struct ShadowGobj {
 
 extern EGSListNode *mShadowRequestList;
 extern Shadow mShadowPool[SHADOW_POOL_SIZE];
-extern u8 mShadowTexture[];
+extern u16 mShadowTexture[32][16]; /* 16x32 15-bit shadow blob, built by ShadowInit */
 extern void **gCamera;
 
 void EGSListAdd(EGSListNode **list, void *data);
 void EGSListRemove(EGSListNode **list, EGSListNode *node);
 void EGSDisplayDeletePoly(void *camera, void *poly);
 void LoadImage(ShadowRect *rect, void *data);
+void EGSMath_VectorModulus(void *v, s32 *out);
 typedef struct ShadowVec {
     /* 0x00 */ s32 vx;
     /* 0x04 */ s32 vy;
@@ -85,17 +96,28 @@ typedef struct ShadowObjState {
 } ShadowObjState;
 
 typedef struct ShadowObj {
-    /* 0x00 */ u8 unk00[0xC];
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ ShadowAnim *anim;
     /* 0x0C */ ShadowObjState *state;
-} ShadowObj;
+    /* 0x10 */ u8 unk10[0x12];
+    /* 0x22 */ u8 npcState; /* 1, 2: characters */
+} ShadowObj; /* GameObjectRuntime */
+
+#define SHADOW_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define SHADOW_MIN(a, b) ((a) > (b) ? (b) : (a))
+#define SHADOW_MAX3(a, b, c) ((a) < SHADOW_MAX2(b, c) ? SHADOW_MAX2(b, c) : (a))
+#define SHADOW_MAX2(a, b) ((a) < (b) ? (b) : (a))
+#define SHADOW_ABS(x) ((x) < 0 ? -(x) : (x))
+/* 20.12 fixed point to integer, rounding towards zero */
+#define SHADOW_FIX(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
 
 extern s32 gSniperMode;
 extern void *gSniperCam;
 
 void EGSDisplaySetupTransformLocalToScreen(void *camera, void *matrix);
 void EGSDisplayTransformWorldToScreen(ShadowVec *in, ShadowVec *out);
-u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count); /* still asm */
-u8 func_800915DC(ShadowObj *obj, u8 *rgb);                                           /* still asm */
+u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count);
+u8 func_800915DC(ShadowObj *obj, u8 *rgb);
 static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, s32 count, u8 *rgb);
 
 /* Texture description handed to EGSDisplayBuildPoly4FT */
@@ -112,9 +134,93 @@ void EGSDisplayBuildPoly4FT(Shadow *shadow, s32 xy0, s32 xy1, s32 xy2, s32 xy3, 
 void EGSDisplayAddPoly(void *camera, void *poly);
 static u8 func_80092468(ShadowObj *obj, Shadow *shadow, s32 count);
 
-INCLUDE_ASM("asm/main/nonmatchings/shadow", ShadowInit);
+typedef struct ShadowMatrix {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+} ShadowMatrix;
 
+/* Plane through point with the given normal */
+typedef struct ShadowPlane {
+    /* 0x00 */ ShadowVec point;
+    /* 0x10 */ ShadowVec normal;
+} ShadowPlane;
+
+#define setVector(v, x, y, z) ((v)->vx = (x), (v)->vy = (y), (v)->vz = (z))
+
+void EGSGeometryINT_PointProjectOnPlaneAlongY(ShadowVec *p, ShadowPlane *plane, u8 *ok, s32 *y);
+int EGSMathFIX_VectorScaleToLength(ShadowVec *v, s32 length, ShadowVec *out);
+extern const ShadowVec D_80013414; /* {0, 0x1000, 0}: up, shared with func_800918C0 */
+
+typedef struct ShadowSVec {
+    s16 vx, vy, vz, pad;
+} ShadowSVec;
+
+void TransposeMatrix(ShadowMatrix *in, ShadowMatrix *out);
+void SetRotMatrix(ShadowMatrix *m);
+void SetTransMatrix(ShadowMatrix *m);
+void ApplyRotMatrix(ShadowSVec *in, ShadowVec *out);
+void GTEMath_VectorNormal(ShadowVec *in, ShadowVec *out);
+
+#define SHADOW_HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+/* Mirror a footprint corner through the centre (y kept) */
+#define SHADOW_MIRROR(dst, src) ((dst)->vx = -(src)->vx, (dst)->vy = (src)->vy, (dst)->vz = -(src)->vz)
+
+#ifdef NON_MATCHING
+/* the original reloads v from the stack in each copy of the falloff macro but computes each ABS once */
+void ShadowInit(void) {
+    ShadowVec v;
+    s32 len;
+    s32 i;
+    s32 j;
+    s32 a;
+    s32 c;
+
+    mShadowRequestList = NULL;
+    for (i = 0; i < SHADOW_POOL_SIZE; i++) {
+        for (j = SHADOW_POLYS - 1; j >= 0; j--) {
+            mShadowPool[i].polys[j].data = 0;
+        }
+    }
+    for (i = 0; i < 32; i++) {
+        for (j = 0; j < 16; j++) {
+            v.vx = (j - 7) << 9;
+            v.vy = (i - 15) << 8;
+            v.vz = 0;
+            EGSMath_VectorModulus(&v, &len);
+            a = SHADOW_FIX((0x1000 - len) * 155 / 4);
+            c = SHADOW_FIX(a * (0x1000 - SHADOW_MAX(SHADOW_ABS(v.vy), SHADOW_ABS(v.vx)) / 4));
+            c = SHADOW_MIN(SHADOW_MAX2(c, 0), 31);
+            mShadowTexture[i][j] = c << 10 | c << 5 | 0x8000 | c;
+        }
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/shadow", ShadowInit);
+#endif
+
+#ifdef NON_MATCHING
+/* max-of-three: the original sign-extends only the y/z result and loads x straight into v0 */
+u8 func_800915DC(ShadowObj *obj, u8 *rgb) {
+    ShadowBox *box;
+    s16 size;
+    s32 level;
+
+    if (obj->anim->model->flags & 0x400000) {
+        box = obj->anim->box;
+        size = SHADOW_MAX3(box->x, box->y, box->z);
+        level = size / 16;
+        level = SHADOW_MAX(SHADOW_MIN(level, 255), 0);
+        rgb[2] = level;
+        rgb[1] = level;
+        rgb[0] = level;
+        return 1;
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/shadow", func_800915DC);
+#endif
 
 static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, s32 count, u8 *rgb) {
     ShadowTex tex;
@@ -156,7 +262,202 @@ static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, 
 
 INCLUDE_RODATA("asm/main/nonmatchings/shadow", D_80013360);
 
+#ifdef NON_MATCHING
+/* stack layout: the original overlays the bone tables with the half/centre vectors */
+u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count) {
+    ShadowAnim *anim;
+    s32 i;
+
+    if ((u32)(obj->npcState - 1) < 2) {
+        anim = obj->anim;
+        if ((anim->model->flags & 0x400000) && !(anim->flags & 0x10) && obj->state != NULL) {
+            ShadowVec bounds[2] = { { -32, 0, -16 }, { 32, 0, 16 } };
+            ShadowMatrix rot;
+            s32 bones[5] = { 0, 7, 1, 9, 3 };
+            ShadowVec radii[5] = { { 32, 0, 16 }, { 12, 0, 16 }, { 12, 0, 16 }, { 3, 0, 3 }, { 3, 0, 3 } };
+            ShadowVec pos;
+            ShadowMatrix inv = { 0 };
+            ShadowVec fwd;
+            ShadowVec halfX;
+            ShadowVec halfZ;
+            ShadowVec centerX;
+            ShadowVec centerZ;
+            ShadowVec extX;
+            ShadowVec extZ;
+            s32 hx;
+            s32 hz;
+
+            pos = obj->state->pos;
+            {
+                ShadowVec up = D_80013414;
+                ShadowVec side;
+
+                fwd.vx = anim->frame->m[0][2];
+                fwd.vy = anim->frame->m[1][2];
+                fwd.vy = -fwd.vy;
+                fwd.vz = anim->frame->m[2][2];
+                if (fwd.vy != 0) {
+                    fwd.vy = 0;
+                    GTEMath_VectorNormal(&fwd, &fwd);
+                }
+                side.vx = fwd.vz;
+                side.vy = 0;
+                side.vz = -fwd.vx;
+                rot.m[0][0] = side.vx;
+                rot.m[1][0] = side.vy;
+                rot.m[2][0] = side.vz;
+                rot.m[0][1] = up.vx;
+                rot.m[1][1] = up.vy;
+                rot.m[2][1] = up.vz;
+                rot.m[0][2] = fwd.vx;
+                rot.m[1][2] = fwd.vy;
+                rot.m[2][2] = fwd.vz;
+            }
+            TransposeMatrix(&rot, &inv);
+            inv.t[0] = rot.t[0];
+            inv.t[1] = rot.t[1];
+            inv.t[2] = rot.t[2];
+            SetRotMatrix(&inv);
+            SetTransMatrix(&inv);
+            for (i = 0; i < 5; i++) {
+                ShadowVec p;
+                ShadowSVec sv;
+                ShadowVec lo;
+                ShadowVec hi;
+
+                p.vx = anim->frames[bones[i]]->t[0];
+                p.vy = anim->frames[bones[i]]->t[1];
+                p.vz = anim->frames[bones[i]]->t[2];
+                p.vy = -p.vy;
+                p.vx -= pos.vx;
+                p.vy -= pos.vy;
+                p.vz -= pos.vz;
+                sv.vx = p.vx;
+                sv.vy = p.vy;
+                sv.vz = p.vz;
+                ApplyRotMatrix(&sv, &p);
+                hi.vx = p.vx + radii[i].vx;
+                hi.vz = p.vz + radii[i].vz;
+                lo.vx = p.vx - radii[i].vx;
+                lo.vz = p.vz - radii[i].vz;
+                if (bounds[1].vx < hi.vx) {
+                    bounds[1].vx = hi.vx;
+                }
+                if (lo.vx < bounds[0].vx) {
+                    bounds[0].vx = lo.vx;
+                }
+                if (bounds[1].vz < hi.vz) {
+                    bounds[1].vz = hi.vz;
+                }
+                if (lo.vz < bounds[0].vz) {
+                    bounds[0].vz = lo.vz;
+                }
+            }
+            {
+                ShadowVec axisX;
+                ShadowVec axisZ;
+
+                axisX.vx = rot.m[0][0];
+                axisX.vy = rot.m[1][0];
+                axisX.vz = rot.m[2][0];
+                axisZ.vx = rot.m[0][2];
+                axisZ.vy = rot.m[1][2];
+                axisZ.vz = rot.m[2][2];
+                hx = (bounds[1].vx - bounds[0].vx) / 2;
+                extX.vx = axisX.vx * hx;
+                extX.vy = axisX.vy;
+                extX.vz = axisX.vz * hx;
+                extX.vx = SHADOW_FIX(extX.vx);
+                extX.vy = SHADOW_FIX(extX.vy);
+                extX.vz = SHADOW_FIX(extX.vz);
+                hz = (bounds[1].vz - bounds[0].vz) / 2;
+                extZ.vx = axisZ.vx * hz;
+                extZ.vy = axisZ.vy;
+                extZ.vz = axisZ.vz * hz;
+                extZ.vx = SHADOW_FIX(extZ.vx);
+                extZ.vy = SHADOW_FIX(extZ.vy);
+                extZ.vz = SHADOW_FIX(extZ.vz);
+                hx = (bounds[1].vx + bounds[0].vx) / 2;
+                centerX.vx = axisX.vx * hx;
+                centerX.vy = axisX.vy;
+                centerX.vz = axisX.vz * hx;
+                centerX.vx = SHADOW_FIX(centerX.vx);
+                centerX.vy = SHADOW_FIX(centerX.vy);
+                centerX.vz = SHADOW_FIX(centerX.vz);
+                hz = (bounds[1].vz + bounds[0].vz) / 2;
+                centerZ.vx = axisZ.vx * hz;
+                centerZ.vy = axisZ.vy;
+                centerZ.vz = axisZ.vz * hz;
+                centerZ.vx = SHADOW_FIX(centerZ.vx);
+                centerZ.vy = SHADOW_FIX(centerZ.vy);
+                centerZ.vz = SHADOW_FIX(centerZ.vz);
+            }
+            center->vx = centerX.vx + centerZ.vx;
+            center->vy = centerX.vy + centerZ.vy;
+            center->vz = centerX.vz + centerZ.vz;
+            halfX.vx = SHADOW_HALF(extX.vx);
+            halfX.vy = extX.vy;
+            halfX.vz = SHADOW_HALF(extX.vz);
+            halfZ.vx = SHADOW_HALF(extZ.vx);
+            halfZ.vy = extZ.vy;
+            halfZ.vz = SHADOW_HALF(extZ.vz);
+            switch (count) {
+                case 4:
+                    points[0].vx = extZ.vx - extX.vx;
+                    points[0].vy = extZ.vy - extX.vy;
+                    points[0].vz = extZ.vz - extX.vz;
+                    points[1].vx = extZ.vx + extX.vx;
+                    points[1].vy = extZ.vy + extX.vy;
+                    points[1].vz = extZ.vz + extX.vz;
+                    SHADOW_MIRROR(&points[2], &points[0]);
+                    SHADOW_MIRROR(&points[3], &points[1]);
+                    break;
+                case 6:
+                    points[0].vx = extZ.vx - halfX.vx;
+                    points[0].vy = extZ.vy - halfX.vy;
+                    points[0].vz = extZ.vz - halfX.vz;
+                    points[1].vx = extZ.vx + halfX.vx;
+                    points[1].vy = extZ.vy + halfX.vy;
+                    points[1].vz = extZ.vz + halfX.vz;
+                    points[2] = extX;
+                    SHADOW_MIRROR(&points[3], &points[0]);
+                    SHADOW_MIRROR(&points[4], &points[1]);
+                    SHADOW_MIRROR(&points[5], &points[2]);
+                    break;
+                case 8:
+                    points[0].vx = extZ.vx - halfX.vx;
+                    points[0].vy = extZ.vy - halfX.vy;
+                    points[0].vz = extZ.vz - halfX.vz;
+                    points[1].vx = extZ.vx + halfX.vx;
+                    points[1].vy = extZ.vy + halfX.vy;
+                    points[1].vz = extZ.vz + halfX.vz;
+                    points[2].vx = extX.vx + halfZ.vx;
+                    points[2].vy = extX.vy + halfZ.vy;
+                    points[2].vz = extX.vz + halfZ.vz;
+                    points[3].vx = extX.vx - halfZ.vx;
+                    points[3].vy = extX.vy - halfZ.vy;
+                    points[3].vz = extX.vz - halfZ.vz;
+                    SHADOW_MIRROR(&points[4], &points[0]);
+                    SHADOW_MIRROR(&points[5], &points[1]);
+                    SHADOW_MIRROR(&points[6], &points[2]);
+                    SHADOW_MIRROR(&points[7], &points[3]);
+                    break;
+                default:
+                    return 0;
+            }
+            for (i = 0; i < count; i++) {
+                points[i].vx += center->vx;
+                points[i].vy += center->vy;
+                points[i].vz += center->vz;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/shadow", func_800918C0);
+#endif
 
 static u8 func_80092468(ShadowObj *obj, Shadow *shadow, s32 count) {
     ShadowVec center;
@@ -236,9 +537,67 @@ void ShadowProcess(void) {
     }
 }
 
+#ifdef NON_MATCHING
+const ShadowVec D_80013414 = { 0, 0x1000, 0 }; /* up; emitted after func_800918C0's templates */
+#else
 INCLUDE_RODATA("asm/main/nonmatchings/shadow", D_80013414);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/shadow", ShadowCalculateProjectionMatrix);
+u8 ShadowCalculateProjectionMatrix(ShadowVec *normal, ShadowMatrix *out) {
+    ShadowVec ax = { 0x1000, 0, 0 };
+    ShadowVec ay = D_80013414;
+    ShadowVec az = { 0, 0, 0x1000 };
+    ShadowVec t = { 0, 0, 0 };
+    static const ShadowPlane ground = { { 0, 0, 0 }, { 0, 0, 0 } };
+    ShadowPlane plane;
+    u8 ok;
+    s32 y0;
+    s32 y1;
+
+    ax.vx /= 32;
+    ax.vy /= 32;
+    ax.vz /= 32;
+    plane = ground;
+    plane.normal = *normal;
+    EGSGeometryINT_PointProjectOnPlaneAlongY(&ax, &plane, &ok, &y0);
+    setVector(&ax, ax.vx, y0, ax.vz);
+    ax.vx <<= 5;
+    ax.vy <<= 5;
+    ax.vz <<= 5;
+    if (ok) {
+        az.vx /= 32;
+        az.vy /= 32;
+        az.vz /= 32;
+        plane = ground;
+        plane.normal = *normal;
+        EGSGeometryINT_PointProjectOnPlaneAlongY(&az, &plane, &ok, &y1);
+        setVector(&az, az.vx, y1, az.vz);
+        az.vx <<= 5;
+        az.vy <<= 5;
+        az.vz <<= 5;
+        if (ok) {
+            if (ax.vx < -0x7E66 || ax.vx > 0x7E66 || ax.vy < -0x7E66 || ax.vy > 0x7E66 || ax.vz < -0x7E66 || ax.vz > 0x7E66) {
+                EGSMathFIX_VectorScaleToLength(&ax, 0x7E66, &ax);
+            }
+            if (az.vx < -0x7E66 || az.vx > 0x7E66 || az.vy < -0x7E66 || az.vy > 0x7E66 || az.vz < -0x7E66 || az.vz > 0x7E66) {
+                EGSMathFIX_VectorScaleToLength(&az, 0x7E66, &az);
+            }
+            out->m[0][0] = ax.vx;
+            out->m[1][0] = ax.vy;
+            out->m[2][0] = ax.vz;
+            out->m[0][1] = ay.vx;
+            out->m[1][1] = ay.vy;
+            out->m[2][1] = ay.vz;
+            out->m[0][2] = az.vx;
+            out->m[1][2] = az.vy;
+            out->m[2][2] = az.vz;
+            out->t[0] = t.vx;
+            out->t[1] = t.vy;
+            out->t[2] = t.vz;
+        }
+    }
+    return ok;
+}
 
 void ShadowRequestDraw(void *gobj) {
     EGSListAdd(&mShadowRequestList, gobj);

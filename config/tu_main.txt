@@ -47,6 +47,7 @@
 800C15E0 egsgte    asm
 800C28A0 egsdisp   c
 800C9EA0 egshmd    c
+800CB8D8 egshmdgte asm   # hand-written: EGSRotMatYXZ is libgte RotMatrixYXZ, rest uses sub/add/addi
 800CCE80 egssort   asm
 800D0E74 egsdev    c
 800D26AC egsanim   c

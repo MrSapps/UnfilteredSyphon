@@ -2,6 +2,7 @@
 #include "level.h"
 #include "system.h"
 #include "gobj.h"
+#include "weapon.h"
 
 /*
  * baseext.ovl holds the level code for BASEEXT, BASEEXT2 and BUNKER (iBaseextInit,
@@ -50,7 +51,6 @@ extern u8 D_80145454;       /* level music may start right away */
 #define OBJECTIVE_DONE(n) (gObjectives != NULL && (gObjectives->completed & (1 << (n))))
 
 /* main.exe */
-extern u32 D_80105F58[];    /* weapon table, 0x20 bytes per weapon; bit 14 = silenced */
 void SysExeTickQueueTimer(void (*cb)(s32), s32 ticks, s32 arg);
 void SysSoundQueueXA(s32 arg0, s32 track);
 void StringContactMeiXingMsg(void);
@@ -345,7 +345,7 @@ void BaseextAlert(void) {
 
 /* Weapon fired: an unsilenced shot alerts the base. */
 static void func_801422DC(s16 id, s16 weapon) {
-    if (!((D_80105F58[weapon * 8] >> 14) & 1) && !gLevelAlerted) {
+    if (!((gWeaponInfo[weapon].flags >> 14) & 1) && !gLevelAlerted) {
         if (id != gPlayerOffset) {
             if (SysSoundIsXAPlaying()) {
                 SysStopXA();

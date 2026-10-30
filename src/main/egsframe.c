@@ -182,12 +182,13 @@ int EGSFrameAddNode(EGSFrame *frame, EGSFrame *parent)
 }
 
 #ifdef NON_MATCHING
-/* prev lands in a2 instead of a1; the NULL-node exit is not merged into the epilogue */
+/* loop entry not threaded past the cur!=frame test; prev in a2 not a1 */
 int EGSFrameRemoveNode(EGSFrame *frame)
 {
+    EGSFrameNode *pnode;
+    EGSFrameNode *node;
     EGSFrame *cur;
     EGSFrame *prev;
-    EGSFrameNode *pnode;
 
     if (frame == NULL) {
         return 0;
@@ -209,11 +210,13 @@ int EGSFrameRemoveNode(EGSFrame *frame)
     if (frame == cur) {
         pnode->child = frame->node->next;
     } else {
-        for (; cur != NULL && cur != frame; cur = cur->node->next) {
+        while (cur != NULL && cur != frame) {
             prev = cur;
-            if (cur->node == NULL) {
+            node = cur->node;
+            if (node == NULL) {
                 return EGS_ERR_NONODE;
             }
+            cur = node->next;
         }
         if (prev->node == NULL) {
             return EGS_ERR_NONODE;
@@ -377,7 +380,60 @@ int EGSFrameSetRotationMatrixParent(EGSFrame *frame, MATRIX *m)
     return ret;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/egsframe", EGSFrameSetRotationMatrix);
+int EGSFrameSetRotationMatrix(EGSFrame *frame, EGSFrame *ref, MATRIX *m)
+{
+    MATRIX inv;
+    MATRIX tmp;
+    EGSFrame *parent;
+
+    if (frame == NULL) {
+        return EGS_ERR_NULL;
+    }
+    FlipY(m);
+    if (frame->node != NULL) {
+        parent = frame->node->parent;
+        if (ref == parent) {
+            frame->node->local.m[0][0] = m->m[0][0];
+            frame->node->local.m[0][1] = m->m[0][1];
+            frame->node->local.m[0][2] = m->m[0][2];
+            frame->node->local.m[1][0] = m->m[1][0];
+            frame->node->local.m[1][1] = m->m[1][1];
+            frame->node->local.m[1][2] = m->m[1][2];
+            frame->node->local.m[2][0] = m->m[2][0];
+            frame->node->local.m[2][1] = m->m[2][1];
+            frame->node->local.m[2][2] = m->m[2][2];
+        } else if (ref == NULL && parent != NULL) {
+            TransposeMatrix(&parent->matrix, &inv);
+            inv.t[0] = frame->node->parent->matrix.t[0];
+            inv.t[1] = frame->node->parent->matrix.t[1];
+            inv.t[2] = frame->node->parent->matrix.t[2];
+            MulMatrix0(&inv, m, &frame->node->local);
+        } else if (ref != NULL && parent == NULL) {
+            MulMatrix0(&ref->matrix, m, &frame->node->local);
+        } else {
+            MulMatrix0(&ref->matrix, m, &tmp);
+            TransposeMatrix(&frame->node->parent->matrix, &inv);
+            inv.t[0] = frame->node->parent->matrix.t[0];
+            inv.t[1] = frame->node->parent->matrix.t[1];
+            inv.t[2] = frame->node->parent->matrix.t[2];
+            MulMatrix0(&inv, &tmp, &frame->node->local);
+        }
+        frame->node->dirty = 1;
+    } else if (ref != NULL) {
+        MulMatrix0(&ref->matrix, m, &frame->matrix);
+    } else {
+        frame->matrix.m[0][0] = m->m[0][0];
+        frame->matrix.m[0][1] = m->m[0][1];
+        frame->matrix.m[0][2] = m->m[0][2];
+        frame->matrix.m[1][0] = m->m[1][0];
+        frame->matrix.m[1][1] = m->m[1][1];
+        frame->matrix.m[1][2] = m->m[1][2];
+        frame->matrix.m[2][0] = m->m[2][0];
+        frame->matrix.m[2][1] = m->m[2][1];
+        frame->matrix.m[2][2] = m->m[2][2];
+    }
+    return FlipY(m);
+}
 
 int EGSFrameSetMatrixParent(EGSFrame *frame, MATRIX *m)
 {
@@ -868,23 +924,37 @@ int EGSFrameLookAtPoint_WithReferenceUpDirection(EGSFrame *frame, EGSFrame *ref,
 }
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
 
-static inline s32 iClampFix(s32 v) {
-    return (MIN(v, 0x7FFF) < -0x7FFF) ? -0x7FFF : MIN(v, 0x7FFF);
+static inline void iFixMul(s32 a, s32 b, s32 *out) {
+    *out = EGSMathFIXMul(a, b);
 }
 
+#define CLAMP_FIX(v) MAX(MIN(v, 0x7FFF), -0x7FFF)
+
 #ifdef NON_MATCHING
-/* original spills each product to an unused 0x10(sp) slot (inline/macro temp?), frame 0x28 */
+/* prologue only: original saves/copies s1 (scale) before s0 (m) */
 int EGSFrameScale(MATRIX *m, VECTOR *scale) {
-    m->m[0][0] = iClampFix(EGSMathFIXMul(m->m[0][0], scale->vx));
-    m->m[1][0] = iClampFix(EGSMathFIXMul(m->m[1][0], scale->vx));
-    m->m[2][0] = iClampFix(EGSMathFIXMul(m->m[2][0], scale->vx));
-    m->m[0][1] = iClampFix(EGSMathFIXMul(m->m[0][1], scale->vy));
-    m->m[1][1] = iClampFix(EGSMathFIXMul(m->m[1][1], scale->vy));
-    m->m[2][1] = iClampFix(EGSMathFIXMul(m->m[2][1], scale->vy));
-    m->m[0][2] = iClampFix(EGSMathFIXMul(m->m[0][2], scale->vz));
-    m->m[1][2] = iClampFix(EGSMathFIXMul(m->m[1][2], scale->vz));
-    m->m[2][2] = iClampFix(EGSMathFIXMul(m->m[2][2], scale->vz));
+    s32 t;
+
+    iFixMul(m->m[0][0], scale->vx, &t);
+    m->m[0][0] = CLAMP_FIX(t);
+    iFixMul(m->m[1][0], scale->vx, &t);
+    m->m[1][0] = CLAMP_FIX(t);
+    iFixMul(m->m[2][0], scale->vx, &t);
+    m->m[2][0] = CLAMP_FIX(t);
+    iFixMul(m->m[0][1], scale->vy, &t);
+    m->m[0][1] = CLAMP_FIX(t);
+    iFixMul(m->m[1][1], scale->vy, &t);
+    m->m[1][1] = CLAMP_FIX(t);
+    iFixMul(m->m[2][1], scale->vy, &t);
+    m->m[2][1] = CLAMP_FIX(t);
+    iFixMul(m->m[0][2], scale->vz, &t);
+    m->m[0][2] = CLAMP_FIX(t);
+    iFixMul(m->m[1][2], scale->vz, &t);
+    m->m[1][2] = CLAMP_FIX(t);
+    iFixMul(m->m[2][2], scale->vz, &t);
+    m->m[2][2] = CLAMP_FIX(t);
     return 0;
 }
 #else

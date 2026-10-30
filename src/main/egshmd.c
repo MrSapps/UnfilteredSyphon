@@ -2,6 +2,7 @@
 
 #include "game.h"
 #include "egsmath.h"
+#include "egsframe.h"
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
@@ -28,14 +29,44 @@ typedef struct DamageEntry {
     /* 0x10 */ s32 values[11];
 } DamageEntry;
 
+typedef struct HMDSkeleton {
+    /* 0x00 */ u8 unk00[4];
+    /* 0x04 */ s32 boneCount;
+} HMDSkeleton;
+
 typedef struct DamageCache {
     /* 0x00 */ s32 count;
     /* 0x04 */ DamageEntry *entries;
+    /* 0x08 */ u8 unk08[0x18];
+    /* 0x20 */ HMDSkeleton *skeleton;
 } DamageCache;
 
+struct EGSHMD;
+
+/*
+ * One running hierarchical animation. The keyframe stream at cur starts with an
+ * 0xFn marker byte and a frame code (0xFC = end, 1 = translation included), then a
+ * big-endian 16-bit bone mask, then per masked bone a delta-packed rotation.
+ */
 typedef struct HMDAnimObj {
-    /* 0x00 */ u8 unk00[0x28];
+    /* 0x00 */ u8 unk00[4];
+    /* 0x04 */ s16 id;
+    /* 0x06 */ u8 unk06[2];
+    /* 0x08 */ union {
+        u32 all; /* bit 28: loop, bit 29: blending */
+        u8 steps; /* blend steps left */
+    } flags;
+    /* 0x0C */ u8 *start;
+    /* 0x10 */ u8 *cur;
+    /* 0x14 */ s32 code;
+    /* 0x18 */ u8 unk18[4];
+    /* 0x1C */ void (*callback)(struct EGSHMD *hmd, s32 event, s32 arg);
+    /* 0x20 */ u32 callbackFlags; /* 0x04000000 | code: on that frame, 0x10000000: on loop */
+    /* 0x24 */ s32 callbackArg;
     /* 0x28 */ s32 type;
+    /* 0x2C */ s32 loops;
+    /* 0x30 */ u8 unk30[4];
+    /* 0x34 */ SVECTOR targets[1]; /* blend target rotation per bone */
 } HMDAnimObj;
 
 typedef struct HMDAnimNode {
@@ -51,10 +82,10 @@ typedef struct EGSHMD {
     /* 0x08 */ u8 unk08[8];
     /* 0x10 */ DamageCache *damage;
     /* 0x14 */ u8 unk14[4];
-    /* 0x18 */ void *anim;
+    /* 0x18 */ EGSFrame **frames; /* one per bone */
     /* 0x1C */ u8 unk1C[4];
     /* 0x20 */ HMDAnimNode *animList;
-    /* 0x24 */ void *unk24;
+    /* 0x24 */ SVECTOR *rotations; /* one per bone */
 } EGSHMD;
 
 /* Display object handed to the HMD sorters (cf. GameObjectAnim). */
@@ -105,7 +136,10 @@ void *EGSMemMalloc(u32 size);
 void GsClearOt(u16 offset, u16 point, GsOT *ot);
 void *EGSDisplayPacketAreaMalloc(s32 size);
 void EGSDisplayPacketAreaFree(EGSHMD *hmd);
-void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, s32 arg2);
+void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply);
+s32 Fooble(s32 a, s32 b);
+void EGSRotMatYXZ(SVECTOR *rot, MATRIX *mat);
+void EGSDisplayHAStop(EGSHMD *hmd, s32 id);
 
 s32 HMDInitOT(void)
 {
@@ -244,7 +278,7 @@ void EGSDisplayAnimateHMD(EGSHMD *hmd)
     HMDAnimNode *node = hmd->animList;
     HMDAnimObj *obj;
 
-    if (hmd->anim == NULL || hmd->unk24 == NULL) {
+    if (hmd->frames == NULL || hmd->rotations == NULL) {
         return;
     }
     while (node != NULL) {
@@ -286,23 +320,173 @@ s32 Fooble(s32 a, s32 b)
     return a;
 }
 
+#ifdef NON_MATCHING
+/* regalloc/scheduling in the delta-decode branches; vz store not tail-merged */
+void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
+{
+    MATRIX mat;
+    EGSHMD *h;
+    HMDSkeleton *skel;
+    u8 blend;
+    s32 code;
+    u16 mask;
+    u16 weight;
+    EGSFrame **frames;
+    u8 *data;
+    u8 *start;
+    SVECTOR *rot;
+    EGSFrame *frame;
+    EGSFrameNode *node;
+    EGSFrameNode *cur;
+    s32 b;
+    s32 n;
+    s32 i;
+
+    weight = 0x7FFF;
+    data = obj->cur;
+    blend = (obj->flags.all >> 29) & 1;
+    h = hmd;
+    frames = h->frames;
+    skel = h->damage->skeleton;
+    if ((data[0] & 0xF0) != 0xF0) {
+        return;
+    }
+    code = data[1];
+    obj->code = code;
+    if (!blend) {
+        if (code == 0xFC && (obj->flags.all & 0x10000000)) {
+            data = obj->cur = obj->start;
+            code = data[1];
+            obj->code = code;
+        }
+        if ((obj->callbackFlags & 0x04000000) && (obj->callbackFlags & 0xFF) == code && obj->callback != NULL) {
+            start = obj->start;
+            obj->callback(hmd, code | 0x04000000, obj->callbackArg);
+            if (obj->start != start) {
+                return;
+            }
+        }
+    } else {
+        n = obj->flags.steps;
+        if (code == 0xFC) {
+            data = obj->cur = obj->start;
+            code = data[1];
+        }
+        if (obj->type == 0x8000) {
+            weight = 0x2B2D;
+        } else if (obj->type == 0x4000) {
+            weight = 0x54D2;
+        }
+        if (--n == 0) {
+            obj->flags.all &= 0xDFFFFF00;
+        } else {
+            obj->flags.all = (obj->flags.all & ~0xFF) | n;
+        }
+    }
+    data += 2;
+    mask = (data[0] << 8) | data[1];
+    data += 2;
+    for (i = 0; i < skel->boneCount; i++, mask >>= 1) {
+        b = data[0];
+        rot = &h->rotations[i];
+        frame = frames[i];
+        if (blend) {
+            node = frame->node;
+            if (weight & 1) {
+                rot->vx = Fooble(rot->vx, obj->targets[i].vx);
+                rot->vy = Fooble(rot->vy, obj->targets[i].vy);
+                rot->vz = Fooble(rot->vz, obj->targets[i].vz);
+                EGSRotMatYXZ(rot, &mat);
+                mat.t[0] = node->local.t[0];
+                mat.t[1] = node->local.t[1];
+                mat.t[2] = node->local.t[2];
+                frame->node->local = mat;
+                frame->node->dirty = 1;
+            }
+            weight >>= 1;
+        }
+        if (mask & 1) {
+            if (blend) {
+                if (!(b & 0x80)) {
+                    data += 2;
+                } else if (b & 0x40) {
+                    data += 4;
+                } else if (!(b & 0x20)) {
+                    data += 3;
+                } else {
+                    data += 6;
+                }
+                if (code == 1 || i == 0) {
+                    data += 3;
+                }
+            } else {
+                if (!(b & 0x80)) {
+                    u8 b1 = data[1];
+                    data += 2;
+                    rot->vx += (s32)(b << 25) >> 27;
+                    rot->vy += (s32)((b << 30) | ((b1 & 0xE0) << 22)) >> 27;
+                    rot->vz += (s32)(b1 << 27) >> 27;
+                } else if (b & 0x40) {
+                    u8 b1 = data[1];
+                    u8 b2 = data[2];
+                    u8 b3 = data[3];
+                    data += 4;
+                    rot->vx += (s32)((b << 26) | ((b1 & 0xF0) << 18)) >> 22;
+                    rot->vy += (s32)((b1 << 28) | ((b2 & 0xFC) << 20)) >> 22;
+                    rot->vz += ((s32)(b2 << 30) >> 22) | b3;
+                } else if (!(b & 0x20)) {
+                    u8 b1 = data[1];
+                    u8 b2 = data[2];
+                    data += 3;
+                    rot->vx += (s32)((b << 27) | ((b1 & 0xC0) << 19)) >> 25;
+                    rot->vy += (s32)((b1 << 26) | ((b2 & 0x80) << 18)) >> 25;
+                    rot->vz += (s32)(b2 << 25) >> 25;
+                } else {
+                    if (b & 0x10) {
+                        b |= 0xE0;
+                    } else {
+                        b &= 0x1F;
+                    }
+                    rot->vx = ((u8)b << 8) + data[1];
+                    rot->vy = (data[2] << 8) + data[3];
+                    rot->vz = (data[4] << 8) + data[5];
+                    data += 6;
+                }
+                if (code == 1) {
+                    mat.t[0] = (s8)data[0];
+                    mat.t[1] = -(data[1] << 24) >> 24;
+                    mat.t[2] = (s8)data[2];
+                    data += 3;
+                } else {
+                    cur = frame->node;
+                    if (i == 0) {
+                        data += 3;
+                    }
+                    mat.t[0] = cur->local.t[0];
+                    mat.t[1] = cur->local.t[1];
+                    mat.t[2] = cur->local.t[2];
+                }
+                if (apply) {
+                    EGSRotMatYXZ(rot, &mat);
+                    frame->node->local = mat;
+                    frame->node->dirty = 1;
+                }
+            }
+        }
+    }
+    obj->cur = data;
+    if (!blend && data[1] == 0xFC) {
+        if ((obj->flags.all & 0x10000000) && --obj->loops != 0) {
+            if ((obj->callbackFlags & 0x10000000) && obj->callback != NULL) {
+                obj->callback(hmd, 0x10000000, obj->callbackArg);
+            }
+        } else {
+            EGSDisplayHAStop(hmd, obj->id);
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayHAnimate);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSRotMatYXZ);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayOnScreen);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplaySetGTEAmbient);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplaySetupGTE_SP);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplaySortHMD);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", func_800CC418);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplaySortSmallHMD);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayGetSectorBox);
-
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayPointColor);
 

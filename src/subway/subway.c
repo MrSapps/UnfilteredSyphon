@@ -1,4 +1,5 @@
 #include "common.h"
+#include "weapon.h"
 #include "level.h"
 #include "system.h"
 #include "gobj.h"
@@ -197,7 +198,6 @@ extern SubwayLevData *gLevData;
 extern u16 gCurrentWeapon;
 extern s32 gSniperMode;
 extern s32 xaLevelStartIndex[];
-extern u32 D_80105F58[][8]; /* per-weapon info, 0x20 bytes each */
 extern u8 gObjPathScaleVector[];
 void LevelAddingObjectiveInstruction(void);
 
@@ -608,7 +608,7 @@ static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
             } else {
                 weapon = gCurrentWeapon;
             }
-            if (((D_80105F58[(s16)weapon][0] >> 8) & 7) == 1 || ((weapon - 6) & 0xFFFF) < 2) {
+            if (((gWeaponInfo[(s16)weapon].flags >> 8) & 7) == 1 || ((weapon - 6) & 0xFFFF) < 2) {
                 func_801420D8(rt, by);
             }
         }

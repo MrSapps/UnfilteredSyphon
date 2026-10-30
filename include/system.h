@@ -223,7 +223,7 @@ s32 EGSDeviceGraphicsInit(s32 w, s32 h, s32);
 void EGSDeviceCounterInitSystemClock(void);
 void EGSDeviceCdInit(void);
 void EGSDeviceControllerInit(void);
-void EGSDeviceControllerVibrate(int, int, int);
+s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
 void EGSDeviceRender(void);
 void EGSDisplayInit();
 void EGSDisplayReinitCameras(void);

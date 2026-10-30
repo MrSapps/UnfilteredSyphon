@@ -1,4 +1,5 @@
 #include "common.h"
+#include "weapon.h"
 #include "level.h"
 #include "system.h"
 #include "gameobj.h"
@@ -35,7 +36,6 @@ extern s16 D_8014405C;   /* object id of the path mover */
 extern u8 D_80144060;    /* lock code hint played */
 extern u8 D_80144064;    /* hostage shot */
 
-extern u32 D_80105F58[][8]; /* per-weapon info, 0x20 bytes each */
 extern void *gElevatorCallSwitchMsg;
 extern void *gAramovMsg;
 extern void *gHitNPCCallback;
@@ -339,7 +339,7 @@ static void func_80141E50(s16 id) {
 
 /* Firing a loud weapon alerts Phagan. */
 static void func_80141F40(s32 arg0, s16 weapon) {
-    if (!gMissionFailed && !((D_80105F58[weapon][0] >> 14) & 1)) {
+    if (!gMissionFailed && !((gWeaponInfo[weapon].flags >> 14) & 1)) {
         func_801417CC(0);
     }
 }

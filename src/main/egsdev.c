@@ -55,12 +55,31 @@ typedef struct EmergencySprite {
     /* 0x12 */ s16 h;
 } EmergencySprite;
 
+typedef struct PadAxis {
+    s32 vx, vy, vz, pad;
+} PadAxis;
+
 /* Per-port pad state (0x3C bytes); PadInitDirect writes the raw buffers. */
 typedef struct Controller {
     /* 0x00 */ u8 status;
-    /* 0x01 */ u8 present;
-    /* 0x02 */ u8 unk02[0x3A];
+    /* 0x01 */ u8 present; /* pad id byte (0x41 digital, 0x73 analog...), 0 when absent */
+    /* 0x02 */ u8 analog;
+    /* 0x03 */ u8 unk03;
+    /* 0x04 */ u16 buttons; /* active high */
+    /* 0x06 */ u8 rx;
+    /* 0x07 */ u8 ry;
+    /* 0x08 */ u8 lx;
+    /* 0x09 */ u8 ly;
+    /* 0x0A */ u8 unk0A[2];
+    /* 0x0C */ PadAxis axis[3]; /* d-pad, left stick, right stick (-0x7F..0x7F) */
 } Controller;
+
+#define PAD_UP 12
+#define PAD_RIGHT 13
+#define PAD_DOWN 14
+#define PAD_LEFT 15
+#define PAD_SELECT 8
+#define PAD_START 11
 
 extern s32 D_8010FEC0;          /* colour mode */
 extern u8 D_8010FEC4;           /* system clock running */
@@ -126,38 +145,27 @@ void ResetGraph();
 void func_80139680(s32 arg0); /* movie.ovl (libcard) */
 
 /* Hand out a free periodic-callback slot (marked with CALLBACK_FREE). */
-#ifdef NON_MATCHING
-/* 5 insns short: search loop keeps separate slot and func pointers in the original */
 /* global until EGSDeviceCounterSetPeriodicCallback is C */
 Callback *FindFreeCallback(void) {
-    Callback *cb;
-    s32 i = 0;
+    s32 i;
 
     if (!D_8010FEDC) {
         D_8010FEDC = 1;
         for (i = 4; i >= 0; i--) {
             gCallbackArray[i].period = CALLBACK_FREE;
         }
-        i = 0;
     }
-    cb = gCallbackArray;
-    do {
-        if (cb->period == CALLBACK_FREE) {
-            cb->period = 0;
-            return cb;
+    for (i = 0; i < 5; i++) {
+        if (gCallbackArray[i].period == CALLBACK_FREE) {
+            gCallbackArray[i].period = 0;
+            return &gCallbackArray[i];
         }
-        cb++;
-        i++;
-    } while (i < 5);
+    }
     return NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", FindFreeCallback);
-#endif
 
-#ifdef NON_MATCHING
-/* tick reload is scheduled above the frame-time store here */
 void EGSDeviceRender(void) {
+    volatile s32 *tick;
     u32 ticks;
 
     D_8010FED0++;
@@ -166,19 +174,18 @@ void EGSDeviceRender(void) {
         D_8010FED8 = 0;
     }
     D_801228A8[D_8010FED8] = D_80110214;
-    ticks = D_80110214 - D_8010FEC8;
+    tick = &D_80110214;
+    ticks = *tick - D_8010FEC8;
     if (GetVideoMode() != 0 ? ticks >= 50 : ticks >= 60) {
+        s32 now = *tick;
         s32 frames = D_8010FED0;
 
         D_8010FED0 = 0;
-        D_8010FEC8 = D_80110214;
+        D_8010FEC8 = now;
         D_8010FECC = frames;
     }
     EGSDisplayDraw();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", EGSDeviceRender);
-#endif
 
 void EGSDeviceSetVideoType(s16 mode) {
     SetVideoMode(mode);
@@ -281,7 +288,155 @@ s32 EGSDeviceControllerInit(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", func_800D133C);
+/* Bit n of a bit array that may start at an unaligned address. */
+static inline u8 TestBit(u8 *bits, s32 n) {
+    u32 misalign = (u32)bits & 3;
+    s32 word;
+    s32 bit;
+
+    if (misalign != 0) {
+        n += misalign * 8;
+        bits = (u8 *)((u32)bits & ~3);
+    }
+    word = n >> 5;
+    bit = 1 << (n & 0x1F);
+    return (((u32 *)bits)[word] & bit) != 0;
+}
+
+static inline void SetBit(u8 *bits, s32 n) {
+    u32 misalign = (u32)bits & 3;
+    s32 word;
+    s32 bit;
+
+    if (misalign != 0) {
+        n += misalign * 8;
+        bits = (u8 *)((u32)bits & ~3);
+    }
+    word = n >> 5;
+    bit = 1 << (n & 0x1F);
+    ((u32 *)bits)[word] |= bit;
+}
+
+static inline void ClearBit(u8 *bits, s32 n) {
+    u32 misalign = (u32)bits & 3;
+    s32 word;
+    s32 bit;
+
+    if (misalign != 0) {
+        n += misalign * 8;
+        bits = (u8 *)((u32)bits & ~3);
+    }
+    word = n >> 5;
+    bit = 1 << (n & 0x1F);
+    ((u32 *)bits)[word] &= ~bit;
+}
+
+s32 PadGetState(s32 port);
+s32 PadInfoMode(s32 port, s32 term, s32 offs);
+s32 PadSetActAlign(s32 port, u8 *table);
+void PadSetAct(s32 port, u8 *table, s32 len);
+extern u8 D_8010FEB8[]; /* actuator alignment table */
+
+#define ABS(x) ((x) >= 0 ? (x) : -(x))
+#define BUTTON_BITS(c) ((u8 *)&(c)->buttons)
+
+/* Decode one raw pad packet into a Controller. */
+void func_800D133C(Controller *c, u8 *buf, s32 port) {
+    s32 state;
+    s32 v;
+    s32 i;
+    s32 x;
+    s32 z;
+    s32 az;
+
+    if (buf[0] == 0xFF) {
+        c->status = 0xFF;
+        c->present = 0;
+        return;
+    }
+    c->status = buf[0];
+    c->present = buf[1];
+    c->analog = 0;
+    c->buttons = ~((buf[2] << 8) | buf[3]);
+    c->rx = buf[4];
+    c->ry = buf[5];
+    c->lx = buf[6];
+    c->ly = buf[7];
+    state = PadGetState(port);
+    if (PadInfoMode(port, 2, 0) != 0 && D_80110204 != 0 && state == 6) {
+        if (PadSetActAlign(port, D_8010FEB8) != 0) {
+            PadSetAct(port, D_80110200, 2);
+        }
+    }
+    c->axis[0].vx = 0;
+    c->axis[0].vy = 0;
+    c->axis[0].vz = 0;
+    if (TestBit(BUTTON_BITS(c), PAD_UP)) {
+        c->axis[0].vz = 0x7F;
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_DOWN)) {
+        c->axis[0].vz -= 0x7F;
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_RIGHT)) {
+        c->axis[0].vx += 0x7F;
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_LEFT)) {
+        c->axis[0].vx -= 0x7F;
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_UP) && TestBit(BUTTON_BITS(c), PAD_DOWN)) {
+        ClearBit(BUTTON_BITS(c), PAD_UP);
+        ClearBit(BUTTON_BITS(c), PAD_DOWN);
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_RIGHT) && TestBit(BUTTON_BITS(c), PAD_LEFT)) {
+        ClearBit(BUTTON_BITS(c), PAD_RIGHT);
+        ClearBit(BUTTON_BITS(c), PAD_LEFT);
+    }
+    if (TestBit(BUTTON_BITS(c), PAD_UP) || TestBit(BUTTON_BITS(c), PAD_DOWN)) {
+        ClearBit(BUTTON_BITS(c), PAD_RIGHT);
+        ClearBit(BUTTON_BITS(c), PAD_LEFT);
+    } else if (TestBit(BUTTON_BITS(c), PAD_RIGHT) || TestBit(BUTTON_BITS(c), PAD_LEFT)) {
+        ClearBit(BUTTON_BITS(c), PAD_UP);
+        ClearBit(BUTTON_BITS(c), PAD_DOWN);
+    }
+    if (c->present == 0x23 || c->present == 0x53 || c->present == 0x73) {
+        c->analog = 1;
+        v = c->lx - 0x7F;
+        if (v >= 0x80) {
+            v = 0x7F;
+        }
+        c->axis[1].vx = v;
+        c->axis[1].vy = 0;
+        c->axis[1].vz = (c->ly - 0x7F < 0x80) ? 0x7F - c->ly : -0x7F;
+        v = c->rx - 0x7F;
+        if (v >= 0x80) {
+            v = 0x7F;
+        }
+        c->axis[2].vx = v;
+        c->axis[2].vy = 0;
+        c->axis[2].vz = (c->ry - 0x7F < 0x80) ? 0x7F - c->ry : -0x7F;
+        if (c->axis[0].vx == 0 && c->axis[0].vy == 0 && c->axis[0].vz == 0) {
+            for (i = 1; i < 3; i++) {
+                z = c->axis[i].vz;
+                az = ABS(z);
+                if (az > 0x60 || ABS(c->axis[i].vx) > 0x60) {
+                    x = c->axis[i].vx;
+                    if (ABS(x) < az) {
+                        if (z > 0x60) {
+                            SetBit(BUTTON_BITS(c), PAD_UP);
+                        } else if (z < -0x60) {
+                            SetBit(BUTTON_BITS(c), PAD_DOWN);
+                        }
+                    } else if (x > 0x60) {
+                        SetBit(BUTTON_BITS(c), PAD_RIGHT);
+                    } else if (x < -0x60) {
+                        SetBit(BUTTON_BITS(c), PAD_LEFT);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
 
 /* Parse both ports; a multitap (0x80) fills four controller records per port. */
 s32 EGSDeviceControllerPoll(void) {
@@ -372,17 +527,17 @@ void EGSDeviceUnhang(void) {
 }
 
 #ifdef NON_MATCHING
-/* original indexes buf[i] each pass; GCC here strength-reduces to a pointer */
+/* v0/v1 swapped for the font-table index and loaded byte */
 /* Print `digits` hex digits of n with the debug font sprite (crash screen). */
 void EmergencyPrintNum(EmergencySprite *sprite, u32 n, s32 digits) {
-    char buf[24];
+    char buf[16];
     s32 i;
     u8 c;
 
     sprintf(buf, D_8010FEF8, n);
     for (i = 0; i < digits; i++) {
         c = buf[i];
-        if ((u32)(c - '0') < 10) {
+        if (c >= '0' && c <= '9') {
             sprite->u = D_80107B30[c - '0'][0];
             sprite->v = D_80107B30[c - '0'][1];
         } else {
@@ -398,7 +553,106 @@ void EmergencyPrintNum(EmergencySprite *sprite, u32 n, s32 digits) {
 INCLUDE_ASM("asm/main/nonmatchings/egsdev", EmergencyPrintNum);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", ServiceCallbacks);
+/* BIOS thread control block of the interrupted thread (only the saved registers used) */
+typedef struct EGSThreadContext {
+    /* 0x00 */ u8 unk00[0x7C];
+    /* 0x7C */ u32 sp;
+    /* 0x80 */ u32 fp;
+    /* 0x84 */ u32 ra;
+    /* 0x88 */ u32 epc;
+} EGSThreadContext;
+
+/* Current thread's context, kept by the BIOS at 0x110 */
+#define CURRENT_THREAD_CONTEXT (*(EGSThreadContext **)0x110)
+
+extern int gSystemState;
+extern u8 gSysHaltState;
+extern EGSRect D_8010FF00;           /* crash screen clear rect */
+extern EmergencySprite D_80107B50;   /* crash screen digit sprite */
+extern u8 D_80122678[];              /* crash screen DR_MODE */
+void MainLoop(void);
+void GsSwapDispBuff(void);
+void SetSprt(void *p);
+u16 GetClut(s32 x, s32 y);
+u16 GetTPage(s32 tp, s32 abr, s32 x, s32 y);
+void SetDrawMode(void *p, s32 dfe, s32 dtd, s32 tpage, void *tw);
+
+/*
+ * VSync IRQ handler: counts the system tick and runs the periodic callbacks. If the
+ * main loop stops sorting frames for too long it shows a crash screen, and Select or
+ * Start then restarts MainLoop.
+ */
+void ServiceCallbacks(void) {
+    EGSThreadContext *tc = CURRENT_THREAD_CONTEXT;
+    u32 elapsed;
+    EGSRect rect;
+    Controller *ctrl;
+    Callback *cb;
+    Callback *next;
+    u32 sp;
+    u32 pc;
+
+    elapsed = lastCounterTick - lastCounterTickSort;
+    lastCounterTick++;
+    if (gSystemState == 2) {
+        lastCounterTickSort = lastCounterTick;
+    }
+    if (!HANG && elapsed > 400 && (tc->epc >> 28) != 1) {
+        rect = D_8010FF00;
+        if (elapsed < 302) {
+            ResetGraph(1);
+            GsSwapDispBuff();
+            ClearImage(&rect, 20, 20, 40);
+            DrawSync(0);
+        } else if (elapsed < 304) {
+            SetSprt(&D_80107B50);
+            D_80107B50.clut = GetClut(0x300, 0x1E3);
+            D_80107B50.x = -170;
+            D_80107B50.y = 100;
+            ResetGraph(1);
+            GsSwapDispBuff();
+            SetDrawMode(D_80122678, 0, 0, GetTPage(1, 1, 0x340, 0), NULL);
+            DrawPrim(D_80122678);
+            EmergencyPrintNum(&D_80107B50, tc->epc, 8);
+            D_80107B50.x += 20;
+            EmergencyPrintNum(&D_80107B50, tc->ra, 8);
+            D_80107B50.x += 20;
+            EmergencyPrintNum(&D_80107B50, tc->sp, 8);
+        }
+        EGSDeviceControllerPoll();
+        EGSDeviceControllerRead(&ctrl, 0);
+        if (TestBit(BUTTON_BITS(ctrl), PAD_SELECT) || TestBit(BUTTON_BITS(ctrl), PAD_START)) {
+            sp = tc->sp;
+            pc = tc->epc;
+            tc->sp = 0x801FFFF8;
+            tc->epc = (u32)MainLoop;
+            gSysHaltState = 2;
+            gSystemState = 2;
+            HANG = 1;
+            HANGpc = pc;
+            HANGra = tc->ra;
+            HANGsp = sp;
+        }
+    }
+    if (D_8010FEC4 == 1) {
+        D_80110214 += 1;
+    }
+    cb = D_80110218;
+    if (cb != NULL && D_8011021C != 1) {
+        D_8011021C = 1;
+        do {
+            next = cb->next;
+            if (cb->counter == 1) {
+                cb->counter = cb->period;
+                cb->func(cb);
+            } else {
+                cb->counter--;
+            }
+            cb = next;
+        } while (cb != NULL);
+        D_8011021C = 0;
+    }
+}
 
 s32 EGSDeviceCounterInitSystemClock(void) {
     D_80110214 = 0;
@@ -486,29 +740,23 @@ s32 EGSDeviceGetFPS(s32 *out) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* uses one more saved register */
 s32 EGSDeviceFrameRateLastNFrames(s16 frames) {
     s32 then = D_8010FED8 - frames;
     s32 now = D_801228A8[D_8010FED8];
-    s32 hz = 60;
+    s32 hz;
     u32 fps;
 
     if (GetVideoMode() != 0) {
         hz = 50;
+    } else {
+        hz = 60;
     }
     if (then < 0) {
         then += 100;
     }
     fps = (u32)(frames * hz) / (u32)(now - D_801228A8[then]);
-    if (fps > (u32)(hz >> 1)) {
-        fps = hz >> 1;
-    }
-    return fps;
+    return (fps > (u32)(hz >> 1)) ? hz >> 1 : fps;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", EGSDeviceFrameRateLastNFrames);
-#endif
 
 s32 EGSDeviceGetFrameCountInfo(s32 *count, s32 *max, s32 **times) {
     *count = D_8010FED8;

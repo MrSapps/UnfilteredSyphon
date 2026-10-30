@@ -2,6 +2,7 @@
 #include "system.h"
 #include "level.h"
 #include "gobj.h"
+#include "weapon.h"
 
 /*
  * menu.ovl: the pause menu (options, controller setup, objectives and level map).
@@ -14,11 +15,6 @@
 /* color plus primitive code, as one word */
 #define setColorCode(p, c) (*(u32 *)&(p)->r = (c))
 
-/* LevelObjectives.unk0C holds the texts of the second objective list (count at 0x08) */
-#define OBJECTIVES2_TEXTS(obj) (*(char ***)(obj)->unk0C)
-/* ... and its first eight bytes hold the main objective count and texts */
-#define OBJECTIVES_COUNT(obj) (*(s32 *)&(obj)->unk00[0])
-#define OBJECTIVES_TEXTS(obj) (*(char ***)&(obj)->unk00[4])
 
 /* The highlight rectangle words hold two s16 halves (x, y; 10.6 fixed point) */
 #define XY(v) (*(ScreenPos *)&(v))
@@ -29,6 +25,15 @@
     } else {                                      \
         (cur) = (target);                         \
     }
+
+/* Objective index of a map-menu row (each objective row has two text ids) */
+#define OBJECTIVE_INDEX(row) ((D_8013F7D0[row].textIds - &D_8013FE20[1]) / 2)
+#define MAP_LOCATION(row) \
+    ((row) != 0 ? &mObjectiveMapLocations[gSysInfo.level][OBJECTIVE_INDEX(row)] : &mPlayerMapLocation)
+#define OBJECTIVE_ON_MAP(row) (gObjectives != NULL && (gObjectives->unk1C & (1 << OBJECTIVE_INDEX(row))))
+
+/* 20.12 fixed point to int, rounding toward zero */
+#define FIXED_INT(x) ((x) < 0 ? -(-(x) >> 12) : (x) >> 12)
 
 #define setSemiTrans(p, abe) ((abe) ? ((p)->code |= 2) : ((p)->code &= ~2))
 
@@ -149,6 +154,14 @@ typedef struct MenuMemory {
     /* 0x13BF8 */ MenuLine lines[132];
 } MenuMemory;
 
+/* Where an objective (or the player) is drawn on the level map */
+typedef struct MapLocation {
+    /* 0x00 */ u8 unk00;
+    /* 0x01 */ u8 map; /* map icon index, 0xFF: not on any map */
+    /* 0x02 */ s8 x;
+    /* 0x03 */ s8 y;
+} MapLocation;
+
 /* "bin/menu.c" (the asserts here don't use the usual "s/..." path) */
 extern char D_8013807C[];
 #define ASSERT_MENU(cond, line) if (!(cond)) EGSDebugAssert(1, 0, D_8013807C, line)
@@ -172,6 +185,8 @@ extern char *D_8013F790;
 extern char *D_8013F794;
 extern char *D_8013F798; /* objectives heading */
 extern char *D_8013F79C; /* completed heading */
+extern char *D_8013F7A0; /* map: "you are here" */
+extern char *D_8013F7A4; /* map: objective location */
 extern char *D_8013F7A8;
 extern char *D_8013F7AC[]; /* controller configuration names */
 extern u8 D_8013F7C0; /* menu text window */
@@ -235,6 +250,11 @@ extern MenuQuad *D_8013FEC4;
 extern u16 D_8013FEC8[];
 extern MenuStackEntry D_8013FED4[];
 extern u8 mSfxSampleCanBePlayedAgain;
+extern MapLocation *mObjectiveMapLocations[];
+extern MapLocation mPlayerMapLocation;
+extern s32 (*D_8013FB4C[])(s32 map, VECTOR32 *pos, ScreenPos *out); /* map locator per level */
+extern s8 D_8013FAD0[][6]; /* player arrow shape per direction */
+extern char *D_8013F740; /* "you" row text */
 extern TextChar *mMap; /* weapon icons */
 
 /* main.exe */
@@ -274,17 +294,6 @@ void NPCSetShooting(s32 on);
 void NPCPutAllOnRadar(s32 on);
 s32 WeaponGetNextID(s32 weapon);
 void WeaponSelect(Gobj *obj, s32 weapon, s32 arg2);
-typedef struct WeaponInfo {
-    /* 0x00 */ char *name; /* icon file, "NAME.xxx" */
-    /* 0x04 */ u8 unk04[5];
-    /* 0x09 */ u8 clipSize;
-    /* 0x0A */ u8 unk0A[2];
-    /* 0x0C */ u32 flags; /* bits 0-2: clips per pickup - 1 */
-    /* 0x10 */ u8 unk10[8];
-    /* 0x18 */ s16 nameMsg; /* index into gUseMsgs */
-    /* 0x1A */ u8 unk1A[6];
-} WeaponInfo;
-extern WeaponInfo gWeaponInfo[];
 extern char *gUseMsgs[];
 extern char *gButtonStrings[];
 extern s32 gPacketAreaMallocSize;
@@ -293,6 +302,9 @@ u8 JoystickGetFlightControls(void);
 u8 LevelZoom(s32 arg0);
 void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
 void TextSetWindowMini(u8 window, s32 on);
+void FlushAllStreamRequests(void);
+s32 ratan2(s32 y, s32 x);
+void func_8013A744(s32 cursor);
 void *EGSDisplayPacketAreaMalloc(u32 size);
 s32 LevelGetMenuHogHeader(void);
 void InterfaceBuildMenuBackgroundPolys(MenuQuad *polys);
@@ -301,7 +313,7 @@ u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
 void TextSetStringSpeed(u16 str, s32 speed);
 void OpenHogForStreaming(char *path, s32 header);
 void EGSDisplayFadeOff(void);
-s32 EGSTextureCreate(EGSTexture *tex, void *tim);
+s32 EGSTextureCreate(EGSTexture *tex);
 s32 EGSTextureCreateSprite(EGSTexture *tex, TextChar *sprite, s16 x, s16 y, s16 w, u16 h);
 s32 EGSTextureLoad(EGSTexture *tex);
 void TextActivateAllWindows(s32 on);
@@ -1132,7 +1144,72 @@ void func_8013A60C(s32 cursor) {
     }
 }
 
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013A744);
+void func_8013A744(s32 cursor) {
+    s32 old;
+    MapLocation *loc;
+    s32 map;
+    s32 i;
+    s32 xy;
+    TextChar *chars;
+
+    if (D_8013F7C4 > 0 && D_8013F7C4 < D_8013FCC0[8]) {
+        setColorCode(&D_8013FEC0[D_8013F7C4 - 1].q[0], 0x28C08000);
+    }
+    old = D_8013F7C4;
+    func_8013A220(cursor);
+    if (cursor == 0x7F) {
+        return;
+    }
+    loc = MAP_LOCATION(D_8013F7C4);
+    map = loc->map;
+    if (map != 0xFF && (D_8013F7C4 == 0 || OBJECTIVE_ON_MAP(D_8013F7C4))) {
+        func_8013AE8C();
+        mMap[map].unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &mMap[map]);
+        for (i = 0; i < D_8013FCC0[8]; i++) {
+            if (D_8013F7D0[i].count > 0) {
+                loc = MAP_LOCATION(i);
+                if (loc->map == map) {
+                    xy = MAP_XY(loc->x - 0x39, loc->y - 5);
+                    if (i != 0 && OBJECTIVE_ON_MAP(i)) {
+                        if (D_8013F7C4 == i) {
+                            D_8013FEC0[i - 1].q[0].z = 0;
+                        } else {
+                            setColorCode(&D_8013FEC0[i - 1].q[0], 0x28C08000);
+                            D_8013FEC0[i - 1].q[0].z = 1;
+                        }
+                        InterfacePlaceQuad(&D_8013FEC0[i - 1].q[0], xy, 1, 1);
+                        InterfacePlaceQuad(&D_8013FEC0[i - 1].q[1], xy, 2, 2);
+                    } else if (D_8013FEBC->data == 0) {
+                        EGSDisplayAddPoly(gInterfaceWindow, &D_8013FEBC[0]);
+                        EGSDisplayAddPoly(gInterfaceWindow, &D_8013FEBC[1]);
+                    }
+                }
+            }
+        }
+        if (D_8013FE66 != 0xFFFF) {
+            TextRemoveString(D_8013FE66);
+            D_8013FE66 = 0xFFFF;
+        }
+    } else if (D_8013FE66 == 0xFFFF) {
+        chars = &D_8013FE6C[271];
+        if (D_8013F7C4 == 0) {
+            D_8013FE66 = TextAddPersistentString(D_8013F7A0, chars, -0x39, -0x11);
+        } else {
+            D_8013FE66 = TextAddPersistentString(D_8013F7A4, chars, -0x39, -0xD);
+        }
+        if (D_8013FE66 != 0xFFFF) {
+            TextSetStringSpeed(D_8013FE66, 0x2000);
+            TextSetStringJustification(D_8013FE66, 0);
+            TextSetStringIntensity(D_8013FE66, 0xF0, 0xB4, 0xB4);
+        }
+    } else if (old == 0 || D_8013F7C4 == 0) {
+        if (D_8013F7C4 == 0) {
+            D_8013FE66 = TextReplaceString(D_8013FE66, D_8013F7A0);
+        } else {
+            D_8013FE66 = TextReplaceString(D_8013FE66, D_8013F7A4);
+        }
+    }
+}
 
 void func_8013AC64(u32 value) {
     MenuBox *box = D_8013FE78;
@@ -1440,7 +1517,7 @@ void func_8013B8F8(s32 cursor) {
 
     switch (D_8013F7C4) {
         case 0:
-            func_80139150(item, ((s32(*)(s32, s32, s32))EGSDeviceControllerVibrate)(5, 0, 0) == 7, 0);
+            func_80139150(item, EGSDeviceControllerVibrate(5, 0, 0) == 7, 0);
             break;
         case 1:
             func_80139150(item, JoystickGetFlightControls(), 0);
@@ -1475,7 +1552,7 @@ void func_8013B8F8(s32 cursor) {
     item = &D_8013FBD8[D_8013F7C4];
     switch (D_8013F7C4) {
         case 0:
-            func_80139150(item, ((s32(*)(s32, s32, s32))EGSDeviceControllerVibrate)(5, 0, 0) == 7, 1);
+            func_80139150(item, EGSDeviceControllerVibrate(5, 0, 0) == 7, 1);
             break;
         case 1:
             func_80139150(item, JoystickGetFlightControls(), 1);
@@ -1544,7 +1621,7 @@ void func_8013CD40(u32 tag) {
         weapon = D_8013F7D0[tag].textIds - D_8013FE20;
         icon = &mMap[tag];
         tex.tim = D_8013FE78;
-        EGSTextureCreate(&tex, D_8013FE78);
+        EGSTextureCreate(&tex);
         EGSTextureCreateSprite(&tex, icon, POSITION.x + 99, POSITION.y - 45, 0, 0);
         if (weapon == 1) {
             func_80139590(&tex);
@@ -1614,7 +1691,141 @@ void func_8013D04C(void) {
     }
 }
 
+#ifdef NON_MATCHING
+/* player arrow: angle +0x100/+0x1000 get combined, and the marker quad load is ordered differently */
+void func_8013D19C(void) {
+    char name[24];
+    EGSTexture tex;
+    ScreenPos pt[2];
+    VECTOR32 pos;
+    s32 arrow[6];
+    MenuItem *item = D_8013F7D0;
+    char **row = D_8013FB98[0];
+    s32 maps = 0;
+    s32 i;
+    s32 j;
+    s32 k;
+    s32 angle;
+    MenuQuad *quad;
+    EGSFrame *frame;
+    s32 cursor;
+
+    row[1] = D_8013F740;
+    item->count = 2;
+    item->strings = row;
+    row += 2;
+    item->textIds = D_8013FE20;
+    item++;
+    ASSERT_MENU(gObjectives != NULL, 3666);
+    ASSERT_MENU(gObjectives->primaryCount < 9, 3667);
+    if (D_8013F7CC != 8) {
+        for (i = 0; i < 16; i++) {
+            mMap[i].h = 0;
+            mMap[i].w = 0;
+        }
+        EGSDisplayBuildPoly4F(&D_8013FEBC[0], 0x5CFFFF, 0, 0, 0, 0);
+        EGSDisplayBuildPoly4F(&D_8013FEBC[1], 0, 0, 0, 0, 0);
+        D_8013FEBC[0].z = 1;
+        D_8013FEBC[1].z = 2;
+        for (i = 0; i < 8; i++) {
+            EGSDisplayBuildPoly4F(&D_8013FEC0[i].q[0], 0, 0, 0, 0, 0);
+            EGSDisplayBuildPoly4F(&D_8013FEC0[i].q[1], 0, 0, 0, 0, 0);
+            D_8013FEC0[i].q[1].z = 2;
+        }
+        tex.tim = D_8013FE78;
+        FlushAllStreamRequests();
+        for (i = 0; i < 16; i++) {
+            sprintf(name, "MAP%d.TIM", i + 1);
+            D_8013F7CC = 8;
+            if (StreamHogBlock(name, D_8013FE78, 0xF000, 0, NULL) != 0) {
+                maps = i;
+                break;
+            }
+            StreamSynchronous();
+            EGSTextureCreate(&tex);
+            EGSTextureCreateSprite(&tex, &mMap[i], POSITION.x - 0x39, POSITION.y - 5, 0, 0);
+            if (i == 0) {
+                func_80139590(&tex);
+            } else {
+                tex.image.cx = tex.image.cy = tex.image.cw = tex.image.ch = 0;
+            }
+            DrawSync(0);
+            EGSTextureLoad(&tex);
+            mMap[i].unk24 = 3;
+        }
+        D_8013F7CC = 8;
+        if (maps > 0 && D_8013FB4C[gSysInfo.level] != NULL) {
+            for (i = 0; i < maps; i++) {
+                pos = gObjPlayer->move->pos;
+                quad = D_8013FEBC;
+                if (D_8013FB4C[gSysInfo.level](i, &pos, &pt[0])) {
+                    mPlayerMapLocation.map = i;
+                    frame = gObjPlayer->anim->frame;
+                    pos.vx += frame->m[0][2];
+                    pos.vz += frame->m[2][2];
+                    D_8013FB4C[gSysInfo.level](i, &pos, &pt[1]);
+                    pos.vy = pt[1].y - pt[0].y;
+                    pos.vx = pt[1].x - pt[0].x;
+                    angle = ratan2(pos.vy, pos.vx) + 0x100;
+                    if (angle < 0) {
+                        angle += 0x1000;
+                    }
+                    angle = FIXED_INT(angle * 8);
+                    for (k = 0; k < 6; k++) {
+                        arrow[k] = D_8013FAD0[angle][k];
+                    }
+                    for (k = 0; k < 2; k++, quad++) {
+                        *(s32 *)&quad->x0 = MAP_XY(pt[0].x + arrow[2] - 0x39, pt[0].y + arrow[3] - 5);
+                        *(s32 *)&quad->x1 = MAP_XY(pt[0].x + arrow[0] - 0x39, pt[0].y + arrow[1] - 5);
+                        *(s32 *)&quad->x2 = MAP_XY(pt[0].x - 0x39, pt[0].y - 5);
+                        *(s32 *)&quad->x3 = MAP_XY(pt[0].x + arrow[4] - 0x39, pt[0].y + arrow[5] - 5);
+                        for (j = 0; j < 6; j++) {
+                            if (arrow[j] > 0) {
+                                arrow[j]++;
+                            } else if (arrow[j] < 0) {
+                                arrow[j]--;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            if (i == maps) {
+                mPlayerMapLocation.map = 0xFF;
+            }
+        } else {
+            mPlayerMapLocation.map = 0xFF;
+        }
+    } else {
+        setColorCode(D_8013FEBC, 0x285CFFFF);
+    }
+    if (mObjectiveMapLocations[gSysInfo.level] != NULL) {
+        for (i = 0; i < gObjectives->primaryCount; i++) {
+            if (gObjectives != NULL && (gObjectives->unk18 & (1 << i)) && !(gObjectives->completed & (1 << i)) &&
+                !(gObjectives->unk14 & (1 << i))) {
+                row[1] = gObjectives->primaryTexts[i];
+                item->count = 2;
+                item->strings = row;
+                row += 2;
+                item->textIds = &D_8013FE20[(i + 1) * 2];
+                item++;
+            }
+        }
+    }
+    if (mMap[0].w != 0) {
+        D_8013FCC0[8] = item - D_8013F7D0;
+    } else {
+        D_8013FCC0[8] = 0;
+    }
+    cursor = D_8013F7C4;
+    func_8013A744(0);
+    func_8013A744(0x7F);
+    D_8013F7C4 = cursor;
+    D_80138044[D_8013FCB4](cursor);
+}
+#else
 INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013D19C);
+#endif
 
 void func_8013D95C(void) {
     MenuItem *item = D_8013F7D0;
@@ -1626,10 +1837,10 @@ void func_8013D95C(void) {
     item->textIds = ids++;
     item->strings = &D_8013F78C;
     item++;
-    for (i = 0; i < OBJECTIVES_COUNT(gObjectives); i++) {
+    for (i = 0; i < gObjectives->primaryCount; i++) {
         if (gObjectives != NULL && (gObjectives->unk18 & (1 << i)) && !(gObjectives->completed & (1 << i)) &&
             !(gObjectives->unk14 & (1 << i))) {
-            D_8013FB98[i][1] = OBJECTIVES_TEXTS(gObjectives)[i];
+            D_8013FB98[i][1] = gObjectives->primaryTexts[i];
             item->count = 2;
             item->strings = D_8013FB98[i];
             item->textIds = ids;
@@ -1638,7 +1849,7 @@ void func_8013D95C(void) {
         }
     }
     done = 0;
-    for (i = 0; i < OBJECTIVES_COUNT(gObjectives); i++) {
+    for (i = 0; i < gObjectives->primaryCount; i++) {
         if (gObjectives != NULL && (gObjectives->unk18 & (1 << i)) && (gObjectives->completed & (1 << i)) &&
             !(gObjectives->unk14 & (1 << i))) {
             if (done == 0) {
@@ -1648,7 +1859,7 @@ void func_8013D95C(void) {
                 item++;
             }
             done++;
-            D_8013FB98[i][1] = OBJECTIVES_TEXTS(gObjectives)[i];
+            D_8013FB98[i][1] = gObjectives->primaryTexts[i];
             item->count = 2;
             item->strings = D_8013FB98[i];
             item->textIds = ids;
@@ -1657,7 +1868,7 @@ void func_8013D95C(void) {
         }
     }
     done = 0;
-    for (i = 0; i < OBJECTIVES_COUNT(gObjectives); i++) {
+    for (i = 0; i < gObjectives->primaryCount; i++) {
         if (gObjectives != NULL && (gObjectives->unk18 & (1 << i)) && (gObjectives->unk14 & (1 << i))) {
             if (done == 0) {
                 item->count = 1;
@@ -1666,7 +1877,7 @@ void func_8013D95C(void) {
                 item++;
             }
             done++;
-            D_8013FB98[i][1] = OBJECTIVES_TEXTS(gObjectives)[i];
+            D_8013FB98[i][1] = gObjectives->primaryTexts[i];
             item->count = 2;
             item->strings = D_8013FB98[i];
             item->textIds = ids;
@@ -1689,7 +1900,7 @@ void func_8013DC98(void) {
     item++;
     for (i = 0; i < gObjectives->count; i++) {
         if (gObjectives != NULL && (gObjectives->unk24 & (1 << i)) && !(gObjectives->unk20 & (1 << i))) {
-            D_8013FB98[i][1] = OBJECTIVES2_TEXTS(gObjectives)[i];
+            D_8013FB98[i][1] = gObjectives->texts[i];
             item->count = 2;
             item->strings = D_8013FB98[i];
             item->textIds = ids;
@@ -1707,7 +1918,7 @@ void func_8013DC98(void) {
                 item++;
             }
             done++;
-            D_8013FB98[i][1] = OBJECTIVES2_TEXTS(gObjectives)[i];
+            D_8013FB98[i][1] = gObjectives->texts[i];
             item->count = 2;
             item->strings = D_8013FB98[i];
             item->textIds = ids;
@@ -1831,7 +2042,7 @@ void func_8013E324(void) {
     }
     D_8013FBD8[2].textIds[1] = TextReplaceString(D_8013FBD8[2].textIds[1], D_8013F7AC[func_8013BB3C()]);
     item = D_8013FBD8;
-    func_80139150(item, ((s32(*)(s32, s32, s32))EGSDeviceControllerVibrate)(5, 0, 0) == 7, 0);
+    func_80139150(item, EGSDeviceControllerVibrate(5, 0, 0) == 7, 0);
     item++;
     func_80139150(item, JoystickGetFlightControls(), 0);
     for (i = 0; i < 9; i++) {

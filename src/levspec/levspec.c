@@ -1,4 +1,5 @@
 #include "common.h"
+#include "weapon.h"
 #include "level.h"
 #include "system.h"
 
@@ -27,7 +28,6 @@ extern s32 D_80142B00;    /* scientists total */
 extern s32 D_80142B04;    /* scientists killed */
 extern s32 D_80142B08;    /* subjects total */
 extern s32 D_80142B0C;    /* subjects inoculated */
-extern u32 D_80105F58[][8]; /* per-weapon info, 0x20 bytes each */
 
 static void func_801418E0();
 static void func_80141D5C(s16 id);
@@ -191,7 +191,7 @@ INCLUDE_ASM("asm/levspec/nonmatchings/levspec", func_80141D5C);
 #endif
 
 static void func_80141EB4(s32 arg0, s16 weapon) {
-    if (!((D_80105F58[weapon][0] >> 14) & 1)) {
+    if (!((gWeaponInfo[weapon].flags >> 14) & 1)) {
         func_801418E0();
     }
 }

@@ -27,10 +27,12 @@ void NPCHazmatStart(s32 id);
 void SysPlayXA(s32 track, s32 arg1, s32 arg2);
 void InterfaceCountdownAbort(void);
 
+/* Two lists: the primary objectives (flags 0x10/0x14/0x18) and a second list (flags 0x20/0x24) */
 typedef struct LevelObjectives {
-    /* 0x00 */ u8 unk00[8];
+    /* 0x00 */ s32 primaryCount;
+    /* 0x04 */ char **primaryTexts;
     /* 0x08 */ s32 count;
-    /* 0x0C */ u8 unk0C[4];
+    /* 0x0C */ char **texts;
     /* 0x10 */ u32 completed; /* bit per objective */
     /* 0x14 */ u32 unk14;     /* bit per objective */
     /* 0x18 */ u32 unk18;     /* bit per objective */

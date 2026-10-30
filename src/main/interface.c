@@ -407,8 +407,6 @@ typedef struct IfaceRGB {
 
 extern IfaceLine D_80117D9C[4];
 
-/* system.h declares EGSListAdd as void; it returns the new node (egsmisc.c). */
-#define EGS_LIST_ADD ((EGSListNode *(*)(EGSListNode **, void *))EGSListAdd)
 extern u16 D_8010F880, D_8010F882, D_8010F884; /* objective text strings */
 extern s16 D_8010F89E, D_8010F8A2;
 extern s16 mSniperViewMax;
@@ -1661,11 +1659,11 @@ void iSetupDirectionSprites(s32 mode) {
     spr = D_8010F8B8;
     spr[2] = *src;
     for (i = 0; i < 5; i++) {
-        D_8010F8B8[i].unk28 = (s32)EGS_LIST_ADD((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &D_8010F8B8[i]);
+        D_8010F8B8[i].unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &D_8010F8B8[i]);
         D_8010F8B8[i].x = x;
     }
     for (i = 0; i < 8; i++) {
-        D_8010F8BC[i].unk28 = (s32)EGS_LIST_ADD((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &D_8010F8BC[i]);
+        D_8010F8BC[i].unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &D_8010F8BC[i]);
         D_8010F8BC[i].y = y;
     }
 }

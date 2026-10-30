@@ -150,6 +150,7 @@ segments:
       - [0xB309C, textbin, gEmergencyRA]   # data in .text
       - [0xB30A0, c, egsdisp]
       - [0xBA6A0, c, egshmd]
+      - [0xBC0D8, asm, egshmdgte]   # hand-written GTE routines (EGSRotMatYXZ..EGSDisplayPointColor)
       - [0xBD680, asm, egssort]
       - [0xBDAF8, textbin, gSortInfo]   # data in .text
       - [0xBDAFC, asm, egssort_800CD2FC]

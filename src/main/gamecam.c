@@ -131,22 +131,33 @@ u8 func_800224F8(s32 mode, VECTOR32 *pos, GameCamSlot *slot);
 s32 GameCameraSetModeDefault(u8 on, Gobj *primary, u8 arg2);
 
 /* What gCamera points at, as far as this file goes. */
+/* Animated camera parameter: mode 0 means only value.vx is meaningful. */
+typedef struct GameCamParam {
+    /* 0x00 */ s32 mode;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ VECTOR32 value;
+    /* 0x18 */ u8 unk18[0x20];
+    /* 0x38 */ VECTOR32 target;
+} GameCamParam; /* 0x48 */
+
+/* The game camera (what gCamera points at), as far as this file goes. */
 typedef struct GameCamCamera {
-    /* 0x000 */ u8 unk000[0x1B4];
-    /* 0x1B4 */ s32 unk1B4; /* 0: only vx of unk1EC is meaningful */
-    /* 0x1B8 */ u8 unk1B8[0x34];
-    /* 0x1EC */ VECTOR32 unk1EC;
-    /* 0x1FC */ u8 unk1FC[0x750];
-    /* 0x94C */ s32 unk94C; /* 0: only vx of unk954 is meaningful */
-    /* 0x950 */ s32 unk950;
-    /* 0x954 */ VECTOR32 unk954;
-    /* 0x964 */ u8 unk964[0x20];
-    /* 0x984 */ VECTOR32 unk984;
+    /* 0x000 */ void **display;
+    /* 0x004 */ u8 unk004[0x1B0];
+    /* 0x1B4 */ GameCamParam pos;
+    /* 0x1FC */ u8 unk1FC[0x240];
+    /* 0x43C */ GameCamParam watch;
+    /* 0x484 */ u8 unk484[0xFC];
+    /* 0x580 */ GameCamParam eye;
+    /* 0x5C8 */ u8 unk5C8[0x240];
+    /* 0x808 */ GameCamParam dist;
+    /* 0x850 */ u8 unk850[0xFC];
+    /* 0x94C */ GameCamParam angle;
     /* 0x994 */ u8 unk994[0xFC];
-    /* 0xA90 */ s32 unkA90;
-    /* 0xA94 */ s32 unkA94;
-    /* 0xA98 */ VECTOR32 unkA98;
-    /* 0xAA8 */ u8 unkAA8[0x274];
+    /* 0xA90 */ GameCamParam unkA90;
+    /* 0xAD8 */ u8 unkAD8[0xFC];
+    /* 0xBD4 */ GameCamParam fov;
+    /* 0xC1C */ u8 unkC1C[0x100];
     /* 0xD1C */ VECTOR32 unkD1C;
     /* 0xD2C */ s32 unkD2C;
     /* 0xD30 */ VECTOR32 unkD30;
@@ -167,10 +178,11 @@ typedef struct GameCamSVec {
 
 /* Interpolated camera parameter (func_8001FF08 and friends). */
 typedef struct GameCamPlane {
-    /* 0x00 */ u8 unk00[8];
+    /* 0x00 */ s32 count;    /* vertices */
+    /* 0x04 */ u8 unk04[4];
     /* 0x08 */ GameCamSVec *normal;
     /* 0x0C */ u8 unk0C[8];
-    /* 0x14 */ GameCamSVec *origin;
+    /* 0x14 */ GameCamSVec *verts[5];
 } GameCamPlane;
 
 typedef struct GameCamTrack {
@@ -193,7 +205,7 @@ typedef struct GameCamTrack {
 } GameCamTrack;
 
 void func_8001FF08(GameCamTrack *track);
-u8 func_800203F0(void *arg0, void *arg1, s32 arg2);
+u8 func_800203F0(VECTOR32 *pos, GameCamPlane *plane, s32 radius);
 void func_80020978(GameCamTrack *track);
 
 extern s32 gExeTick;
@@ -212,7 +224,7 @@ void func_8001E76C(void);
 void func_8001D91C(void);
 void func_8001E1DC(void);
 void func_8001AF98(void);
-void func_8001E218(s32 arg0);
+s32 func_8001E218(s32 arg0);
 s32 func_8001E5D8(VECTOR32 *out);
 s32 func_80021BA4(void);
 u8 GameCameraCheckMode(s32 mode);
@@ -245,6 +257,59 @@ void *memset(void *p, int c, int n);
 void CameraInit(void *camera, s32 arg1, VECTOR32 *pos, VECTOR32 *angle, s32 proj, void *arg5, s32 arg6, s32 arg7, void *arg8, void *arg9, s32 arg10, s32 arg11);
 
 int EGSMathFIXDiv(int a, int b);
+
+#define abs(x) __builtin_abs(x)
+
+/* Convex outline in the xz plane (camera bounds). */
+typedef struct GameCamOutline {
+    /* 0x00 */ s32 count;
+    /* 0x04 */ VECTOR32 v[1];
+} GameCamOutline;
+
+/* Cheap |(x, z)| (octagonal approximation). */
+static inline s32 iApproxLength(s32 x, s32 z) {
+    s32 ax = abs(x);
+    s32 az = abs(z);
+    s32 sum = ax + az;
+    s32 diff = ax - az;
+    s32 half = sum >> 1;
+    s32 quarter = sum >> 2;
+
+    if (diff < 0) {
+        diff = az - ax;
+    }
+    if (diff < half) {
+        sum -= quarter;
+    } else if (diff <= half + quarter) {
+        sum -= sum >> 3;
+    }
+    return sum;
+}
+
+static inline void iDotXZ(VECTOR32 *a, VECTOR32 *b, s32 *out) {
+    *out = a->vx * b->vx + a->vz * b->vz;
+}
+
+static inline void iDot3(VECTOR32 *a, VECTOR32 *b, s32 *out) {
+    *out = a->vx * b->vx + a->vy * b->vy + a->vz * b->vz;
+}
+
+static inline void iFixDiv(s32 a, s32 b, s32 *out) {
+    *out = EGSMathFIXDiv(a, b);
+}
+
+typedef struct GameCamOutline5 {
+    /* 0x00 */ s32 count;
+    /* 0x04 */ VECTOR32 v[5];
+} GameCamOutline5;
+
+void EGSCameraSetProjectionAngle(void *camera, s32 angle);
+void EGSFrameSetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *dir, s32 arg3);
+void func_8001EF10(void);
+void func_80023D70(void);
+
+void EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
 
 INCLUDE_RODATA("asm/main/nonmatchings/gamecam", D_800101E4);
 
@@ -716,10 +781,10 @@ void func_8001D89C(VECTOR32 *pos) {
     u8 unused[0x48];
 
     in = *pos;
-    if (((GameCamCamera *)gCamera)->unkA90 == 0) {
-        out.vx = ((GameCamCamera *)gCamera)->unkA98.vx;
+    if (((GameCamCamera *)gCamera)->unkA90.mode == 0) {
+        out.vx = ((GameCamCamera *)gCamera)->unkA90.value.vx;
     } else {
-        out = ((GameCamCamera *)gCamera)->unkA98;
+        out = ((GameCamCamera *)gCamera)->unkA90.value;
     }
     pos->vx = out.vx;
 }
@@ -735,7 +800,97 @@ void func_8001E1DC(void) {
     v = D_800101F4;
 }
 
+#ifdef NON_MATCHING
+/* stack: the original reuses the rotation-matrix slots (sp+0x70) for the mode-5 vectors; here they get fresh slots */
+/* As in func_8001F864, the distance fetch writes a whole vector over a single word. */
+s32 func_8001E218(s32 arg0) {
+    VECTOR32 cur;
+    VECTOR32 angle;
+    VECTOR32 dir;
+    VECTOR32 off;
+    VECTOR32 eye;
+    VECTOR32 scale;
+
+    scale = D_800101F4;
+    if (CAM->angle.mode == 0) {
+        angle.vx = CAM->angle.value.vx;
+    } else {
+        angle = CAM->angle.value;
+    }
+    {
+        GOBJ_MATRIX m;
+        GameCamSVec rot;
+
+        rot.vx = -angle.vx;
+        rot.vy = angle.vy;
+        rot.vz = -angle.vz;
+        RotMatrixYXZ(&rot, &m);
+        m.m[0][1] = -m.m[0][1];
+        m.m[1][2] = -m.m[1][2];
+        m.m[1][0] = -m.m[1][0];
+        m.m[2][1] = -m.m[2][1];
+        dir.vx = m.m[0][2];
+        dir.vy = m.m[1][2];
+        dir.vz = m.m[2][2];
+    }
+    {
+    s32 dist;
+
+    if (CAM->dist.mode == 0) {
+        dist = CAM->dist.value.vx;
+    } else {
+        *(VECTOR32 *)&dist = CAM->dist.value;
+    }
+    off.vx = EGSMathFIXMul(dir.vx, dist);
+    off.vy = EGSMathFIXMul(dir.vy, dist);
+    off.vz = EGSMathFIXMul(dir.vz, dist);
+    }
+    CameraAccessFrameInfo(gCamera, 0, 1, 1);
+    cur = CAM->unkD1C;
+    cur.vx += D_80113B2C.unk088;
+    cur.vy += D_80113B2C.unk08C;
+    cur.vz += D_80113B2C.unk090;
+    eye.vx = cur.vx - off.vx;
+    eye.vy = cur.vy - off.vy;
+    eye.vz = cur.vz - off.vz;
+    if (D_80113B2C.mode == 5) {
+        VECTOR32 p;
+        VECTOR32 delta;
+        s32 len;
+
+        if (CAM->pos.mode == 0) {
+            p.vx = CAM->pos.target.vx;
+        } else {
+            p = CAM->pos.target;
+        }
+        delta.vx = p.vx - eye.vx;
+        delta.vy = p.vy - eye.vy;
+        delta.vz = p.vz - eye.vz;
+        EGSMath_VectorModulus(&delta, &len);
+        if (len > 16) {
+            GTEMath_VectorNormal(&delta, &delta);
+            delta.vx = EGSMathFIXMul(delta.vx, 16);
+            delta.vy = EGSMathFIXMul(delta.vy, 16);
+            delta.vz = EGSMathFIXMul(delta.vz, 16);
+            eye.vx += delta.vx;
+            eye.vy += delta.vy;
+            eye.vz += delta.vz;
+        } else {
+            eye = p;
+        }
+    }
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 1;
+    CAM->unkD1C = eye;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 0;
+    CameraAccessMoveInfo(gCamera, 1, 0, 1);
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E218);
+#endif
 
 s32 func_8001E5D8(VECTOR32 *out) {
     VECTOR32 pos;
@@ -744,19 +899,19 @@ s32 func_8001E5D8(VECTOR32 *out) {
     VECTOR32 scale;
 
     scale = D_800101E4;
-    if (CAM->unk94C == 0) {
-        angle.vx = CAM->unk954.vx;
+    if (CAM->angle.mode == 0) {
+        angle.vx = CAM->angle.value.vx;
     } else {
-        angle = CAM->unk954;
+        angle = CAM->angle.value;
     }
     off.vx = 0;
     off.vy = 0;
     off.vz = 0x2C0;
     EGSGeometry_VectorRotateYXZ(&off, &angle, &off);
-    if (CAM->unk1B4 == 0) {
-        pos.vx = CAM->unk1EC.vx;
+    if (CAM->pos.mode == 0) {
+        pos.vx = CAM->pos.target.vx;
     } else {
-        pos = CAM->unk1EC;
+        pos = CAM->pos.target;
     }
     out->vx = pos.vx + off.vx;
     out->vy = pos.vy + off.vy;
@@ -807,7 +962,49 @@ s32 func_8001ECC8(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001EF10);
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001F864);
+/* The fov fetch copies a whole vector into a single word (as the original does,
+ * spilling over the saved registers above it); only the first word is used. */
+s32 func_8001F864(GameCamCamera *cam) {
+    VECTOR32 pos;
+    VECTOR32 eye;
+    VECTOR32 at;
+    VECTOR32 watch;
+    VECTOR32 dir;
+    s32 fov;
+    EGSFrame *frame;
+
+    if (cam->fov.mode == 0) {
+        fov = cam->fov.value.vx;
+    } else {
+        *(VECTOR32 *)&fov = cam->fov.value;
+    }
+    EGSCameraSetProjectionAngle(cam->display, fov);
+    frame = *(EGSFrame **)cam->display;
+    if (cam->pos.mode == 0) {
+        pos.vx = cam->pos.value.vx;
+    } else {
+        pos = cam->pos.value;
+    }
+    if (cam->eye.mode == 0) {
+        eye.vx = cam->eye.value.vx;
+    } else {
+        eye = cam->eye.value;
+    }
+    at = eye;
+    EGSFrameSetPosition(frame, 0, &at);
+    if (cam->watch.mode == 0) {
+        watch.vx = cam->watch.value.vx;
+    } else {
+        watch = cam->watch.value;
+    }
+    dir.vx = watch.vx - pos.vx;
+    dir.vy = watch.vy - pos.vy;
+    dir.vz = watch.vz - pos.vz;
+    EGSFrameSetOrientation(frame, 0, &dir, 0);
+    func_8001EF10();
+    func_80023D70();
+    return 1;
+}
 
 void GameCameraInit(void) {
     VECTOR32 pos = { 0, 0x180, 0, 0 };
@@ -908,11 +1105,166 @@ s32 GameCameraToggleCollision(void) {
     return 1;
 }
 
+#ifdef NON_MATCHING
+/* scheduling: the original loads track->unk10 before the second dot product finishes, and stores the first FIXDiv product in a call delay slot */
+void func_8001FF08(GameCamTrack *track) {
+    VECTOR32 n;
+    VECTOR32 v;
+    VECTOR32 d;
+    VECTOR32 m;
+    VECTOR32 q;
+    s32 a;
+    s32 b;
+    s32 c;
+
+    track->moving = 0;
+    n.vx = track->plane->normal->vx;
+    n.vy = track->plane->normal->vy;
+    n.vz = track->plane->normal->vz;
+    v.vx = FIX12(track->vel.vx);
+    v.vy = FIX12(track->vel.vy);
+    v.vz = FIX12(track->vel.vz);
+    iDot3(&v, &n, &a);
+    a = -a;
+    if (a < -0x54C0) {
+        return;
+    }
+    d.vx = track->pos.vx - track->plane->verts[0]->vx;
+    d.vy = track->pos.vy - track->plane->verts[0]->vy;
+    d.vz = track->pos.vz - track->plane->verts[0]->vz;
+    iDot3(&d, &n, &b);
+    d.vx <<= 12;
+    d.vy <<= 12;
+    d.vz <<= 12;
+    if (b - a - (track->unk10 << 12) > track->unk28 || b < -track->unk2C) {
+        return;
+    }
+    track->moving = 1;
+    track->unk3C = b;
+    track->unk40 = a;
+    if (track->unk34 >= a) {
+        m.vx = EGSMathFIXMul(n.vx, a - b);
+        m.vy = EGSMathFIXMul(n.vy, a - b);
+        m.vz = EGSMathFIXMul(n.vz, a - b);
+        q.vx = track->vel.vx + m.vx;
+        q.vy = track->vel.vy + m.vy;
+        q.vz = track->vel.vz + m.vz;
+    } else {
+        iFixDiv(b, a, &c);
+        q.vx = EGSMathFIXMul(track->vel.vx, c);
+        q.vy = EGSMathFIXMul(track->vel.vy, c);
+        q.vz = EGSMathFIXMul(track->vel.vz, c);
+    }
+    track->unk44.vx = d.vx + q.vx;
+    track->unk44.vy = d.vy + q.vy;
+    track->unk44.vz = d.vz + q.vz;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001FF08);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020230);
+u8 func_80020230(VECTOR32 *pos, GameCamOutline *outline, s32 radius) {
+    VECTOR32 normal;
+    VECTOR32 rel;
+    s32 dot;
+    s32 i;
+    s32 next;
+    s32 len;
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_800203F0);
+    radius = FIX12(radius);
+    for (i = 0; i < outline->count; i++) {
+        next = i + 1;
+        if (next == outline->count) {
+            next = 0;
+        }
+        normal.vx = outline->v[i].vz - outline->v[next].vz;
+        normal.vz = outline->v[next].vx - outline->v[i].vx;
+        len = iApproxLength(normal.vx, normal.vz) > 1 ? iApproxLength(normal.vx, normal.vz) : 1;
+        rel.vx = pos->vx - outline->v[i].vx;
+        rel.vz = pos->vz - outline->v[i].vz;
+        iDotXZ(&rel, &normal, &dot);
+        if (radius * len < dot) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+u8 func_800203F0(VECTOR32 *pos, GameCamPlane *plane, s32 radius) {
+    VECTOR32 p;
+    GameCamOutline5 o;
+    s32 ax;
+    s32 ay;
+    s32 az;
+    s32 m;
+    s32 i;
+
+    ax = abs(plane->normal->vx);
+    ay = abs(plane->normal->vy);
+    az = abs(plane->normal->vz);
+    m = MAX(ax, MAX(ay, az));
+    o.count = plane->count;
+    if (m == ax) {
+        if (plane->normal->vx < 0) {
+            p.vx = FIX12(pos->vy);
+            p.vz = FIX12(pos->vz);
+            o.v[0].vx = 0;
+            o.v[0].vz = 0;
+            for (i = 1; i < plane->count; i++) {
+                o.v[i].vx = plane->verts[i]->vy - plane->verts[0]->vy;
+                o.v[i].vz = plane->verts[i]->vz - plane->verts[0]->vz;
+            }
+        } else {
+            p.vx = -FIX12(pos->vy);
+            p.vz = FIX12(pos->vz);
+            o.v[0].vx = 0;
+            o.v[0].vz = 0;
+            for (i = 1; i < plane->count; i++) {
+                o.v[i].vx = plane->verts[0]->vy - plane->verts[i]->vy;
+                o.v[i].vz = plane->verts[i]->vz - plane->verts[0]->vz;
+            }
+        }
+    } else if (m == ay) {
+        if (plane->normal->vy >= 0) {
+            p.vx = FIX12(pos->vx);
+            p.vz = FIX12(pos->vz);
+            o.v[0].vx = 0;
+            o.v[0].vz = 0;
+            for (i = 1; i < plane->count; i++) {
+                o.v[i].vx = plane->verts[i]->vx - plane->verts[0]->vx;
+                o.v[i].vz = plane->verts[i]->vz - plane->verts[0]->vz;
+            }
+        } else {
+            p.vx = -FIX12(pos->vx);
+            p.vz = FIX12(pos->vz);
+            o.v[0].vx = 0;
+            o.v[0].vz = 0;
+            for (i = 1; i < plane->count; i++) {
+                o.v[i].vx = plane->verts[0]->vx - plane->verts[i]->vx;
+                o.v[i].vz = plane->verts[i]->vz - plane->verts[0]->vz;
+            }
+        }
+    } else if (plane->normal->vz < 0) {
+        p.vx = FIX12(pos->vx);
+        p.vz = FIX12(pos->vy);
+        o.v[0].vx = 0;
+        o.v[0].vz = 0;
+        for (i = 1; i < plane->count; i++) {
+            o.v[i].vx = plane->verts[i]->vx - plane->verts[0]->vx;
+            o.v[i].vz = plane->verts[i]->vy - plane->verts[0]->vy;
+        }
+    } else {
+        p.vx = -FIX12(pos->vx);
+        p.vz = FIX12(pos->vy);
+        o.v[0].vx = 0;
+        o.v[0].vz = 0;
+        for (i = 1; i < plane->count; i++) {
+            o.v[i].vx = plane->verts[0]->vx - plane->verts[i]->vx;
+            o.v[i].vz = plane->verts[i]->vy - plane->verts[0]->vy;
+        }
+    }
+    return func_80020230(&p, (GameCamOutline *)&o, radius);
+}
 
 #ifdef NON_MATCHING
 /* regalloc: track and the plane distance swap s0/s1 */
@@ -979,7 +1331,56 @@ void func_80020BB8(VECTOR32 *pos, s32 radius, s32 yLow, s32 yHigh, VECTOR32 *del
     box->max.vz = pos->vz + FIX12(MAX(delta->vz, 0) + rxz) + radius;
 }
 
+#ifdef NON_MATCHING
+/* the final 'not all beyond max.vz' test: the original fills the first branch's delay slot with the result 1 */
+u8 func_80020E90(GameCamBox *box, GameCamPlane *plane) {
+    GameCamSVec *a = plane->verts[0];
+    GameCamSVec *b = plane->verts[1];
+    GameCamSVec *c = plane->verts[2];
+    GameCamSVec *d;
+
+    if (plane->count == 3) {
+        if (a->vy < box->min.vy && b->vy < box->min.vy && c->vy < box->min.vy) {
+            return 0;
+        }
+        if (box->max.vy < a->vy && box->max.vy < b->vy && box->max.vy < c->vy) {
+            return 0;
+        }
+        if (a->vx < box->min.vx && b->vx < box->min.vx && c->vx < box->min.vx) {
+            return 0;
+        }
+        if (box->max.vx < a->vx && box->max.vx < b->vx && box->max.vx < c->vx) {
+            return 0;
+        }
+        if (a->vz < box->min.vz && b->vz < box->min.vz && c->vz < box->min.vz) {
+            return 0;
+        }
+        return box->max.vz >= a->vz || box->max.vz >= b->vz || box->max.vz >= c->vz;
+    }
+    if (plane->count == 4) {
+        d = plane->verts[3];
+        if (a->vy < box->min.vy && b->vy < box->min.vy && c->vy < box->min.vy && d->vy < box->min.vy) {
+            return 0;
+        }
+        if (box->max.vy < a->vy && box->max.vy < b->vy && box->max.vy < c->vy && box->max.vy < d->vy) {
+            return 0;
+        }
+        if (a->vx < box->min.vx && b->vx < box->min.vx && c->vx < box->min.vx && d->vx < box->min.vx) {
+            return 0;
+        }
+        if (box->max.vx < a->vx && box->max.vx < b->vx && box->max.vx < c->vx && box->max.vx < d->vx) {
+            return 0;
+        }
+        if (a->vz < box->min.vz && b->vz < box->min.vz && c->vz < box->min.vz && d->vz < box->min.vz) {
+            return 0;
+        }
+        return box->max.vz >= a->vz || box->max.vz >= b->vz || box->max.vz >= c->vz || box->max.vz >= d->vz;
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020E90);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
 
@@ -992,10 +1393,10 @@ s32 func_80021BA4(void) {
     VECTOR32 dir;
     VECTOR32 angle;
 
-    if (CAM->unk1B4 == 0) {
-        pos.vx = CAM->unk1EC.vx;
+    if (CAM->pos.mode == 0) {
+        pos.vx = CAM->pos.target.vx;
     } else {
-        pos = CAM->unk1EC;
+        pos = CAM->pos.target;
     }
     D_80113B2C.unk085 = 0;
     if (D_80113B2C.collision && D_80113B2C.mode != 10 && D_80113B2C.mode != 13 && D_80113B2C.mode != 19 &&
@@ -1014,10 +1415,10 @@ s32 func_80021BA4(void) {
         d.vx = pos.vx - cur.vx;
         d.vy = pos.vy - cur.vy;
         d.vz = pos.vz - cur.vz;
-        if (CAM->unk94C == 0) {
-            angle.vx = CAM->unk984.vx;
+        if (CAM->angle.mode == 0) {
+            angle.vx = CAM->angle.target.vx;
         } else {
-            angle = CAM->unk984;
+            angle = CAM->angle.target;
         }
         rot.vx = -angle.vx;
         rot.vy = angle.vy;
