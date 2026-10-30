@@ -190,10 +190,10 @@ void EGSDisplayFadeFull(void);
 void EGSDeviceGraphicsSetColorMode(s32 mode);
 s32 EGSFileSearchCD(void *pos, char *path);
 /* movie.ovl */
-void MovieSetStreamBufferNumSectors(s32 sectors);
-void MovieSetDoubleDecodeBuffers(s32);
+s32 MovieSetStreamBufferNumSectors(s32 sectors);
+s32 MovieSetDoubleDecodeBuffers(u8 on);
 s32 MovieOpen(char *path, s32 arg1, s32 arg2, s32 arg3, void (*done)(void), void *buf, s32 bufSize);
-void MovieClose(void);
+s32 MovieClose(void); /* falls off the end; callers use the junk result */
 void EGSDisplayDeleteMovie(void *camera);
 void EGSDisplayQueueInterrupt(void (*fn)(void), s32 arg1, s32 arg2);
 void StreamVramPage(s32 page, s32 arg1);
