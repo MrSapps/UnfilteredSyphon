@@ -12,7 +12,7 @@
 /config/symbols/main.ext.txt
 /config/symbols/unresolved.txt
 /include/gte_macros.inc
-/include/include_asm.h
+
 /include/labels.inc
 /include/macro.inc
 

@@ -48,8 +48,10 @@ segments:
     vram: 0x80010000
     bss_size: 0x27874
     subsegments:
-      - [0x800, rodata, rdata]
-      - [0x4C08, asm, text_80014408]
+      - [0x800, .rodata, system]
+      - [0x8D4, rodata, rdata_800100D4]
+      - [0x4C08, c, system]
+      - [0x6D50, asm, text_80016550]
       - [0x67298, textbin, gLOSFace]   # data in .text (hand-written asm)
       - [0x67414, textbin, gTestHit]   # data in .text (hand-written asm)
       - [0x67418, textbin, gTestRay]   # data in .text (hand-written asm)

@@ -56,6 +56,12 @@ for _name in OVERLAYS:
 
 ASFLAGS = "-EL -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 -Iinclude"
 
+# Psy-Q 4.x cc1psx (GCC 2.7.2), verified by exact matches in system.c.
+CC1 = f"{TOOLS}/compilers/gcc-2.7.2-psx/cc1"
+CPPFLAGS = "-P -undef -D__GNUC__=2 -Dmips -D__psx__ -DINCLUDE_ASM_USE_MACRO_INC=1 -Iinclude -Isrc"
+CFLAGS = "-quiet -O2 -G8 -mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -funsigned-char"
+MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G8 --expand-div"
+
 
 def write_main_ext_syms():
     """Main-exe symbols as absolute references for the overlay splat configs."""
@@ -124,6 +130,19 @@ def main():
         n.newline()
         n.rule("as", "${cross}as $asflags $in -o $out", description="AS $in")
         n.rule(
+            "cc",
+            # __FILE__ must read "s/<name>.c" as on the original dev machine (used by ASSERT)
+            "(printf '#line 1 \"$origname\"\\n'; cat $in)"
+            f" | cpp {CPPFLAGS} -MMD -MF $out.d -MT $out"
+            f" | {CC1} {CFLAGS} -o -"
+            " | sed 's/^\\t\\.rdata$$/\\t.section .rodata/'"
+            f" | {sys.executable} {MASPSX}"
+            " | ${cross}as $asflags -G8 -o $out -",
+            description="CC $in",
+            depfile="$out.d",
+            deps="gcc",
+        )
+        n.rule(
             "bin",
             "printf '.section .data\\n.incbin \"$in\"\\n' | ${cross}as $asflags -o $out -",
             description="BIN $in",
@@ -150,7 +169,9 @@ def main():
             objs = linker_objects(ROOT / ld)
             for o in objs:
                 src = source_for(o)
-                if src.endswith(".s"):
+                if src.endswith(".c"):
+                    n.build(o, "cc", src, variables=dict(origname=f"s/{Path(src).name}"))
+                elif src.endswith(".s"):
                     n.build(o, "as", src, implicit=["include/macro.inc"])
                 else:
                     n.build(o, "bin", src)
