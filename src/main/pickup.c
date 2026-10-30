@@ -47,7 +47,7 @@ extern char *(*D_8010FCF8)();         /* locked-door string callback */
 extern char *(*D_8010FCFC)();         /* use string callback */
 extern void (*D_8010FD00)();          /* key callback */
 extern void (*D_8010FD04)();          /* bomb callback */
-extern void (*D_8010FD08)();          /* computer callback */
+extern s32 (*D_8010FD08)();           /* computer callback */
 extern s32 (*D_8010FD0C)();           /* switch callback */
 extern void (*gObjectInteractionCallback)(); /* level specific object callback */
 extern s32 D_801101B8;
@@ -96,6 +96,10 @@ void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
+void func_80148234(Gobj *obj, s16 type);    /* in an overlay */
+void ObjectElectronicDestruction(Gobj *obj, s32 by);
+
+extern void (*gObjectMovieDoneCallback)();
 void InterfaceAddBomb(s16 id);
 void NPCEnableGenerator(s16 id);
 void NPCHazmatStop(s32 id);
@@ -951,7 +955,101 @@ void BOMBObjDispatch(SysMsg *msg) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", COMPUTERObjDispatch);
+void COMPUTERObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    Gobj *pc = gameObjectsInfo[msg->to].runtime;
+    s32 type = GOBJ_TYPE(pc->id);
+    u8 result;
+    char *str;
+
+    switch (msg->id) {
+    case 6:
+        pc->flags0 |= 0x40;
+        CobjAddBulletCollisionBoxGobj(pc, 1, 0, 0);
+        if (!(pc->flags0 & 1)) {
+            CobjAddCollisionBoxGobj(pc, 1, 0, 1, 1);
+        }
+        break;
+    case 5:
+        pc->flags0 &= ~0x40;
+        CobjRemoveBulletCollisionBoxGobj(pc);
+        if (!(pc->flags0 & 1)) {
+            CobjRemoveCollisionBoxGobj(pc);
+        }
+        break;
+    case 18:
+        if (!(pc->flags0 & 0x20)) {
+            PickupAddUseMsg(pc->id, 1);
+            if (!(pc->flags0 & 8)) {
+                SysPostMessage(0x15, 4, pc->id, gPlayerOffset, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 19:
+        if (!(pc->flags0 & 0x20)) {
+            PickupRemoveUseMsg(pc->id);
+            if (!(pc->flags0 & 8)) {
+                SysPostMessage(0x19, 3, pc->id, gPlayerOffset, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 41:
+        *(s32 *)msg->data[0] = pc->flags0;
+        break;
+    case 42:
+        pc->flags0 = *(s32 *)msg->data[0];
+    case 13:
+        if (pc->healthInfo->health <= 0) {
+            if (!(pc->flags0 & 0x80)) {
+                pc->flags0 |= 0x80;
+                ObjectElectronicDestruction(pc, msg->from);
+            } else if (pc->anim->unk00[0xA] & 8) {
+                EGSAnimShowDetailDef(pc->anim);
+            }
+        }
+        break;
+    case 20:
+    case 27:
+        if (pc->flags0 & 0x10) {
+            pc->flags0 &= ~0x10;
+        }
+        break;
+    case 21:
+    case 39:
+        if (!(pc->flags0 & 0x10)) {
+            if (!(pc->flags0 & 0x20)) {
+                pc->flags0 |= 0x20;
+                result = 1;
+                if (D_8010FD08 != NULL) {
+                    result = D_8010FD08(pc->id, type);
+                }
+                pos.vx = pc->anim->frame->pos.vx;
+                pos.vy = pc->anim->frame->pos.vy;
+                pos.vz = pc->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+                SysPlaySong(0, 0xE, 0, (s32)&pos);
+                if (result == 1) {
+                    ObjectRefMultiSYSPOSTMSG0(pc->id, 0x15, 3);
+                }
+                UseObject(pc->id);
+            }
+        } else if (D_8010FCF8 != NULL) {
+            str = D_8010FCF8(pc->id, type);
+            if (str != NULL) {
+                TextStatusMessage(str, 0);
+            }
+        }
+        break;
+    case 45:
+        if (gObjectMovieDoneCallback != NULL && (pc->flags0 & 0x20)) {
+            gObjectMovieDoneCallback(pc->id, type);
+        }
+        break;
+    case 2:
+        func_80148234(pc, type);
+        break;
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008D548);
 
