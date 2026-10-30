@@ -1,4 +1,3 @@
-# Jump tables per module/TU (kept by tools/split_parts.py; C functions no longer emit them in asm)
 baseext baseext 80141844
 baseext baseext 801418EC
 cave cave 80141744
@@ -63,4 +62,7 @@ museum museum 801414BC
 museum museum 80141564
 park2 park2 801412BC
 subway subway 801415A4
+title title 801416A4
+title title 801416C4
+title title 801416E4
 whouse whouse 801414CC
