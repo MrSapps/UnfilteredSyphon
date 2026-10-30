@@ -323,7 +323,31 @@ void SpriteInitTemporary(void)
 }
 
 /* D_801173E8[i]: >0 first slot of a run of that many, 0 rest of a run, -1 free */
-INCLUDE_ASM("asm/main/nonmatchings/sprite", SpriteGetTemporary);
+EGSTexture *SpriteGetTemporary(s32 count) {
+    s32 i;
+    s32 j;
+
+    i = 0;
+    while (i + count < SPRITE_TEMP_MAX) {
+        if (D_801173E8[i] <= 0) {
+            for (j = i; D_801173E8[j] < 0 && j < i + count; j++) {
+            }
+            if (j == i + count) {
+                break;
+            }
+            i = j;
+        }
+        i += D_801173E8[i];
+    }
+    if (i + count > SPRITE_TEMP_MAX) {
+        return NULL;
+    }
+    D_801173E8[i] = count;
+    for (j = i + 1; j < i + count; j++) {
+        D_801173E8[j] = 0;
+    }
+    return &D_80116CB0[i];
+}
 
 s32 SpriteDisposeTemporary(EGSTexture *tex)
 {
