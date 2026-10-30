@@ -810,7 +810,7 @@ static void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos) {
 INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80142C7C);
 #endif
 
-INCLUDE_PART1("asm/subway/nonmatchings/subway", func_80142D74)
+INCLUDE_RODATA("asm/subway/nonmatchings/subway", D_80140FE4);
 
 static void *func_80142D74(s16 id, s16 kind) {
     VECTOR32 pos;
