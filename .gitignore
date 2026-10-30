@@ -30,3 +30,5 @@ __pycache__/
 
 # Claude Code session state (agent worktrees etc.)
 /.claude/
+/permute/
+/tools/decomp-permuter/
