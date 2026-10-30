@@ -96,6 +96,16 @@ void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
+void func_80148120(Gobj *obj);              /* in an overlay */
+Gobj *ObjectMatchToRefIDByCatID(s16 id, s32 cat);
+void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
+void EGSFrameSetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *dir, s32 arg3);
+void KeyDroppedByNPC(Gobj *npc);
+void iKeyRestore(Gobj *obj);
+
+typedef struct SVECTOR16 {
+    s16 vx, vy, vz;
+} SVECTOR16;
 void func_80148234(Gobj *obj, s16 type);    /* in an overlay */
 void ObjectElectronicDestruction(Gobj *obj, s32 by);
 
@@ -852,7 +862,111 @@ INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DF0);
 
 
+#ifdef NON_MATCHING
+/* stack layout only: the original reuses case 41's pos slot (0x50) in case 42 */
+void AUTOPICKUPObjDispatch(SysMsg *msg) {
+    VECTOR32 playerPos;
+    VECTOR32 keyPos;
+    s32 dist;
+    Gobj *key = gameObjectsInfo[msg->to].runtime;
+    s32 ref;
+    Gobj *npc;
+
+    switch (msg->id) {
+    case 10:
+        if ((*(u32 *)key & 0x62) == 0x42) {
+            playerPos = gObjPlayer->move->pos;
+            keyPos.vx = key->anim->frame->pos.vx;
+            keyPos.vy = key->anim->frame->pos.vy;
+            keyPos.vz = key->anim->frame->pos.vz;
+            keyPos.vy = -keyPos.vy;
+            EGSGeometry_GetFuzzyDistancePoint2Point(&playerPos, &keyPos, &dist);
+            if (dist <= 0xC0) {
+                key->flags0 = (key->flags0 & ~2) | 0x20;
+                key->anim->unk00[8] |= 8;
+                PickupObjectSet(key->id, 2, 0, 0, 0);
+                PickupObjectTake(0);
+                gLevelKeycardsTaken++;
+                if (D_8010FD00 != NULL) {
+                    D_8010FD00(key->id);
+                }
+            } else {
+                SysPostMessage(0xA, 4, key->id, key->id, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 41: {
+        SVECTOR16 saved;
+        VECTOR32 pos;
+
+        ref = gameObjectsInfo[key->id].refId;
+        if (ref != -1) {
+            npc = ObjectMatchToRefIDByCatID(ref, 2);
+            if (key->id != npc->id && !(*(u32 *)key & 0x22) && npc->healthInfo->health <= 0) {
+                KeyDroppedByNPC(npc);
+            }
+        }
+        if ((*(u32 *)key & 0x22) == 2) {
+            pos.vx = key->anim->frame->pos.vx;
+            pos.vy = key->anim->frame->pos.vy;
+            pos.vz = key->anim->frame->pos.vz;
+            pos.vy = -pos.vy;
+            saved.vx = pos.vx;
+            saved.vy = pos.vy;
+            saved.vz = pos.vz;
+        } else {
+            saved.vx = 0x7FFF;
+            saved.vy = 0x7FFF;
+            saved.vz = 0x7FFF;
+        }
+        *(s32 *)msg->data[0] = (u16)saved.vx | ((u16)saved.vy << 16);
+        *(s16 *)msg->data[1] = saved.vz;
+        break;
+    }
+    case 42: {
+        SVECTOR16 saved;
+        VECTOR32 pos;
+        VECTOR32 up;
+
+        saved.vx = ((s16 *)msg->data[0])[0];
+        saved.vy = ((s16 *)msg->data[0])[1];
+        saved.vz = *(s16 *)msg->data[1];
+        if (saved.vx == 0x7FFF && saved.vy == saved.vx && saved.vz == saved.vy) {
+            key->flags0 &= ~2;
+            if (gameObjectsInfo[key->id].refId != -1) {
+                SysExeTickQueueTimer(iKeyRestore, 1, key);
+            }
+            key->anim->unk00[8] |= 8;
+            break;
+        }
+        up.vx = 0;
+        up.vy = 0x1000;
+        up.vz = 0;
+        EGSFrameSetOrientation(key->anim->frame, 0, &up, 0);
+        pos.vx = saved.vx;
+        pos.vy = saved.vy;
+        pos.vz = saved.vz;
+        EGSFrameSetPosition(key->anim->frame, 0, &pos);
+        key->flags0 = (key->flags0 | 2) & ~0x20;
+        key->anim->unk00[8] &= ~8;
+    }
+    case 6:
+        key->flags0 |= 0x40;
+        if ((*(u32 *)key & 0x22) == 2) {
+            SysPostMessage(0xA, 4, key->id, key->id, 0, 0, 0, 0);
+        }
+        break;
+    case 5:
+        key->flags0 &= ~0x40;
+        break;
+    case 2:
+        func_80148120(key);
+        break;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", AUTOPICKUPObjDispatch);
+#endif
 
 void BOMBObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
