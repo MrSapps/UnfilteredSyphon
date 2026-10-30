@@ -7,7 +7,7 @@
 /* Hooks level overlays install from their init function. */
 void DamageSetDamagedCallback(void (*cb)(s16 id, s16 by));
 void DamageSetDestroyedCallback(void (*cb)(s16 id, s16 by));
-void LevelSetEOLCallback(void (*cb)());
+s32 (*LevelSetEOLCallback(s32 (*cb)()))(); /* cb returns nonzero to allow the end of level */
 void UseSetBombCallback(void (*cb)());
 void UseSetLevSpecObjCallback(void (*cb)());
 void UseSetSwitchCallback(void (*cb)());
@@ -92,7 +92,7 @@ void StringMissionFailedMsg();
 void LevelObjectivesIncomplete(void *msg);
 void DamageDestroyImmediately(s32 arg0, s16 id);
 void ObjectDoMovieEx(char *name, s32 arg1, s16 arg2, s16 arg3);
-void LevelMissionCtrMsg(char *msg, s32 arg1);
+s32 LevelMissionCtrMsg(char *msg, s32 extraTicks);
 void ObjectTeleportPlayer(s16 id, s32 arg1);
 void GameCameraRequestCutToBehind(void);
 void InterfaceSetAddLevelSpecificNPCCallback(void (*cb)());

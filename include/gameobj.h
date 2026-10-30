@@ -4,11 +4,19 @@
 #include "common.h"
 
 /* Per-level table of placed game objects (gameObjectsInfo[], 0x4C bytes each). */
+typedef struct GOBJ_MATRIX {
+    s16 m[3][3];
+    s16 pad;
+    s32 t[3];
+} GOBJ_MATRIX; /* layout of the PsyQ MATRIX */
+
 typedef struct GameObjectInfo {
     /* 0x00 */ s32 modelIndex; /* index into gameObjectsModelInfo */
-    /* 0x04 */ u8 unk04[0x20];
+    /* 0x04 */ GOBJ_MATRIX matrix; /* placement; t[] is the start position */
     /* 0x24 */ u16 flags24;
-    /* 0x26 */ u8 unk26[0xA];
+    /* 0x26 */ u8 unk26[2];
+    /* 0x28 */ s32 pathStart;
+    /* 0x2C */ s32 path;
     /* 0x30 */ s32 refId; /* linked object id, -1 if none */
     /* 0x34 */ struct GameObjectRuntime *runtime;
     /* 0x38 */ u8 unk38[0x14];
