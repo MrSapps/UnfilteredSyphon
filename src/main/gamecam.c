@@ -2,6 +2,7 @@
 #include "gameobj.h"
 #include "gobj.h"
 #include "game.h"
+#include "scratch.h"
 
 /* gamecam.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010FF78)
@@ -131,32 +132,119 @@ s32 GameCameraSetModeDefault(u8 on, Gobj *primary, u8 arg2);
 
 /* What gCamera points at, as far as this file goes. */
 typedef struct GameCamCamera {
-    /* 0x000 */ u8 unk000[0xA90];
+    /* 0x000 */ u8 unk000[0x1B4];
+    /* 0x1B4 */ s32 unk1B4; /* 0: only vx of unk1EC is meaningful */
+    /* 0x1B8 */ u8 unk1B8[0x34];
+    /* 0x1EC */ VECTOR32 unk1EC;
+    /* 0x1FC */ u8 unk1FC[0x750];
+    /* 0x94C */ s32 unk94C; /* 0: only vx of unk954 is meaningful */
+    /* 0x950 */ s32 unk950;
+    /* 0x954 */ VECTOR32 unk954;
+    /* 0x964 */ u8 unk964[0x20];
+    /* 0x984 */ VECTOR32 unk984;
+    /* 0x994 */ u8 unk994[0xFC];
     /* 0xA90 */ s32 unkA90;
     /* 0xA94 */ s32 unkA94;
     /* 0xA98 */ VECTOR32 unkA98;
+    /* 0xAA8 */ u8 unkAA8[0x274];
+    /* 0xD1C */ VECTOR32 unkD1C;
+    /* 0xD2C */ s32 unkD2C;
+    /* 0xD30 */ VECTOR32 unkD30;
+    /* 0xD40 */ u8 unkD40;
 } GameCamCamera;
+
+#define CAM ((GameCamCamera *)gCamera)
 
 extern const VECTOR32 D_800101E4; /* {1, 1, 1} */
 extern const VECTOR32 D_800101F4; /* zero */
+void EGSGeometry_VectorRotateYXZ(VECTOR32 *in, VECTOR32 *angle, VECTOR32 *out);
+void CameraAccessMoveInfo(void *camera, s32 arg1, s32 arg2, s32 arg3);
 u8 EGSListFind(EGSListNode **list, s32 arg1, void *data);
 
+typedef struct GameCamSVec {
+    s16 vx, vy, vz, pad;
+} GameCamSVec;
+
 /* Interpolated camera parameter (func_8001FF08 and friends). */
+typedef struct GameCamPlane {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ GameCamSVec *normal;
+    /* 0x0C */ u8 unk0C[8];
+    /* 0x14 */ GameCamSVec *origin;
+} GameCamPlane;
+
 typedef struct GameCamTrack {
-    /* 0x00 */ u8 unk00[0x24];
-    /* 0x24 */ void *unk24;
-    /* 0x28 */ u8 unk28[8];
+    /* 0x00 */ VECTOR32 pos;
+    /* 0x10 */ s32 unk10;
+    /* 0x14 */ VECTOR32 vel;
+    /* 0x24 */ GameCamPlane *plane;
+    /* 0x28 */ s32 unk28;
+    /* 0x2C */ s32 unk2C;
     /* 0x30 */ s32 unk30;
-    /* 0x34 */ u8 unk34[4];
+    /* 0x34 */ s32 unk34;
     /* 0x38 */ u8 moving;
     /* 0x39 */ u8 pad39[3];
-    /* 0x3C */ u8 unk3C[8];
-    /* 0x44 */ u8 unk44[0x10];
+    /* 0x3C */ s32 unk3C;
+    /* 0x40 */ s32 unk40;
+    /* 0x44 */ VECTOR32 unk44;
+    /* 0x54 */ VECTOR32 unk54;
+    /* 0x64 */ VECTOR32 unk64;
+    /* 0x74 */ VECTOR32 unk74;
 } GameCamTrack;
 
 void func_8001FF08(GameCamTrack *track);
 u8 func_800203F0(void *arg0, void *arg1, s32 arg2);
 void func_80020978(GameCamTrack *track);
+
+extern s32 gExeTick;
+int EGSMathFIXMul(int a, int b);
+void EGSDisplayAddPoly(void *display, void *poly);
+
+/* Scrim animation (GSAddAnim); its frame is at 0xC. */
+typedef struct GameCamAnim {
+    /* 0x0 */ u8 unk0[0xC];
+    /* 0xC */ EGSFrame *frame;
+} GameCamAnim;
+
+#define ABS(x) ((x) < 0 ? -(x) : (x))
+
+void func_8001E76C(void);
+void func_8001D91C(void);
+void func_8001E1DC(void);
+void func_8001AF98(void);
+void func_8001E218(s32 arg0);
+s32 func_8001E5D8(VECTOR32 *out);
+s32 func_80021BA4(void);
+u8 GameCameraCheckMode(s32 mode);
+
+#define MIN(a, b) ((a) > (b) ? (b) : (a))
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+#define FIX12(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+
+/* Axis-aligned box. */
+typedef struct GameCamBox {
+    VECTOR32 min;
+    VECTOR32 max;
+} GameCamBox;
+
+void RotMatrixYXZ(GameCamSVec *rot, GOBJ_MATRIX *m);
+void CameraAccessFrameInfo(void *camera, s32 arg1, s32 arg2, s32 arg3);
+u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos);
+
+extern GameCamView D_800FCF84[];
+extern GameCamModeInfo D_800FDC50[];
+extern s32 D_800FE13C[];
+extern s32 D_800FE190[];
+extern s32 D_800FE1E4[];
+extern u8 D_8010F714[];
+extern u8 D_800FE238[];
+extern u8 D_800FE340[];
+int rcos(int a);
+int rsin(int a);
+void *memset(void *p, int c, int n);
+void CameraInit(void *camera, s32 arg1, VECTOR32 *pos, VECTOR32 *angle, s32 proj, void *arg5, s32 arg6, s32 arg7, void *arg8, void *arg9, s32 arg10, s32 arg11);
+
+int EGSMathFIXDiv(int a, int b);
 
 INCLUDE_RODATA("asm/main/nonmatchings/gamecam", D_800101E4);
 
@@ -215,7 +303,7 @@ s32 GameCameraGetMode(void) {
     return D_80113B2C.mode;
 }
 
-s32 GameCameraCheckMode(s32 mode) {
+u8 GameCameraCheckMode(s32 mode) {
     return D_80113B2C.mode == mode;
 }
 
@@ -649,17 +737,142 @@ void func_8001E1DC(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E218);
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E5D8);
+s32 func_8001E5D8(VECTOR32 *out) {
+    VECTOR32 pos;
+    VECTOR32 angle;
+    VECTOR32 off;
+    VECTOR32 scale;
+
+    scale = D_800101E4;
+    if (CAM->unk94C == 0) {
+        angle.vx = CAM->unk954.vx;
+    } else {
+        angle = CAM->unk954;
+    }
+    off.vx = 0;
+    off.vy = 0;
+    off.vz = 0x2C0;
+    EGSGeometry_VectorRotateYXZ(&off, &angle, &off);
+    if (CAM->unk1B4 == 0) {
+        pos.vx = CAM->unk1EC.vx;
+    } else {
+        pos = CAM->unk1EC;
+    }
+    out->vx = pos.vx + off.vx;
+    out->vy = pos.vy + off.vy;
+    out->vz = pos.vz + off.vz;
+    CAM->unkD1C = *out;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 0;
+    CameraAccessMoveInfo(gCamera, 1, 2, 1);
+    return 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E76C);
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001ECC8);
+s32 func_8001ECC8(void) {
+    VECTOR32 pos;
+
+    if (D_80113B2C.cut == 1) {
+        func_8001E76C();
+    } else {
+        func_8001D91C();
+        func_8001E1DC();
+        func_8001AF98();
+        func_8001E218(0);
+        func_8001E5D8(&pos);
+        SCRATCH_CALL0(func_80021BA4);
+    }
+    if (D_80113B2C.action == 7 ||
+        (D_80113B2C.unk085 && !GameCameraCheckMode(14) && !GameCameraCheckMode(15) &&
+         !GameCameraCheckMode(16) && !GameCameraCheckMode(10))) {
+        VECTOR32 lo = { -1, 0, -1, 0 };
+        VECTOR32 hi = { 1, 0, 1, 0 };
+
+        CAM->unkD1C = lo;
+        CAM->unkD30 = hi;
+        CAM->unkD40 = 0;
+        CameraAccessMoveInfo(gCamera, 1, 0, 5);
+        CAM->unkD1C = lo;
+        CAM->unkD30 = hi;
+        CAM->unkD40 = 0;
+        CameraAccessMoveInfo(gCamera, 1, 3, 5);
+    }
+    if (D_80113B2C.transitionTime != 0 && D_80113B2C.transitionTime > 0) {
+        D_80113B2C.transitionTime--;
+    }
+    D_80113B2C.cut = 0;
+    return 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001EF10);
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001F864);
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraInit);
+void GameCameraInit(void) {
+    VECTOR32 pos = { 0, 0x180, 0, 0 };
+    VECTOR32 angle = { 0, 0x800, 0, 0 };
+    s32 i;
+    s32 j;
+    s32 k;
+    s32 none;
+    GameCamCamera *cam;
+
+    D_8010FF78 = 0;
+    CameraInit(gCamera, 0, &pos, &angle, rcos(0x19D) * 192 / rsin(0x19D), &D_8010F714, 0, 2400, &D_800FE238,
+               &D_800FE340, 0, 0);
+    memset(&D_80113B2C, 0, sizeof(GameCamState));
+    D_80113B2C.mode = -1;
+    D_80113B2C.joystickMode = 5;
+    D_80113B2C.views = D_800FCF84;
+    D_80113B2C.modes = D_800FDC50;
+    D_80113B2C.modeData = D_800FE13C;
+    D_80113B2C.modeJoystick = D_800FE190;
+    D_80113B2C.joystickModes = D_800FE1E4;
+    D_80113B2C.unk05C = 0;
+    D_80113B2C.action = 0;
+    D_80113B2C.modeMask = 0;
+    D_80113B2C.joystickMask = 0;
+    D_80113B2C.collision = 1;
+    D_80113B2C.unk085 = 0;
+    D_80113B2C.cut = 1;
+    for (i = 0; i < 21; i++) {
+        D_80113B2C.modes[i].unk04 = 0;
+        D_80113B2C.modes[i].unk08 = 0;
+        D_80113B2C.modes[i].unk0C = 0;
+        D_80113B2C.modes[i].unk10 = 0;
+        D_80113B2C.modes[i].unk14 = 0;
+        D_80113B2C.modes[i].lead.vx = 0;
+        D_80113B2C.modes[i].lead.vy = 0;
+        D_80113B2C.modes[i].lead.vz = 0;
+        D_80113B2C.modes[i].watch.vx = 0;
+        D_80113B2C.modes[i].watch.vy = 0;
+        D_80113B2C.modes[i].watch.vz = 0;
+        D_80113B2C.modes[i].unk38 = 0;
+    }
+    D_80113B2C.scrimAnim = NULL;
+    for (j = 4 * sizeof(GameCamShake); j >= 0; j -= sizeof(GameCamShake)) {
+        ((GameCamShake *)((u8 *)D_80113B2C.shakes + j))->active = 0;
+    }
+    D_80113B2C.shakeList = NULL;
+    D_80113B2C.unk1FC = 1;
+    D_80113B2C.unk1FD = 1;
+    D_80113B2C.unk1FE = 1;
+    D_80113B2C.transitionTime = 0;
+    none = -1;
+    for (k = 3 * sizeof(GameCamSlot); k >= 0; k -= sizeof(GameCamSlot)) {
+        ((GameCamSlot *)((u8 *)D_80113B2C.slots + k))->mode = none;
+    }
+    D_80113B2C.slotList = NULL;
+    cam = CAM;
+    cam->unkD40 = 1;
+    cam->unkD1C.vx = 181;
+    CameraAccessMoveInfo(gCamera, 1, 8, 2);
+    cam = CAM;
+    cam->unkD40 = 1;
+    cam->unkD1C.vx = 827;
+    CameraAccessMoveInfo(gCamera, 1, 8, 3);
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraActivate);
 
@@ -701,25 +914,142 @@ INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020230);
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_800203F0);
 
+#ifdef NON_MATCHING
+/* regalloc: track and the plane distance swap s0/s1 */
+void func_80020978(GameCamTrack *track) {
+    VECTOR32 n;
+    VECTOR32 q;
+    VECTOR32 p;
+    s32 r = track->unk10 << 12;
+    s32 dist = track->unk40;
+    GameCamSVec *normal = track->plane->normal;
+    s32 d = track->unk3C;
+
+    if (track->unk34 >= dist) {
+        n.vx = normal->vx;
+        n.vy = normal->vy;
+        n.vz = normal->vz;
+        d = dist - d + r;
+        track->unk54.vx = EGSMathFIXMul(n.vx, d);
+        track->unk54.vy = EGSMathFIXMul(n.vy, d);
+        track->unk54.vz = EGSMathFIXMul(n.vz, d);
+        track->unk64.vx = EGSMathFIXMul(n.vx, dist);
+        track->unk64.vy = EGSMathFIXMul(n.vy, dist);
+        track->unk64.vz = EGSMathFIXMul(n.vz, dist);
+        track->unk74.vx = track->unk54.vx - track->unk64.vx;
+        track->unk74.vy = track->unk54.vy - track->unk64.vy;
+        track->unk74.vz = track->unk54.vz - track->unk64.vz;
+    } else {
+        p.vx = EGSMathFIXDiv(track->vel.vx, dist);
+        p.vy = EGSMathFIXDiv(track->vel.vy, dist);
+        p.vz = EGSMathFIXDiv(track->vel.vz, dist);
+        d = d - r;
+        q.vx = EGSMathFIXMul(p.vx, d);
+        q.vy = EGSMathFIXMul(p.vy, d);
+        q.vz = EGSMathFIXMul(p.vz, d);
+        track->unk54.vx = q.vx - track->vel.vx;
+        track->unk54.vy = q.vy - track->vel.vy;
+        track->unk54.vz = q.vz - track->vel.vz;
+        track->unk64 = track->unk54;
+        track->unk74.vx = 0;
+        track->unk74.vy = 0;
+        track->unk74.vz = 0;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020978);
+#endif
 
 void func_80020B58(GameCamTrack *track) {
     func_8001FF08(track);
     if (track->moving) {
-        track->moving = func_800203F0(&track->unk44, track->unk24, track->unk30);
+        track->moving = func_800203F0(&track->unk44, track->plane, track->unk30);
         if (track->moving) {
             func_80020978(track);
         }
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020BB8);
+void func_80020BB8(VECTOR32 *pos, s32 radius, s32 yLow, s32 yHigh, VECTOR32 *delta, s32 rxz, s32 ry, GameCamBox *box) {
+    box->min.vx = pos->vx + FIX12(delta->vx <= 0 ? delta->vx - rxz : -rxz) - radius;
+    box->min.vy = yLow + FIX12(delta->vy <= 0 ? delta->vy - ry : -ry);
+    box->min.vz = pos->vz + FIX12(delta->vz <= 0 ? delta->vz - rxz : -rxz) - radius;
+    box->max.vx = pos->vx + FIX12(MAX(delta->vx, 0) + rxz) + radius;
+    box->max.vy = yHigh + FIX12(MAX(delta->vy, 0) + ry);
+    box->max.vz = pos->vz + FIX12(MAX(delta->vz, 0) + rxz) + radius;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020E90);
 
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
 
+#ifdef NON_MATCHING
+/* the CameraAccessFrameInfo mode select: original loads gCamera after the arms (shared call tail) */
+s32 func_80021BA4(void) {
+    VECTOR32 cur;
+    VECTOR32 pos;
+    VECTOR32 d;
+    VECTOR32 dir;
+    VECTOR32 angle;
+
+    if (CAM->unk1B4 == 0) {
+        pos.vx = CAM->unk1EC.vx;
+    } else {
+        pos = CAM->unk1EC;
+    }
+    D_80113B2C.unk085 = 0;
+    if (D_80113B2C.collision && D_80113B2C.mode != 10 && D_80113B2C.mode != 13 && D_80113B2C.mode != 19 &&
+        D_80113B2C.unk05C != 3) {
+        GOBJ_MATRIX m;
+        GameCamSVec rot;
+        s32 which;
+
+        if (D_80113B2C.mode == 13 || D_80113B2C.mode == 18 || D_80113B2C.unk05C == 2) {
+            which = 2;
+        } else {
+            which = 1;
+        }
+        CameraAccessFrameInfo(gCamera, 0, which, 1);
+        cur = CAM->unkD1C;
+        d.vx = pos.vx - cur.vx;
+        d.vy = pos.vy - cur.vy;
+        d.vz = pos.vz - cur.vz;
+        if (CAM->unk94C == 0) {
+            angle.vx = CAM->unk984.vx;
+        } else {
+            angle = CAM->unk984;
+        }
+        rot.vx = -angle.vx;
+        rot.vy = angle.vy;
+        rot.vz = -angle.vz;
+        RotMatrixYXZ(&rot, &m);
+        m.m[0][1] = -m.m[0][1];
+        m.m[1][2] = -m.m[1][2];
+        m.m[1][0] = -m.m[1][0];
+        m.m[2][1] = -m.m[2][1];
+        dir.vx = m.m[0][2];
+        dir.vy = m.m[1][2];
+        dir.vz = m.m[2][2];
+        if (func_80021230(&cur, &d, &dir, &pos)) {
+            D_80113B2C.unk085 = 1;
+        }
+    }
+    {
+        VECTOR32 scale;
+
+        scale.vx = 1;
+        scale.vy = 1;
+        scale.vz = 1;
+        CAM->unkD1C = pos;
+        CAM->unkD30 = scale;
+    }
+    CAM->unkD40 = 0;
+    CameraAccessMoveInfo(gCamera, 1, 3, 1);
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021BA4);
+#endif
 
 void GameCameraModeGetDefaultLeadOffset(s32 mode, VECTOR32 *out) {
     *out = D_80113B2C.views[D_80113B2C.modes[mode].view].lead;
@@ -769,51 +1099,50 @@ Gobj *GameCameraGetPrimaryGobj(void) {
     return D_80113B2C.primary;
 }
 
-#ifdef NON_MATCHING
-/* free-slot search: original cross-jumps the found-slot path into the shake!=NULL move */
 void GameCameraShakeStart(GameCamShake *shake, s32 magnitude, s32 rate, VECTOR32 *axis, EGSFrame *frame, VECTOR32 *pos) {
     s32 i;
     GameCamShake *s;
+    GameCamShake *use;
 
     if (magnitude == 0 || rate == 0 || axis == NULL || (magnitude < 0 && shake == NULL)) {
         return;
     }
-    if (shake == NULL) {
+    if (shake != NULL) {
+        use = shake;
+    } else {
+        use = NULL;
         for (i = 0, s = D_80113B2C.shakes; i < 5; i++, s++) {
             if (!s->active) {
-                shake = s;
+                use = s;
                 break;
             }
-            if (shake == NULL || s->magnitude < shake->magnitude) {
-                shake = s;
+            if (use == NULL || s->magnitude < use->magnitude) {
+                use = s;
             }
         }
     }
-    shake->active = 1;
-    shake->magnitude = magnitude;
-    shake->rate = rate;
-    shake->axis = *axis;
+    use->active = 1;
+    use->magnitude = magnitude;
+    use->rate = rate;
+    use->axis = *axis;
     if (frame != NULL) {
-        shake->frame = frame;
+        use->frame = frame;
     } else if (pos != NULL) {
-        shake->frame = &shake->ownFrame;
-        if (shake->ownFrame.pos.pad == 0) {
-            shake->ownFrame.pos.vx = pos->vx;
-            shake->frame->pos.vy = -pos->vy;
-            shake->frame->pos.vz = pos->vz;
+        use->frame = &use->ownFrame;
+        if (use->ownFrame.pos.pad == 0) {
+            use->ownFrame.pos.vx = pos->vx;
+            use->frame->pos.vy = -pos->vy;
+            use->frame->pos.vz = pos->vz;
         } else {
-            EGSFrameSetPosition(&shake->ownFrame, 0, pos);
+            EGSFrameSetPosition(&use->ownFrame, 0, pos);
         }
     } else {
-        shake->frame = NULL;
+        use->frame = NULL;
     }
-    if (!EGSListFind(&D_80113B2C.shakeList, 0, shake)) {
-        D_80113B2C.shakeList = EGSListAdd(&D_80113B2C.shakeList, shake);
+    if (!EGSListFind(&D_80113B2C.shakeList, 0, use)) {
+        D_80113B2C.shakeList = EGSListAdd(&D_80113B2C.shakeList, use);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraShakeStart);
-#endif
 
 void GameCameraShakeModifyMagnitude(GameCamShake *shake, VECTOR32 *axis) {
     shake->axis = *axis;
@@ -964,6 +1293,50 @@ void GameCameraSetScrimScrollRate(s32 rate) {
     D_80113B2C.scrimRate = -rate;
 }
 
+#ifdef NON_MATCHING
+/* the original does not cross-jump the two scroll-rate stores (sw stays in the abs branch's delay slot) */
+void func_80023D70(void) {
+    VECTOR32 pos;
+    VECTOR32 dir;
+    void *display;
+    s32 i;
+    s32 rate;
+
+    if ((u8)(D_80113B2C.scrimOn + 1) >= 2) {
+        pos.vx = (*(EGSFrame **)*gCamera)->pos.vx;
+        pos.vy = (*(EGSFrame **)*gCamera)->pos.vy;
+        pos.vz = (*(EGSFrame **)*gCamera)->pos.vz;
+        pos.vy = -pos.vy;
+        dir.vx = (*(EGSFrame **)*gCamera)->m[0][2];
+        dir.vy = (*(EGSFrame **)*gCamera)->m[1][2];
+        dir.vz = (*(EGSFrame **)*gCamera)->m[2][2];
+        dir.vy = -dir.vy;
+        dir.vx = EGSMathFIXMul(dir.vx, 32);
+        dir.vy = EGSMathFIXMul(dir.vy, 32);
+        dir.vz = EGSMathFIXMul(dir.vz, 32);
+        pos.vx += dir.vx;
+        pos.vy += dir.vy;
+        pos.vz += dir.vz;
+        EGSFrameSetPosition(((GameCamAnim *)D_80113B2C.scrimAnim)->frame, 0, &pos);
+    }
+    if (D_80113B2C.scrimRate != 0) {
+        CameraGetDisplay(gCamera, &display);
+        rate = D_80113B2C.scrimRate;
+        if ((u32)gExeTick % (u32)(rate < 0 ? -rate : rate) == 0 && rate < 0) {
+            for (i = 0; i < 13; i++) {
+                EGSDisplayAddPoly(display, mPMI[i]);
+            }
+            D_80113B2C.scrimRate = ABS(D_80113B2C.scrimRate);
+        } else if (D_80113B2C.scrimRate > 0) {
+            for (i = 0; i < 13; i++) {
+                EGSDisplayDeletePoly(display, mPMI[i]);
+            }
+            D_80113B2C.scrimRate = -D_80113B2C.scrimRate;
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80023D70);
+#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/gamecam", jtbl_80010274);
