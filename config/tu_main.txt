@@ -18,7 +18,7 @@
 8002B2B4 object    c   rodata=80010F60
 800303B8 sniper    c   rodata=8001148C
 800323EC target    c   rodata=8001149C
-800353D0 joystick  c   rodata=800114B8
+80035328 joystick  c   rodata=800114B8   # starts with a static helper used by GameSysJoystick
 80039DEC sprite    c
 8003A980 los       c
 8003B758 interface c   rodata=80011B90

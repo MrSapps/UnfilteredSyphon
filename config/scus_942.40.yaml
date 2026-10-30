@@ -117,7 +117,7 @@ segments:
       - [0x1BAB4, c, object]
       - [0x20BB8, c, sniper]
       - [0x22BEC, c, target]
-      - [0x25BD0, c, joystick]
+      - [0x25B28, c, joystick]
       - [0x2A5EC, c, sprite]
       - [0x2B180, c, los]
       - [0x2BF58, c, interface]
