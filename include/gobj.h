@@ -11,18 +11,27 @@ typedef struct VECTOR32 {
 /* Per-object movement bookkeeping (0x1B8 bytes, EGSMemMalloc'd). */
 typedef struct MoveInfo {
     /* 0x000 */ VECTOR32 pos;
-    /* 0x010 */ u8 unk010[0xFC];
+    /* 0x010 */ u8 unk010[0xF9];
+    /* 0x109 */ u8 unk109;
+    /* 0x10A */ u8 unk10A[2];
     /* 0x10C */ VECTOR32 unk10C; /* position (y grows downwards) */
     /* 0x11C */ u8 unk11C[0x10];
     /* 0x12C */ s32 unk12C; /* height */
-    /* 0x130 */ u8 unk130[0x44];
+    /* 0x130 */ s32 unk130;
+    /* 0x134 */ s32 unk134;
+    /* 0x138 */ s32 unk138;
+    /* 0x13C */ s32 unk13C;
+    /* 0x140 */ u8 unk140[0x34];
     /* 0x174 */ s32 unk174;
     /* 0x178 */ u8 unk178[4];
     /* 0x17C */ s32 unk17C;
     /* 0x180 */ u8 unk180[0x10];
     /* 0x190 */ s32 unk190;
     /* 0x194 */ VECTOR32 pendingMove; /* applied by GameSysProcessMoveRequests */
-    /* 0x1A4 */ u8 unk1A4[0x14];
+    /* 0x1A4 */ u32 collFlags;
+    /* 0x1A8 */ u8 unk1A8[8];
+    /* 0x1B0 */ struct CollisionInfo *coll;
+    /* 0x1B4 */ u8 unk1B4[4];
 } MoveInfo; /* size 0x1B8 */
 
 typedef struct EGSFrame {
