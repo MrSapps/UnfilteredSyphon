@@ -123,6 +123,18 @@ s32 func_8007369C(CobjNode *node, CobjNode **list);
 s32 func_800736EC(CobjNode *src, CobjNode **list);
 s32 func_800737B8(Gobj *gobj, CobjNode **list);
 
+/* Collision physics state (fields used here) */
+typedef struct CobjPhysics {
+    /* 0x00 */ u8 unk00[0x24];
+    /* 0x24 */ s32 minNormalY; /* contacts with a flatter normal count as floor */
+} CobjPhysics;
+
+/* Contact found by the collision detector */
+typedef struct CobjContact {
+    /* 0x00 */ u8 unk00[0x44];
+    /* 0x44 */ VECTOR32 normal;
+} CobjContact;
+
 s32 iCollisionPhysicsFaceGetFrictionForceValue(u8 *physics, s32 *out) {
     s32 modulus;
 
@@ -158,7 +170,46 @@ INCLUDE_ASM("asm/main/nonmatchings/cobj", iCollisionPhysicsGetKineticFrictionFor
 
 INCLUDE_RODATA("asm/main/nonmatchings/cobj", D_800122D4);
 
+#ifdef NON_MATCHING
+/* Scheduling only: the first EGSMathFIXMul result is stored in the next call's delay slot */
+/* Push out along the averaged normal of the floor-like contacts. */
+void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR32 *out) {
+    VECTOR32 sum = { 0, 0, 0, 0 };
+    VECTOR32 push;
+    s32 len;
+    s32 i;
+    s32 n = 0;
+    s32 scale;
+
+    for (i = 0; i < count; i++) {
+        if (contacts[i]->normal.vy >= phys->minNormalY) {
+            sum.vx += contacts[i]->normal.vx;
+            sum.vy += contacts[i]->normal.vy;
+            n++;
+            sum.vz += contacts[i]->normal.vz;
+        }
+    }
+    if (n > 0) {
+        scale = 0xCCCC;
+        if (n >= 2) {
+            EGSMath_VectorModulus(&sum, &len);
+            scale = 0x0CCCC000 / len;
+        }
+        for (i = 0; i < count; i++) {
+            if (contacts[i]->normal.vy >= phys->minNormalY) {
+                push.vx = EGSMathFIXMul(contacts[i]->normal.vx, -scale);
+                push.vy = EGSMathFIXMul(contacts[i]->normal.vy, -scale);
+                push.vz = EGSMathFIXMul(contacts[i]->normal.vz, -scale);
+                out->vx += push.vx;
+                out->vy += push.vy;
+                out->vz += push.vz;
+            }
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cobj", func_80072E34);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/cobj", CollisionPhysicsGobj_DetectorMotion);
 
@@ -336,7 +387,128 @@ INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjHandleHotBox);
 
 INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjLoop);
 
-INCLUDE_ASM("asm/main/nonmatchings/cobj", HMDLOSLoop);
+typedef struct LOSMtx {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+} LOSMtx;
+
+/* HMD model header: boxes per part */
+typedef struct HMDHeader {
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ s32 last; /* number of boxes - 1 */
+    /* 0x08 */ u8 unk08[0xC];
+    /* 0x14 */ s32 boxOffset; /* from the header, 0x20 bytes per box */
+} HMDHeader;
+
+typedef struct HMDLOSModel {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ HMDHeader *hmd;
+} HMDLOSModel;
+
+/* GameObjectAnim as seen by the LOS code */
+typedef struct HMDLOSAnim {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ LOSMtx *frame;
+    /* 0x10 */ HMDLOSModel *model;
+    /* 0x14 */ u16 id; /* gameObjectsInfo index in the low 10 bits */
+    /* 0x16 */ u8 unk16[2];
+    /* 0x18 */ LOSMtx **frames;
+} HMDLOSAnim;
+
+/* Face handed to the GTE intersection code */
+typedef struct LOSAnimFaceState {
+    /* 0x00 */ s32 kind; /* 3: triangle, 4: quad */
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ void *unk08;
+    /* 0x0C */ s32 unk0C;
+    /* 0x10 */ s32 unk10;
+    /* 0x14 */ s16 *v[4];
+} LOSAnimFaceState;
+
+/* Terrain face (negative first word: quad) */
+typedef struct LOSTerrFace {
+    /* 0x00 */ s32 flags;
+    /* 0x04 */ u8 unk04[3];
+    /* 0x07 */ u8 v0;
+    /* 0x08 */ u8 v3;
+    /* 0x09 */ u8 unk09;
+    /* 0x0A */ u8 v1;
+    /* 0x0B */ u8 v2;
+} LOSTerrFace;
+
+/* Terrain face hit by the sector pass */
+typedef struct LOSSectorHit {
+    /* 0x00 */ LOSTerrFace *face;
+    /* 0x04 */ u8 *verts;
+} LOSSectorHit; /* size 8 */
+
+extern LOSSectorHit losSectorHitArray[];
+extern u32 losSectorHitCount;
+
+void GobjLOSLoop(void *query, s32 type, u8 arg2);
+void LOSVerifyHits(void *query);
+s32 LOSGeometry_GetIntersectLine2AnimFacePlane(void *ray, LOSAnimFaceState *face, LOSVec *point, LOSVec *normal);
+
+/* Only the field used here; see weapon.c for the full WeaponInfo. */
+typedef struct CobjWeaponInfo {
+    /* 0x00 */ char *name;
+    /* 0x04 */ void *masterAnim;
+    /* 0x08 */ u8 unk08[0x18];
+} CobjWeaponInfo; /* size 0x20 */
+
+extern CobjWeaponInfo gWeaponInfo[];
+extern LOSAnimFaceState losAnimFace;
+extern LOSHit *losBlocker;
+extern u8 losRay[];
+void LOSSetupGTE(LOSMtx *mtx);
+s32 LOSRotBoxV(void *bxv, s32 z, LOSHit *hit, void *ray);
+
+/* Weapon an object holds, by its GameObjectInfo weapon word */
+#define HMDLOS_WEAPON(info)                                                                    \
+    (*(u8 *)&(info)->flags24 != 0 ? *(u8 *)&(info)->flags24                                    \
+     : (*(u32 *)&(info)->flags24 & 0x3000) != 0x1000                                           \
+         ? ((*(u32 *)&(info)->flags24 & 0x3000) == 0x2000 ? 0x14 : 0)                          \
+         : 0x13)
+
+/* Line of sight against an HMD model's boxes (last box: the held weapon); bit per box hit. */
+s32 HMDLOSLoop(HMDLOSAnim *anim) {
+    u8 bxv[0x48];
+    LOSHit hit;
+    HMDLOSAnim owner;
+    s32 last = anim->model->hmd->last;
+    s32 i;
+    s32 hits;
+    LOSMtx *mtx;
+    void *box;
+
+    hit.owner = (LOSHitOwner *)&owner;
+    losAnimFace.kind = 3;
+    losAnimFace.unk08 = &losAnimFace.unk0C;
+    hits = 0;
+    for (i = last; i >= 0; i--) {
+        mtx = anim->frames[i];
+        box = (u8 *)anim->model->hmd + anim->model->hmd->boxOffset + i * 32;
+        if (i == last) {
+            box = gWeaponInfo[HMDLOS_WEAPON(&gameObjectsInfo[gameObjectsInfo[anim->id & 0x3FF].runtime->id])].masterAnim;
+            if (box == NULL) {
+                hits <<= 1;
+                continue;
+            }
+            mtx = anim->frames[8];
+        }
+        owner.frame = mtx;
+        InitBxv2(bxv, box, 0);
+        LOSSetupGTE(mtx);
+        hits <<= 1;
+        if (LOSRotBoxV(bxv, losEndPointZ, &hit, &losRay)) {
+            losBlocker->point = hit.point;
+            hits |= 1;
+            losBlocker->normal = hit.normal;
+        }
+    }
+    return hits;
+}
 
 s32 LOSGetCameraBlocker(LOSVec *point, LOSVec *normal) {
     u32 i;
@@ -430,7 +602,48 @@ void PreSortHits(void) {
     ASSERT(losHitCount < LOS_HIT_MAX);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/cobj", GTELOSFinish);
+void GTELOSFinish(void *query, u8 windows, u8 arg2) {
+    u32 i;
+    LOSSectorHit *sh;
+    LOSTerrFace *face;
+    LOSHit *hit;
+    s32 kind;
+
+    for (i = 0; i < losSectorHitCount; i++) {
+        sh = &losSectorHitArray[i];
+        face = sh->face;
+        kind = 3;
+        if (face->flags < 0) {
+            kind = 4;
+        }
+        losAnimFace.kind = kind;
+        losAnimFace.unk08 = &losAnimFace.unk0C;
+        hit = &losHitArray[losHitCount];
+        if (kind == 3) {
+            losAnimFace.v[0] = (s16 *)(sh->verts + (face->v0 << 3) / 3);
+            losAnimFace.v[1] = (s16 *)(sh->verts + (face->v1 << 3) / 3);
+            losAnimFace.v[2] = (s16 *)(sh->verts + (face->v2 << 3) / 3);
+        } else if (kind == 4) {
+            losAnimFace.v[0] = (s16 *)(sh->verts + (face->v0 << 3) / 3);
+            losAnimFace.v[1] = (s16 *)(sh->verts + (face->v1 << 3) / 3);
+            losAnimFace.v[2] = (s16 *)(sh->verts + (face->v3 << 3) / 3);
+            losAnimFace.v[3] = (s16 *)(sh->verts + (face->v2 << 3) / 3);
+        }
+        if (LOSGeometry_GetIntersectLine2AnimFacePlane(losRay, &losAnimFace, &hit->point, &hit->normal) == 0) {
+            hit->window = face;
+            hit->type = 0;
+            hit->box = NULL;
+            losHitCount++;
+#line 1724
+            ASSERT(losHitCount < LOS_HIT_MAX);
+        }
+    }
+    GobjLOSLoop(query, 1, arg2);
+    if (windows) {
+        GobjLOSLoop(query, 2, 0);
+    }
+    LOSVerifyHits(query);
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/cobj", GTELOSLoop);
 

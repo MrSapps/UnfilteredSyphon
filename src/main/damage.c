@@ -2,6 +2,7 @@
 #include "system.h"
 #include "gameobj.h"
 #include "gobj.h"
+#include "egsmath.h"
 
 /* damage.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F980)
@@ -15,6 +16,41 @@ SDATA_LOCAL(D_80110180)
 SDATA_LOCAL(D_80110184)
 
 typedef void (*DamageCallback)(s16 id, s16 by);
+
+extern u8 D_8010F988; /* bone angle limits not yet computed */
+extern s32 D_80110170; /* cos 40 deg: side limits */
+extern s32 D_80110174;
+extern s32 D_80110178; /* cos 65 deg: front/back limits */
+extern s32 D_8011017C;
+extern s32 D_801069F0[4]; /* body bones */
+extern s32 D_80106A00[4]; /* side bones */
+extern s32 D_80106A10[4]; /* other side bones */
+extern s32 D_80106A20[4]; /* front/back bones */
+int rand(void);
+int rcos(int a);
+
+/* Display list of animated models (see object.c) */
+typedef struct DamageDisplayAnim {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ EGSFrame *frame;
+    /* 0x10 */ u8 unk10[4];
+    /* 0x14 */ u16 id; /* 0x2000: game object, gameObjectsInfo index in the low 10 bits */
+} DamageDisplayAnim;
+
+typedef struct DamageDisplayNode {
+    /* 0x00 */ DamageDisplayAnim *anim;
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ struct DamageDisplayNode *next;
+} DamageDisplayNode;
+
+typedef struct DamageDisplay {
+    /* 0x00 */ u8 unk00[0x8C];
+    /* 0x8C */ DamageDisplayNode *anims;
+} DamageDisplay;
+
+extern VECTOR32 gExplosionPosition;
+void NPCPutFireOnNPCMove(s32 id);
+void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
 
 extern DamageCallback D_8010F980; /* damaged callback */
 extern DamageCallback D_8010F984; /* destroyed callback */
@@ -30,9 +66,18 @@ typedef struct GobjHealth {
     /* 0x04 */ s16 lastAttacker;
     /* 0x06 */ s16 armor;
     /* 0x08 */ s16 health;
-    /* 0x0A */ u8 unk0A[2];
-    /* 0x0C */ s16 unk0C;
+    /* 0x0A */ s16 lastAttackerBy;
+    /* 0x0C */ s16 unk0C; /* pending damage */
+    /* 0x0E */ s16 damageType;
 } GobjHealth;
+
+/* TargetInfo aim points */
+typedef struct DamageTarget {
+    /* 0x00 */ s16 targetId;
+    /* 0x02 */ u8 unk02[0x62];
+    /* 0x64 */ VECTOR32 targetPos; /* aim point on the target */
+    /* 0x74 */ VECTOR32 aimPos;    /* aim point otherwise */
+} DamageTarget;
 #define GOBJ_HEALTH(g) ((GobjHealth *)(g)->healthInfo)
 
 /* A thrown grenade (passed to its fuse timer callback). */
@@ -54,9 +99,11 @@ void EGSDisplayRegisterDamage(void *arg0, void *arg1, void *arg2, s32 tex, Gobj 
 void SniperSetMode(s32 mode);
 void NPCDropPickupStuff(s16 id);
 void EGSAnimShowDetailDef(GameObjectAnim *anim);
-s32 DamageRadius(s16 id, void *pos, s32 damage, s32 radius, s32 radius2, s32 kind, s32 arg6); /* returns objects hit */
+s32 DamageRadius(s16 id, VECTOR32 *pos, s32 damage, s32 inner, s32 outer, s32 kind, u8 self);
 void SysExeTickQueueTimer(void (*cb)(), s32 ticks, void *arg);
-void DamageGOBJ(s32 arg0, s16 from, s16 to, s16 amount, s32 type);
+void DamageGOBJ(s16 from, s16 by, s16 to, s16 amount, s16 type);
+void DamageGobjCAS(s16 id, s32 action);
+void CASRequestAction(s32 id, s32 action);
 void func_80069C70(Grenade *g);
 /* NPC state (GameObjectRuntime.npc) fields used here */
 typedef struct DamageNPC {
@@ -98,6 +145,12 @@ extern s32 gCurrentWeapon;
 
 /* GameObjectInfo.flags24 low byte: NPC weapon */
 #define GOBJINFO_WEAPON(info) (*(u8 *)&(info)->flags24)
+#define GOBJINFO_WORD24(info) (*(u32 *)&(info)->flags24)
+/* Weapon an object holds (no player special case), as one expression (see weapon.c) */
+#define GOBJINFO_NPC_WEAPON(info)                                                            \
+    (GOBJINFO_WEAPON(info) != 0                ? GOBJINFO_WEAPON(info)                        \
+     : (GOBJINFO_WORD24(info) & 0x3000) != 0x1000 ? ((GOBJINFO_WORD24(info) & 0x3000) == 0x2000 ? 0x14 : 0) \
+                                               : 0x13)
 #define GOBJ_WEAPON_IS(g, w)                                                                         \
     ((g)->id != gPlayerOffset ? (GOBJINFO_WEAPON(&gameObjectsInfo[(g)->id]) != 0 &&                   \
                                  GOBJINFO_WEAPON(&gameObjectsInfo[(g)->id]) == (w))                   \
@@ -169,7 +222,67 @@ void func_800669B0(VECTOR32 *from, Gobj *gobj, VECTOR32 *out) {
     out->vz = from->vz - pos.vz;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", WhichBoneIsHit);
+#define DAMAGE_FIX(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+
+/* Pick the bone a bullet coming along dir hits: by the angle to the object's facing. */
+s32 WhichBoneIsHit(GameObjectAnim *anim, VECTOR32 *dir, s32 **bones, s32 *count) {
+    VECTOR32 d;
+    VECTOR32 side;
+    VECTOR32 facing;
+    s32 dot[2];
+    s32 r = rand() & 3;
+    s32 hit = 0;
+
+    facing.vx = ((EGSFrame *)anim->frame)->m[0][2];
+    facing.vy = ((EGSFrame *)anim->frame)->m[1][2];
+    facing.vz = ((EGSFrame *)anim->frame)->m[2][2];
+    facing.vy = -facing.vy;
+    if (D_8010F988) {
+        D_80110170 = rcos(0x1C7);
+        D_80110174 = rcos(0x1C7);
+        D_80110178 = rcos(0x2E3);
+        D_8011017C = rcos(0x2E3);
+        D_8010F988 = 0;
+    }
+    d = *dir;
+    d.vy = 0;
+    GTEMath_VectorNormal((VECTOR *)&d, (VECTOR *)&d);
+    facing.vy = 0;
+    GTEMath_VectorNormal((VECTOR *)&facing, (VECTOR *)&facing);
+    side.vx = facing.vz;
+    side.vy = 0;
+    side.vz = -facing.vx;
+    *count = 4;
+    dot[0] = d.vx * side.vx + d.vy * side.vy + d.vz * side.vz;
+    dot[0] = DAMAGE_FIX(dot[0]);
+    if (dot[0] >= D_80110174) {
+        hit |= 2;
+    } else if (-D_80110170 >= dot[0]) {
+        hit |= 1;
+    }
+    dot[0] = d.vx * facing.vx + d.vy * facing.vy + d.vz * facing.vz;
+    dot[0] = DAMAGE_FIX(dot[0]);
+    if (dot[0] >= D_8011017C) {
+        hit |= 8;
+    } else if (-D_80110178 >= dot[0]) {
+        hit |= 4;
+    }
+    if (hit & 2) {
+        *bones = D_80106A00;
+        return (r & 1) ? 5 : 6;
+    }
+    if (hit & 1) {
+        *bones = D_80106A10;
+        return (r & 1) ? 0xB : 0xC;
+    }
+    if (hit & 0xC) {
+        *bones = D_80106A20;
+        *count = 2;
+        return (r & 1) ? 0xE : 0xD;
+    }
+    *bones = D_801069F0;
+    return D_801069F0[r];
+}
 
 void iDamageShowParticleGlassSpark(void *arg0, void *arg1, void *arg2) {
     NPCSoundGobj(1, arg0, arg1, 0x1E0);
@@ -273,7 +386,64 @@ void DamageShowObjectBulletHole(s16 id, void *arg1, void *arg2) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGOBJ);
+/* Damage 'to' (from: attacker gobj id or -1, by: who gets credited). Grenade launcher shots
+ * become blasts; the rest go through the hit animation. */
+void DamageGOBJ(s16 from, s16 by, s16 to, s16 amount, s16 type) {
+    s32 weapon;
+    Gobj *target;
+    Gobj *attacker;
+    s32 before;
+    VECTOR32 *pos;
+
+    if (from != -1) {
+        if (gameObjectsInfo[from].runtime->id != gPlayerOffset) {
+            weapon = GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gameObjectsInfo[from].runtime->id]);
+        } else {
+            weapon = gCurrentWeapon;
+        }
+    } else {
+        weapon = -1;
+    }
+    target = gameObjectsInfo[to].runtime;
+    if (from != -1) {
+        attacker = gameObjectsInfo[from].runtime;
+    } else {
+        attacker = NULL;
+    }
+    if ((u32)(weapon - 6) < 2) {
+        before = GOBJ_HEALTH(target)->health;
+        if (to == ((DamageTarget *)attacker->target)->targetId) {
+            pos = &((DamageTarget *)attacker->target)->targetPos;
+        } else {
+            pos = &((DamageTarget *)attacker->target)->aimPos;
+        }
+        if ((u32)(target->npcState - 1) >= 2) {
+            DamageRadius(from, pos, amount, 0x60, 0x20, 0x11, 0);
+        }
+        if (before != GOBJ_HEALTH(target)->health) {
+            return;
+        }
+    } else if (weapon == 0x10 && type != 0x892) {
+        if (to == ((DamageTarget *)attacker->target)->targetId) {
+            pos = &((DamageTarget *)attacker->target)->targetPos;
+        } else {
+            pos = &((DamageTarget *)attacker->target)->aimPos;
+        }
+        ParticleGrenadeLauncher(from, pos);
+        return;
+    }
+    if (by == gPlayerOffset || GOBJ_TYPE(to) != GOBJ_TYPE_BOMB) {
+        GOBJ_HEALTH(target)->lastAttacker = from;
+        GOBJ_HEALTH(target)->lastAttackerBy = by;
+        GOBJ_HEALTH(target)->unk0C = (from != -1 && (target->unk20[0] & 0x10)) ? 0 : amount;
+        GOBJ_HEALTH(target)->damageType = type;
+        if (target->cas != NULL && GOBJ_HEALTH(target)->health > 0) {
+            CASRequestAction(to, 0xE);
+        } else {
+            DamageGobjCAS(to, 0xE);
+        }
+    }
+}
 
 void DamageGOBJHierarchy(s16 id, s16 by) {
     GameObjectInfo *info = gameObjectsInfo;
@@ -337,7 +507,82 @@ void DamageKillAllPeople(s32 by, s16 kind) {
     NPCEndActivationFlag = 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageRadius);
+/* Damage everything displayed (and the player) around pos: full damage within inner, falling off
+ * to outer. Big explosions set NPCs on fire. Returns how many objects survived a full hit. */
+s32 DamageRadius(s16 id, VECTOR32 *pos, s32 damage, s32 inner, s32 outer, s32 kind, u8 self) {
+    VECTOR32 center;
+    VECTOR32 at;
+    s32 dist;
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    DamageDisplayNode *node;
+    DamageDisplayAnim *anim;
+    Gobj *other;
+    s32 idx;
+    u16 objId;
+    u8 isNpc;
+    s32 hits = 0;
+    u8 playerSeen = 0;
+    s32 amount;
+
+    if (pos == NULL) {
+        center.vx = gobj->anim->frame->pos.vx;
+        center.vy = gobj->anim->frame->pos.vy;
+        center.vz = gobj->anim->frame->pos.vz;
+        center.vy = -center.vy;
+    } else {
+        center = *pos;
+    }
+    node = ((DamageDisplay *)*gCamera)->anims;
+    while (node != NULL || !playerSeen) {
+        if (node == NULL) {
+            anim = (DamageDisplayAnim *)gObjPlayer->anim;
+        } else {
+            anim = node->anim;
+        }
+        objId = anim->id;
+        if (objId & 0x2000) {
+            idx = objId & 0x3FF;
+            other = gameObjectsInfo[idx].runtime;
+            isNpc = (u32)(other->npcState - 1) < 2;
+            if (idx == gPlayerOffset) {
+                playerSeen = 1;
+            }
+            if ((self || id != idx) && other->healthInfo->health > 0 && other->target != NULL &&
+                GOBJ_TYPE(idx) != 2 && (gSysInfo.level != 0x12 || idx == gPlayerOffset) && GOBJ_TYPE(idx) != 2 &&
+                (kind != 0x12 || isNpc)) {
+                at.vx = anim->frame->pos.vx;
+                at.vy = anim->frame->pos.vy;
+                at.vz = anim->frame->pos.vz;
+                at.vy = -at.vy;
+                EGSGeometry_GetFuzzyDistancePoint2Point(&at, &center, &dist);
+                if (dist <= 0) {
+                    dist = 1;
+                }
+                if (dist <= inner) {
+                    DamageGOBJ(-1, id, idx, damage, kind);
+                    if (inner >= 0x100 && dist < inner >> 1 && kind == 0x11) {
+                        if (isNpc && !(((DamageNPC *)other->npc)->flags & 4)) {
+                            NPCPutFireOnNPCMove(idx);
+                        }
+                        if (other->healthInfo->health >= 2) {
+                            hits++;
+                        }
+                    }
+                } else if (dist < outer) {
+                    amount = damage * (outer - dist) / (outer - inner);
+                    DamageGOBJ(-1, id, idx, amount > 0 ? amount : 1, kind);
+                }
+                gExplosionPosition.vx = center.vx;
+                gExplosionPosition.vy = center.vy;
+                gExplosionPosition.vz = center.vz;
+            }
+        }
+        if (node != NULL) {
+            node = node->next;
+        }
+    }
+    return hits;
+}
 
 #ifdef NON_MATCHING
 /* Register allocation: id/pos callee-saved regs swapped, hit count not sharing radius's reg. */

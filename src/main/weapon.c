@@ -2,6 +2,8 @@
 #include "system.h"
 #include "gameobj.h"
 #include "gobj.h"
+#include "game.h"
+#include "egsmath.h"
 
 /* weapon.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F900)
@@ -16,22 +18,32 @@ SDATA_LOCAL(D_80110028)
 SDATA_LOCAL(D_8011002C)
 
 typedef void (*WeaponCallback)();
+typedef void (*WeaponFiredCallback)(s16 id, s16 weapon);
+
+/* Master anim of a weapon model, with its dropped ("X") variant */
+typedef struct WeaponMasterAnim {
+    /* 0x00 */ u8 unk00[0x24];
+    /* 0x24 */ void *dropModel;
+} WeaponMasterAnim;
 
 /* Per-weapon constant data (gWeaponInfo[], 0x20 bytes each). */
 typedef struct WeaponInfo {
     /* 0x00 */ char *name;
-    /* 0x04 */ s32 unk04;
+    /* 0x04 */ WeaponMasterAnim *masterAnim; /* NULL: no model */
     /* 0x08 */ u8 unk08; /* nonzero: usable weapon */
     /* 0x09 */ u8 clipSize;
     /* 0x0A */ u8 unk0A;
     /* 0x0B */ u8 unk0B;
     /* 0x0C */ u32 clipShift : 3;
     /* 0x0C */ u32 unk0C_3 : 13;
-    /* 0x0E */ s8 unk0E;
-    /* 0x0F */ s8 unk0F;
-    /* 0x10 */ s16 unk10;
+    /* 0x0E */ s8 fireSong; /* SysPlaySong id, negative for none */
+    /* 0x0F */ s8 npcFireSnd; /* SysPlayWpnSnd id; -2: use fireSong */
+    /* 0x10 */ s16 npcAlertSnd;
     /* 0x12 */ s16 deathAction;
-    /* 0x14 */ u8 unk14[0xC];
+    /* 0x14 */ u8 unk14[6];
+    /* 0x1A */ s8 tipY; /* muzzle offset in the hand */
+    /* 0x1B */ s8 tipZ;
+    /* 0x1C */ u8 unk1C[4];
 } WeaponInfo; /* size 0x20 */
 
 /* Per-weapon ammo (gWeaponState[]). */
@@ -42,7 +54,7 @@ typedef struct WeaponState {
 
 #define WEAPON_TASER 0xE
 
-extern WeaponCallback D_8010F900; /* weapon fired callback */
+extern WeaponFiredCallback D_8010F900; /* weapon fired callback */
 extern WeaponCallback D_8010F904; /* taser hit NPC callback */
 extern s32 gCurrentWeapon;
 extern u32 gWeaponsAvailable[]; /* bit per weapon */
@@ -51,6 +63,14 @@ extern WeaponState gWeaponState[];
 extern u8 D_8010628C[]; /* next weapon in the selection order */
 extern u8 D_801062A8[]; /* previous weapon in the selection order */
 extern s32 particleTaserState;
+extern WeaponMasterAnim *D_8011002C; /* body armour (VEST.GMD) */
+extern s16 gTaserGobjID;
+extern u8 D_80110028;
+extern s32 gPermHogFile;
+s32 EGSHogGetBlockByName(s32 hog, char *name, void **out);
+void LevelGetModel(char *name, void **out);
+WeaponMasterAnim *EGSAnimCreateMasterAnim(void *model, s32 flags);
+int rand(void);
 
 /* Bit-string access that tolerates an unaligned base. */
 #define BITS_WORD(arr, n, w, b)                    \
@@ -70,6 +90,12 @@ extern s32 gPlayerOffset;
 /* GameObjectInfo.flags24 viewed as the NPC weapon word: low byte = weapon, 0x3000 = default kind */
 #define GOBJINFO_WEAPON(info) (*(u8 *)&(info)->flags24)
 #define GOBJINFO_WORD24(info) (*(u32 *)&(info)->flags24)
+/* Weapon an object holds (no player special case); a single expression, so the
+ * compiler folds scaling/conversion into each arm. */
+#define GOBJINFO_NPC_WEAPON(info)                                                            \
+    (GOBJINFO_WEAPON(info) != 0                ? GOBJINFO_WEAPON(info)                        \
+     : (GOBJINFO_WORD24(info) & 0x3000) != 0x1000 ? ((GOBJINFO_WORD24(info) & 0x3000) == 0x2000 ? 0x14 : 0) \
+                                               : 0x13)
 
 static inline s32 WeaponOfGobj(Gobj *gobj) {
     s32 weapon;
@@ -94,10 +120,15 @@ static inline s32 WeaponOfGobj(Gobj *gobj) {
 #define WEAPON_ANIM_MAX 30
 
 typedef struct WeaponAnim {
-    /* 0x00 */ u8 unk00[0xC];
+    /* 0x00 */ u8 unk00[9];
+    /* 0x09 */ u8 unk09;
+    /* 0x0A */ u8 unk0A; /* 0x10: held */
+    /* 0x0B */ u8 unk0B;
     /* 0x0C */ s32 unk0C; /* nonzero while in use */
-    /* 0x10 */ u8 unk10[6];
-    /* 0x16 */ u8 unk16;
+    /* 0x10 */ WeaponMasterAnim *masterAnim;
+    /* 0x14 */ u8 unk14[2];
+    /* 0x16 */ u16 unk16; /* pickup data (low byte) */
+    /* 0x18 */ GameObjectAnim *unk18; /* owner's anim while held */
 } WeaponAnim;
 
 extern s32 D_8010F928;                       /* last allocated weapon anim slot */
@@ -106,9 +137,10 @@ extern WeaponAnim *D_80118A8C[WEAPON_ANIM_MAX];
 
 /* Placement frame of each weapon anim slot (0x24 bytes each). */
 typedef struct WeaponFrame {
-    /* 0x00 */ u8 unk00[0x14];
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ u8 unk12[2];
     /* 0x14 */ s32 x, y, z;
-    /* 0x20 */ u8 unk20[4];
+    /* 0x20 */ s32 unk20;
 } WeaponFrame; /* size 0x24 */
 extern WeaponFrame D_80118B08[WEAPON_ANIM_MAX];
 
@@ -118,18 +150,19 @@ typedef struct WeaponSaveInfo {
     /* 0x06 */ u16 info; /* anim byte 0x16 | owner << 8, 0 when owned by an object */
 } WeaponSaveInfo;
 
-void WeaponDrop(Gobj *gobj, s32 arg1);
+void WeaponDrop(Gobj *gobj, u8 keep);
+WeaponAnim *iWeaponAllocateAnim(s32 owner, s32 *slotOut);
 
 #define WEAPON_PREVIOUS 0x1C
 #define WEAPON_NEXT 0x1B
 /* Weapons that don't use ammo (clip size 0) */
 #define WEAPON_NO_AMMO(w) (gWeaponInfo[w].clipSize * (gWeaponInfo[w].clipShift + 1) == 0)
 
-extern Gobj *D_80118FB8; /* first object to select a weapon, -1 until then */
+extern Gobj *D_80118FB8[]; /* [0]: first object to select a weapon, -1 until then */
 
 s32 WeaponGetPreviousID(s32 weapon);
 void InterfaceWeaponChange(void);
-s32 WeaponReload(s32 weapon);
+u8 WeaponReload(s32 weapon);
 void CASRequestAction(s32 id, s32 action);
 extern char D_8010F934[]; /* " " (.sdata) */
 
@@ -139,12 +172,142 @@ s32 WeaponAddAmmo(s32 weapon, s32 rounds);
 s32 WeaponGetNextID(s32 weapon);
 void WeaponSelect(Gobj *gobj, s32 weapon, s32 arg2);
 void InterfaceWeaponDisplayUpdate(void);
+void SysPlayWpnSnd(s32 arg0, s32 snd, Gobj *gobj, s32 arg3);
+void NPCSoundGobj(s32 arg0, s32 id, void *arg2, s32 snd);
+
+/* NPC state (GameObjectRuntime.npc) fields used here */
+typedef struct WeaponNPC {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ s32 flags;
+    /* 0x24 */ u8 unk24[0x12];
+    /* 0x36 */ s16 burst; /* shots left before the reload animation */
+    /* 0x38 */ u8 unk38[4];
+    /* 0x3C */ s32 reloadAction;
+    /* 0x40 */ u8 unk40[0xC];
+    /* 0x4C */ s8 unk4C;
+} WeaponNPC;
+
+/* Terrain sector (gTerrSector[], 0x3C bytes); a dropped weapon shows while its model is loaded */
+typedef struct WeaponTerrSector {
+    /* 0x00 */ s32 *model;
+    /* 0x04 */ u8 unk04[0x38];
+} WeaponTerrSector;
+extern WeaponTerrSector *gTerrSector;
+
+void EGSDisplayAddAnim(void *display, void *anim);
+void EGSDisplayDeleteAnim(void *display, void *anim);
+void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, void *b, s32 *dist);
+void PickupSetDataIDs(u8 data, s16 *armor, s16 *weapon);
+
+extern MATRIX D_80118A58; /* hand matrix with Y flipped, for WeaponGetTip */
+void PickupObjectSet(); /* (s16 objId, u8 armor, u8 weapon, s16 amount, u8 showMsg), called unprototyped */
+u8 PickupObjectTake(u8 manual);
+void MatrixNormal_0(void *in, void *out);
+
+/* Terrain sector found by EGSDisplayGetPointSector */
+typedef struct WeaponDropSectorDisplay {
+    /* 0x00 */ u8 unk00[2];
+    /* 0x02 */ s16 id;
+} WeaponDropSectorDisplay;
+typedef struct WeaponDropSectorModel {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ WeaponDropSectorDisplay *display;
+} WeaponDropSectorModel;
+typedef struct WeaponDropSector {
+    /* 0x00 */ u8 unk00[0x10];
+    /* 0x10 */ WeaponDropSectorModel *model;
+} WeaponDropSector;
+WeaponDropSector *EGSDisplayGetPointSector(s32 *pos);
+
+void EGSAnimSimpleCreate(void *model, s32 arg1, s32 flags, WeaponAnim **out);
 
 INCLUDE_RODATA("asm/main/nonmatchings/weapon", D_80011E8C);
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponInit);
+void WeaponInit(void) {
+    char name[16];
+    void *model = NULL;
+    s32 i;
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponUpdate);
+    gWeaponsAvailable[0] = 0;
+    for (i = 0; i < 0x1A; i++) {
+        gWeaponState[i].loaded = 0;
+        gWeaponState[i].reserve = 0;
+        if (gWeaponInfo[i].name != NULL && gWeaponInfo[i].name[0] != 0 &&
+            EGSHogGetBlockByName(gPermHogFile, gWeaponInfo[i].name, &model) == 0) {
+            gWeaponInfo[i].masterAnim = EGSAnimCreateMasterAnim(model, 0x04010000);
+            strcpy(name, gWeaponInfo[i].name);
+            name[0] = 'X';
+            if (EGSHogGetBlockByName(gPermHogFile, name, &model) == 0) {
+                gWeaponInfo[i].masterAnim->dropModel = model;
+            }
+        } else {
+            gWeaponInfo[i].masterAnim = NULL;
+        }
+    }
+    LevelGetModel("VEST.GMD", &model);
+#line 333
+    ASSERT(model != NULL);
+    D_8011002C = EGSAnimCreateMasterAnim(model, 0x04010000);
+    LevelGetModel("XEST.GMD", &model);
+#line 336
+    ASSERT(model != NULL);
+    D_8011002C->dropModel = model;
+    /* one past the end: also resets D_80118FB8 */
+    for (i = 0; i <= WEAPON_ANIM_MAX; i++) {
+        if (model != NULL) {
+            EGSAnimSimpleCreate(model, 0, 0x04010000, &D_80118A8C[i]);
+            D_80118A8C[i]->unk18 = NULL;
+            D_80118A8C[i]->unk09 = 0x11;
+        }
+        D_80118F40[i] = -1;
+    }
+    gTaserGobjID = -1;
+    D_80110028 = 1;
+}
+
+/* Dropped weapons: show them while their sector is visible, and let the player walk over them. */
+void WeaponUpdate(void) {
+    s32 i;
+    WeaponAnim *anim;
+    VECTOR32 pos;
+    s32 dist;
+    s16 armor;
+    s16 weapon;
+    u8 amount;
+
+    for (i = 0; i < WEAPON_ANIM_MAX; i++) {
+        anim = D_80118A8C[i];
+        if (D_80118F40[i] >= 0) {
+            if (*(s32 *)gTerrSector[D_80118F40[i]].model != 0) {
+                if (anim->unk0C == 0) {
+                    anim->unk0C = (s32)&D_80118B08[i];
+                    EGSDisplayAddAnim(*gCamera, anim);
+                }
+                pos = gObjPlayer->move->pos;
+                pos.vy = -pos.vy;
+                EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &((WeaponFrame *)anim->unk0C)->x, &dist);
+                if (dist < 0xC0) {
+                    PickupSetDataIDs(anim->unk16, &armor, &weapon);
+                    if (weapon != 0) {
+                        amount = gWeaponInfo[weapon].unk0B;
+                    } else {
+                        amount = 0;
+                    }
+                    if (weapon != 0xF) {
+                        PickupObjectSet(-1, armor, weapon, amount, 0);
+                        if (PickupObjectTake(0)) {
+                            D_80118F40[i] = -1;
+                            EGSDisplayDeleteAnim(*gCamera, anim);
+                        }
+                    }
+                }
+            } else if (anim->unk0C != 0) {
+                anim->unk0C = 0;
+                EGSDisplayDeleteAnim(*gCamera, anim);
+            }
+        }
+    }
+}
 
 void WeaponAdd(s32 weapon, s32 rounds) {
     u32 *words;
@@ -192,17 +355,17 @@ void WeaponSpecialUse(s32 weapon) {
     }
 }
 
-#ifdef NON_MATCHING
-/* v0/v1 swapped when loading loaded/reserve. */
 s32 WeaponHasMaxAmmo(s32 weapon) {
     WeaponState *state = &gWeaponState[weapon];
     s32 ret;
+    s32 total;
 
     if (weapon == WEAPON_TASER ||
         gWeaponInfo[weapon].clipSize * (gWeaponInfo[weapon].clipShift + 1) != 0) {
         if (gWeaponInfo[weapon].clipShift != 0) {
-            ret = state->loaded + state->reserve >=
-                  gWeaponInfo[weapon].clipSize * (gWeaponInfo[weapon].clipShift + 1);
+            total = state->loaded;
+            total += state->reserve;
+            ret = total >= gWeaponInfo[weapon].clipSize * (gWeaponInfo[weapon].clipShift + 1);
         } else {
             ret = state->loaded >= gWeaponInfo[weapon].clipSize;
         }
@@ -211,9 +374,6 @@ s32 WeaponHasMaxAmmo(s32 weapon) {
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponHasMaxAmmo);
-#endif
 
 s32 WeaponAddAmmo(s32 weapon, s32 rounds) {
     WeaponState *state = &gWeaponState[weapon];
@@ -267,7 +427,35 @@ s32 WeaponAddAmmo(s32 weapon, s32 rounds) {
     return rounds;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponGetTip);
+/* World position of the muzzle of the weapon in gobj's hand; 0 if it holds no valid weapon. */
+s32 WeaponGetTip(Gobj *gobj, VECTOR32 *tip) {
+    WeaponInfo *info;
+
+    if (GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id]) >= 0x1A) {
+        return 0;
+    }
+    info = &gWeaponInfo[GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id])];
+    tip->vx = 0;
+    tip->vy = info->tipY;
+    tip->vz = info->tipZ;
+    D_80118A58.m[0][0] = gobj->anim->frames[8]->m[0][0];
+    D_80118A58.m[0][1] = -gobj->anim->frames[8]->m[0][1];
+    D_80118A58.m[0][2] = gobj->anim->frames[8]->m[0][2];
+    D_80118A58.m[1][0] = -gobj->anim->frames[8]->m[1][0];
+    D_80118A58.m[1][1] = gobj->anim->frames[8]->m[1][1];
+    D_80118A58.m[1][2] = -gobj->anim->frames[8]->m[1][2];
+    D_80118A58.m[2][0] = gobj->anim->frames[8]->m[2][0];
+    D_80118A58.m[2][1] = -gobj->anim->frames[8]->m[2][1];
+    D_80118A58.m[2][2] = gobj->anim->frames[8]->m[2][2];
+    D_80118A58.t[0] = gobj->anim->frames[8]->pos.vx;
+    D_80118A58.t[1] = -gobj->anim->frames[8]->pos.vy;
+    D_80118A58.t[2] = gobj->anim->frames[8]->pos.vz;
+    ApplyMatrixLV(&D_80118A58, (VECTOR *)tip, (VECTOR *)tip);
+    tip->vx += D_80118A58.t[0];
+    tip->vy += D_80118A58.t[1];
+    tip->vz += D_80118A58.t[2];
+    return 1;
+}
 
 s32 WeaponGetPreviousID(s32 weapon) {
     s32 id = D_801062A8[weapon];
@@ -349,10 +537,46 @@ WeaponAnim *iWeaponAllocateAnim(s32 owner, s32 *slotOut) {
 INCLUDE_ASM("asm/main/nonmatchings/weapon", iWeaponAllocateAnim);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponReplace);
-
 #ifdef NON_MATCHING
-/* Only the D_80118FB8 access differs: the original materialises its address once (la + 0(reg)). */
+/* Scheduling only: the else branch loads gCamera (into a2) before the slot stores */
+/* Show the object's current weapon in its hand (or hide it when it has none). */
+void WeaponReplace(Gobj *gobj) {
+    WeaponInfo *info;
+    WeaponAnim *anim;
+    s32 i;
+    struct EGSFrame **frame;
+
+    info = &gWeaponInfo[GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id])];
+    for (i = WEAPON_ANIM_MAX; i >= 0; i--) {
+        if (D_80118F40[i] == (s32)gobj) {
+            break;
+        }
+    }
+    if (i >= 0) {
+        anim = D_80118A8C[i];
+    } else {
+        anim = iWeaponAllocateAnim((s32)gobj, NULL);
+    }
+    if (info->masterAnim != 0) {
+        anim->unk18 = NULL;
+        anim->unk09 = 0x11;
+        anim->unk18 = gobj->anim;
+        frame = gobj->anim->frames;
+        anim->unk0C = (s32)*(gobj->npcState != 8 ? &frame[8] : &frame[4]);
+        anim->masterAnim = info->masterAnim;
+        anim->unk16 = GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id]);
+        EGSDisplayAddAnim(*gCamera, anim);
+    } else {
+        anim->unk0C = 0;
+        D_80118F40[D_8010F928] = -1;
+        D_8010F928--;
+        EGSDisplayDeleteAnim(*gCamera, anim);
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponReplace);
+#endif
+
 void WeaponSelect(Gobj *gobj, s32 weapon, s32 quiet) {
     s32 next;
 
@@ -376,19 +600,79 @@ void WeaponSelect(Gobj *gobj, s32 weapon, s32 quiet) {
             WeaponReload(weapon);
             CASRequestAction(gobj->id, 0x25);
         }
-        if (D_80118FB8 == (Gobj *)-1) {
-            D_80118FB8 = gobj;
+        if (D_80118FB8[0] == (Gobj *)-1) {
+            D_80118FB8[0] = gobj;
         }
     }
     GOBJINFO_WEAPON(&gameObjectsInfo[gobj->id]) = weapon;
 }
+
+#ifdef NON_MATCHING
+/* Register allocation: the original keeps one more callee-saved giv (keep spilled to the stack) and inverts the weapon-byte branch */
+/* gobj lets go of its weapon: drop it on the floor (keep) or remove it. A player/armoured NPC
+ * also drops its body armour. */
+void WeaponDrop(Gobj *gobj, u8 keep) {
+    s32 i;
+    WeaponAnim *anim;
+    WeaponAnim *vest;
+    WeaponDropSector *sector;
+    s32 slot;
+    WeaponFrame *frame;
+
+    for (i = 0; i < WEAPON_ANIM_MAX; i++) {
+        if (D_80118F40[i] == (s32)gobj) {
+            anim = D_80118A8C[i];
+            anim->unk0A &= ~0x10;
+            if (!keep) {
+                D_80118F40[i] = -1;
+                anim->unk0C = 0;
+                EGSDisplayDeleteAnim(*gCamera, anim);
+            } else {
+                sector = EGSDisplayGetPointSector(&((WeaponFrame *)anim->unk0C)->x);
+                if (sector != NULL) {
+                    D_80118F40[i] = sector->model->display->id;
+                    frame = &D_80118B08[i];
+                    *frame = *(WeaponFrame *)anim->unk0C;
+                    D_80118B08[i].unk20 = 0;
+                    anim->unk0C = (s32)frame;
+                    anim->unk18 = NULL;
+                    anim->unk09 = 0x11;
+                    anim->unk18 = NULL;
+                    frame->m[0][0] = 0;
+                    frame->m[2][0] = 0;
+                    frame->m[1][1] = 0;
+                    frame->m[1][2] = 0;
+                    MatrixNormal_0(frame, frame);
+                    frame->y = -(((MoveInfo *)gobj->move)->unk12C + 0x28);
+                    anim->unk16 = GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id]);
+                    if ((gobj->id == gPlayerOffset || (GOBJINFO_WORD24(&gameObjectsInfo[gobj->id]) & 0x4000)) &&
+                        gobj->healthInfo->armor != 0) {
+                        vest = iWeaponAllocateAnim(D_80118F40[i], &slot);
+                        D_80118B08[slot] = *(WeaponFrame *)gobj->anim->frames[0xD];
+                        D_80118B08[slot].unk20 = 0;
+                        D_80118B08[slot].y = frame->y;
+                        vest->unk16 = 0x80;
+                        if (gobj->id != gPlayerOffset) {
+                            GOBJINFO_WORD24(&gameObjectsInfo[gobj->id]) &= ~0x4000;
+                        }
+                        vest->masterAnim = D_8011002C;
+                        EGSDisplayAddAnim(*gCamera, vest);
+                    }
+                } else {
+                    D_80118F40[i] = -1;
+                    anim->unk0C = 0;
+                    EGSDisplayDeleteAnim(*gCamera, anim);
+                }
+                GOBJINFO_WEAPON(&gameObjectsInfo[gobj->id]) = 0;
+            }
+        }
+    }
+}
 #else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponSelect);
+INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponDrop);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponDrop);
-
-s32 WeaponReload(s32 weapon) {
+u8 WeaponReload(s32 weapon) {
     WeaponState *state = &gWeaponState[weapon];
     s32 reserve = state->reserve;
     s32 need;
@@ -429,7 +713,74 @@ void WeaponDoFiredCallback(s16 id, s16 weapon) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponSubRound);
+static inline void WeaponFired(s32 id, s32 weapon) {
+    if (D_8010F900 != NULL) {
+        D_8010F900(id, weapon);
+    }
+}
+
+/* A shot was fired: sound, ammo and the reload animation when the clip/burst is empty. */
+void WeaponSubRound(Gobj *gobj) {
+    s32 weapon;
+    u8 reload;
+    WeaponState *state;
+
+    if (gobj->id != gPlayerOffset) {
+        weapon = GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id]);
+        if (gWeaponInfo[weapon].npcFireSnd == -2) {
+            SysPlaySong(1, gWeaponInfo[weapon].fireSong, gobj, 0);
+        } else if (gWeaponInfo[weapon].npcFireSnd >= 0) {
+            SysPlayWpnSnd(1, gWeaponInfo[weapon].npcFireSnd, gobj, ((WeaponNPC *)gobj->npc)->unk4C);
+        }
+        WeaponFired(gobj->id, weapon);
+        if (!(((WeaponNPC *)gobj->npc)->flags & 0x100000)) {
+            if (gWeaponInfo[weapon].clipShift) {
+                ((WeaponNPC *)gobj->npc)->burst--;
+                if (gWeaponInfo[weapon].clipShift && ((WeaponNPC *)gobj->npc)->burst == 0) {
+                    reload = 1;
+                    ((WeaponNPC *)gobj->npc)->burst = gWeaponInfo[weapon].clipSize;
+                } else {
+                    reload = 0;
+                }
+            } else {
+                reload = 1;
+            }
+            if (gobj->cas != NULL && reload) {
+                if ((u32)(weapon - 6) >= 2 && weapon != 0x10) {
+                    ((WeaponNPC *)gobj->npc)->reloadAction = 0x3D;
+                } else {
+                    ((WeaponNPC *)gobj->npc)->reloadAction = 0x54;
+                }
+                CASRequestAction(gobj->id, ((WeaponNPC *)gobj->npc)->reloadAction);
+            }
+        }
+    } else {
+        state = &gWeaponState[gCurrentWeapon];
+        if (state->loaded != 0) {
+            if (gCurrentWeapon != WEAPON_TASER) {
+                state->loaded--;
+            }
+            if (gWeaponInfo[gCurrentWeapon].fireSong >= 0) {
+                SysPlaySong(1, gWeaponInfo[gCurrentWeapon].fireSong, gobj, 0);
+                if ((u32)(gCurrentWeapon - 0x13) >= 2) {
+                    NPCSoundGobj(0, gPlayerOffset, NULL, gWeaponInfo[gCurrentWeapon].npcAlertSnd);
+                    WeaponFired(gPlayerOffset, gCurrentWeapon);
+                }
+            }
+        }
+        if (gobj->cas->active != 8 &&
+            (!gWeaponInfo[gCurrentWeapon].clipShift || (state->loaded == 0 && state->reserve != 0))) {
+            if ((u32)(gCurrentWeapon - 6) >= 2 && gCurrentWeapon != 0x10) {
+                if (WeaponReload(gCurrentWeapon)) {
+                    CASRequestAction(gobj->id, 0x3D);
+                }
+            } else {
+                CASRequestAction(gobj->id, 0x54);
+            }
+        }
+        InterfaceWeaponDisplayUpdate();
+    }
+}
 
 void WeaponGetRounds(s32 weapon, s32 *rounds, s32 *clips) {
     if (weapon == WEAPON_TASER) {
@@ -457,8 +808,8 @@ s32 WeaponGetDeathAction(s32 weapon) {
     return gWeaponInfo[weapon].deathAction;
 }
 
-WeaponCallback WeaponSetWeaponFiredCallback(WeaponCallback cb) {
-    WeaponCallback old = D_8010F900;
+WeaponFiredCallback WeaponSetWeaponFiredCallback(WeaponFiredCallback cb) {
+    WeaponFiredCallback old = D_8010F900;
     D_8010F900 = cb;
     return old;
 }
@@ -509,14 +860,65 @@ s32 WeaponGetSaveInfo(WeaponSaveInfo *out) {
 INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponGetSaveInfo);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponRestoreSaveInfo);
+s32 WeaponRestoreSaveInfo(WeaponSaveInfo *in) {
+    s32 i;
+    WeaponAnim *anim;
+    WeaponFrame *frame;
+    s16 (*m)[3];
+    VECTOR side;
+    VECTOR up;
+    s32 info;
+
+    for (i = 0; i < WEAPON_ANIM_MAX; i++) {
+        anim = D_80118A8C[i];
+        if ((s16)in[i].info != 0) {
+            frame = &D_80118B08[i];
+            frame->x = in[i].x;
+            frame->y = in[i].y;
+            frame->z = in[i].z;
+            anim->unk16 = in[i].info & 0xFF;
+            D_80118F40[i] = (s16)in[i].info >> 8;
+            m = frame->m;
+            if (m[1][0] != 1 && m[1][0] != -1) {
+                side.vx = 0;
+                up.vx = (rand() & 1) ? 0x1000 : -0x1000;
+                up.vz = 0;
+                up.vy = 0;
+                m[1][0] = up.vx;
+                m[1][1] = up.vy;
+                m[1][2] = up.vz;
+                while ((side.vy = rand() * 2) == 0 && (side.vz = rand() * 2) == 0) {
+                }
+                GTEMath_VectorNormal(&side, &side);
+                OuterProduct12(&side, &up, &up);
+                m[0][0] = side.vx;
+                m[0][1] = side.vy;
+                m[0][2] = side.vz;
+                m[2][0] = up.vx;
+                m[2][1] = up.vy;
+                m[2][2] = up.vz;
+            }
+            info = in[i].info & 0x3F;
+            if (info != 0) {
+                anim->masterAnim = gWeaponInfo[info].masterAnim;
+            } else {
+                anim->masterAnim = D_8011002C;
+            }
+        } else {
+            anim->unk0C = 0;
+            D_80118F40[i] = -1;
+        }
+
+    }
+    return 1;
+}
 
 void WeaponUnlimitedAmmo(void) {
     s32 i;
     WeaponState *state;
 
     for (i = 0; i < 0x1A; i++) {
-        if (gWeaponInfo[i].unk04 != 0 && gWeaponInfo[i].unk08 != 0) {
+        if (gWeaponInfo[i].masterAnim != NULL && gWeaponInfo[i].unk08 != 0) {
             WeaponAdd(i, 0);
             state = &gWeaponState[i];
             state->loaded = 0xFFFF;
