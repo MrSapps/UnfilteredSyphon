@@ -58,7 +58,8 @@ typedef struct EmergencySprite {
 /* Per-port pad state (0x3C bytes); PadInitDirect writes the raw buffers. */
 typedef struct Controller {
     /* 0x00 */ u8 status;
-    /* 0x01 */ u8 unk01[0x3B];
+    /* 0x01 */ u8 present;
+    /* 0x02 */ u8 unk02[0x3A];
 } Controller;
 
 extern s32 D_8010FEC0;          /* colour mode */
@@ -84,7 +85,7 @@ extern s32 lastCounterTick;
 extern s32 lastCounterTickSort;
 extern u8 gIsStreamingFlag;
 extern s32 D_801228A8[100];     /* frame times */
-extern u8 D_80122864[];         /* pad buffers */
+extern u8 D_80122864[2][0x22];  /* raw PadInitDirect buffers, one per port */
 extern Controller gControllers[8];
 extern Callback gCallbackArray[5];
 extern Callback *D_80110218;    /* active callbacks */
@@ -96,6 +97,7 @@ extern s32 GsDRAWENV;
 extern char D_8001375C[];       /* "s/egsdev.c" */
 
 void ServiceCallbacks(void);
+void func_800D133C(Controller *c, u8 *buf, s32 port);
 Callback *FindFreeCallback(void);
 s32 EGSDeviceGraphicsClearScreen(u8 *rgb);
 void func_800D1DF0(s32 i);
@@ -273,7 +275,7 @@ s32 EGSDeviceGraphicsReset(s32 mode) {
 
 s32 EGSDeviceControllerInit(void) {
     func_80139680(0);
-    PadInitDirect(D_80122864, D_80122864 + 0x22);
+    PadInitDirect(D_80122864[0], D_80122864[1]);
     PadStartCom();
     D_80110204 = 1;
     return 0;
@@ -281,7 +283,25 @@ s32 EGSDeviceControllerInit(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdev", func_800D133C);
 
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", EGSDeviceControllerPoll);
+/* Parse both ports; a multitap (0x80) fills four controller records per port. */
+s32 EGSDeviceControllerPoll(void) {
+    s32 port;
+
+    for (port = 0; port < 2; port++) {
+        if (D_80122864[port][1] == 0x80) {
+            func_800D133C(&gControllers[port * 4], &D_80122864[port][2], port);
+            func_800D133C(&gControllers[port * 4 + 1], &D_80122864[port][2 + 8], port);
+            func_800D133C(&gControllers[port * 4 + 2], &D_80122864[port][2 + 16], port);
+            func_800D133C(&gControllers[port * 4 + 3], &D_80122864[port][2 + 24], port);
+        } else {
+            func_800D133C(&gControllers[port * 4], D_80122864[port], port);
+            gControllers[port * 4 + 1].present = 0;
+            gControllers[port * 4 + 2].present = 0;
+            gControllers[port * 4 + 3].present = 0;
+        }
+    }
+    return 0;
+}
 
 s32 EGSDeviceControllerRead(Controller **out, u32 port) {
     if (port < 8) {
