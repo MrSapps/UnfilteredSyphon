@@ -89,7 +89,7 @@ void ReleaseOneSoundBlock(s32 block);
 void StopMusicUnderscore(void);
 void StopSound(s32 block, s16 id);
 void StopAllSoundsInBlock(s32 block);
-void PauseMusicUnderscore(u8 pause);
+void PauseMusicUnderscore(s32 pause);
 void PauseAllLoops(u8 pause);
 s32 PlayingXA(void);
 void StopXA(void);
@@ -197,7 +197,7 @@ s32 WhereIsThisFilePlease(char *name) {
     return pos;
 }
 
-s32 CanIHaveTheCDPlease(void) {
+s32 CanIHaveTheCDPlease(s32 pos, s16 chan, s32 arg) {
     return 1;
 }
 

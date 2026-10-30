@@ -6,6 +6,9 @@
  * MIDI underscores are SEQ/SEP data; XA streams are played straight off the CD.
  */
 
+/* The original was built with gcc's builtin abs() (inline bgez/negu); this build passes -fno-builtin. */
+#define abs(x) __builtin_abs(x)
+
 /* snddrv.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010FD78)
 SDATA_LOCAL(D_8010FD7C)
@@ -115,9 +118,9 @@ typedef struct SoundEvent {
     /* 0x0C */ u16 unk0C;
     /* 0x0E */ s16 unk0E;
     /* 0x10 */ s16 value;
-    /* 0x12 */ u8 unk12;
-    /* 0x13 */ u8 unk13;
-    /* 0x14 */ s32 unk14;
+    /* 0x12 */ s16 unk12; /* pan fade: -(change) */
+    /* 0x14 */ s16 unk14; /* stop the underscore when the fade ends */
+    /* 0x16 */ s16 unk16;
     /* 0x18 */ struct SoundEvent *next;
 } SoundEvent;
 
@@ -268,6 +271,24 @@ s16 GetSoundVol(SoundBlock *block, s16 snd, s16 which);
 s16 GetSoundNote(SoundBlock *block, s16 snd, s16 which);
 static void func_800C13B4(s32 status);
 extern u8 gSeqTable[];
+s16 AddPan(s16 pan, s16 add);
+s32 PlayingXA(void);
+s32 GetXAPos(void);
+s16 SsVoiceCheck(s32 voice, s32 vab_pro, s16 note);
+s32 SsVoKeyOn(s32 vab_pro, s32 pitch, u16 volL, u16 volR);
+void SsUtChangeADSR(s16 vc, s16 vab, s16 prog, s16 old_note, u16 adsr1, u16 adsr2);
+void SsUtKeyOffV(s16 voice);
+void SsSeqSetVol(s16 access_num, s16 voll, s16 volr);
+void SsSeqPlay(s16 access_num, s8 play_mode, s16 l_count);
+void SsSepPlay(s16 access_num, s16 seq_num, s8 play_mode, s16 l_count);
+MIDIDesc *FindMIDIDesc(s32 id);
+SoundBlock *FindSoundBlockByNum(s32 num);
+void ReverbSet(s16 type, s16 depth);
+void SsSeqSetCrescendo(s16 access_num, s16 vol, s32 v_time);
+void SsSepSetCrescendo(s16 access_num, s16 seq_num, s16 vol, s32 v_time);
+void SetLoopingVolume(SoundEntry *s, s16 vol, s16 pan);
+void SsUtChangePitch(s16 voice, s16 vab, s16 prog, s16 old_note, s16 old_fine, s16 new_note, s16 new_fine);
+s16 GetPanChange(s16 flags, s16 from, s16 to);
 SoundEvent *GetUnusedEvent(void);
 void ResetMIDICallback(void);
 s16 SsIsEos(s16 access_num, s16 seq_num);
@@ -375,10 +396,8 @@ SoundBlock *SoundRegisterVABContinue(SoundBlock *block, u8 *vb, s32 size) {
     return NULL;
 }
 
-#ifdef NON_MATCHING
-/* frame 0x18 larger (extra struct temp); target re-sign-extends the vab id passed to SsVabTransBody* */
 SoundBlock *SoundRegisterVABPartly(SoundBlock *vh, u8 *vb, s32 size) {
-    SoundEntry saved[70];
+    SoundEntry saved[69]; /* the sound table, saved while libsnd parses the header */
     s32 i;
     s32 vab;
     s32 offset;
@@ -389,15 +408,15 @@ SoundBlock *SoundRegisterVABPartly(SoundBlock *vh, u8 *vb, s32 size) {
     s32 type;
 
     if (vh->vabId == -1) {
-        for (i = 8; i < 16; i++) {
-            if (gVabBlock[i] == NULL) {
+        for (ret = 8; ret < 16; ret++) {
+            if (gVabBlock[ret] == NULL) {
                 break;
             }
         }
-        if (i == 16) {
+        if (ret == 16) {
             return NULL;
         }
-        vh->vabId = i;
+        vh->vabId = ret;
     }
     vab = vh->vabId;
     if (gSndMemPtr[vab] == 0) {
@@ -447,9 +466,6 @@ SoundBlock *SoundRegisterVABPartly(SoundBlock *vh, u8 *vb, s32 size) {
     }
     return NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SoundRegisterVABPartly);
-#endif
 
 s16 SoundRegisterVABComplete(void) {
     s16 done = SsVabTransCompleted(0);
@@ -532,10 +548,97 @@ void ClearVABsResolvedFlag(SoundBlock *block) {
     block->numSounds &= 0x7FFFFFFF;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetupAllLoaded);
-
 #ifdef NON_MATCHING
-/* regalloc: i/j get s1/s2 swapped; target copies gMIDIDesc[0] a0->v1 for the type test */
+/* regalloc: s4/s5 swapped in loop 1; target copies type to a3 for the 7/9/10 tests */
+void SetupAllLoaded(s16 revType, s16 revDepth) {
+    s32 n;
+    s32 i;
+    s16 j;
+    u8 count;
+    MIDIDesc *m;
+    SoundBlock *other;
+    s32 type;
+    u8 idx;
+    s32 byID;
+
+    for (i = 0; i < 16; i++) {
+        if (gVabBlock[i] != NULL && !(gVabBlock[i]->numSounds & 0x80000000)) {
+            n = gVabBlock[i]->numSounds & 0xFF;
+            for (j = 0; j < n; j++) {
+                if ((gVabBlock[i]->sounds[j].flags & 0x1F) == SND_TYPE_SEQ) {
+                    m = FindMIDIDesc(gVabBlock[i]->sounds[j].voices);
+                    if (m != NULL) {
+                        gVabBlock[i]->sounds[j].seq = m->seq;
+                    } else {
+                        gVabBlock[i]->sounds[j].seq = 0xFF;
+                    }
+                }
+            }
+        }
+    }
+    for (i = 0; i < 16; i++) {
+        if (gVabBlock[i] != NULL) {
+            count = gVabBlock[i]->numSounds;
+            for (j = 0; j < count; j++) {
+                type = gVabBlock[i]->sounds[j].flags & 0x1F;
+                if ((s32)gVabBlock[i]->numSounds < 0 && ((s16)gVabBlock[i]->sounds[j].flags >> 5) != 0) {
+                    type = 9;
+                    if ((s16)gVabBlock[i]->sounds[j].flags & 0x8000) {
+                        type = 10;
+                    }
+                    gVabBlock[i]->sounds[j].voices = ((s16)gVabBlock[i]->sounds[j].flags >> 11) & 0xF;
+                    gVabBlock[i]->sounds[j].vab = (gVabBlock[i]->sounds[j].flags >> 5) & 0x3F;
+                }
+                if ((byID = (type == 7 || type == 8)) || type == 9 || type == 10) {
+                    idx = gVabBlock[i]->sounds[j].vab;
+                    if (byID) {
+                        other = FindSoundBlockByID(gVabBlock[i]->sounds[j].voices);
+                    } else {
+                        other = FindSoundBlockByNum(gVabBlock[i]->sounds[j].voices);
+                    }
+                    if (other != NULL) {
+                        gVabBlock[i]->sounds[j].vab = other->vabId;
+                        gVabBlock[i]->sounds[j].seq = other->sounds[idx].seq;
+                        gVabBlock[i]->sounds[j].sepNum = other->sounds[idx].sepNum;
+                        gVabBlock[i]->sounds[j].prog = other->sounds[idx].prog;
+                        gVabBlock[i]->sounds[j].firstTone = other->sounds[idx].firstTone;
+                        if (type == 7 || type == 9) {
+                            gVabBlock[i]->sounds[j].tone = other->sounds[idx].tone;
+                            gVabBlock[i]->sounds[j].note = other->sounds[idx].note;
+                            gVabBlock[i]->sounds[j].vol = other->sounds[idx].vol;
+                            gVabBlock[i]->sounds[j].pan = other->sounds[idx].pan;
+                            gVabBlock[i]->sounds[j].defVol = other->sounds[idx].defVol;
+                            gVabBlock[i]->sounds[j].defPan = other->sounds[idx].defPan;
+                            gVabBlock[i]->sounds[j].unk12 = other->sounds[idx].unk12;
+                            if (type == 9) {
+                                gVabBlock[i]->sounds[j].flags = (other->sounds[idx].flags & 0x1F) | (idx << 5) |
+                                                                (gVabBlock[i]->sounds[j].voices << 11);
+                            } else {
+                                gVabBlock[i]->sounds[j].flags = other->sounds[idx].flags;
+                            }
+                        } else if (type == 10) {
+                            gVabBlock[i]->sounds[j].flags = (other->sounds[idx].flags & 0x1F) | (idx << 5) |
+                                                            (gVabBlock[i]->sounds[j].voices << 11) | 0x8000;
+                        } else {
+                            gVabBlock[i]->sounds[j].flags = other->sounds[idx].flags;
+                        }
+                    }
+                } else {
+                    gVabBlock[i]->sounds[j].vab = gVabBlock[i]->vabId;
+                }
+                if ((gVabBlock[i]->sounds[j].flags & 0x1F) != SND_TYPE_SEQ && (s32)gVabBlock[i]->numSounds >= 0) {
+                    gVabBlock[i]->sounds[j].seq = gVabBlock[i]->sounds[j].tone;
+                }
+            }
+            gVabBlock[i]->numSounds |= 0x80000000;
+        }
+    }
+    ReverbSet(revType, revDepth);
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetupAllLoaded);
+#endif
+
 void ReleaseAllSoundBlocks(void) {
     s16 j;
     s32 i;
@@ -549,7 +652,7 @@ void ReleaseAllSoundBlocks(void) {
         }
     }
     i = 0;
-    if (gMIDIDesc[i] != NULL) {
+    while (gMIDIDesc[i] != NULL) {
         if (gMIDIDesc[i]->type == 0) {
             SsSeqStop(gMIDIDesc[i]->seq);
             SsSetMarkCallback(gMIDIDesc[i]->seq, 0, NULL);
@@ -573,9 +676,6 @@ void ReleaseAllSoundBlocks(void) {
     SsEnd();
     SsStart();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", ReleaseAllSoundBlocks);
-#endif
 
 void ReleaseOneSoundBlock(SoundBlock *block) {
     StopAllSoundsInBlock(block);
@@ -623,7 +723,129 @@ void ShutdownSound(void) {
     SsQuit();
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", PlaySoundVolPan);
+s16 PlaySoundVolPan(SoundBlock *block, s16 snd, s16 vol, s16 pan) {
+    SoundEntry *sounds = block->sounds;
+    s16 left, right;
+    s16 i;
+    s16 ret = snd;
+
+    if (snd == -1) {
+        return -1;
+    }
+    if ((u8)block->numSounds - 1 < snd) {
+        return -1;
+    }
+    if (gVabBlock[block->vabId] == NULL) {
+        return -1;
+    }
+    if (gVabBlock[sounds[snd].vab] == NULL) {
+        return -1;
+    }
+    if ((sounds[snd].flags & 0x1F) == SND_TYPE_GROUP) {
+        for (i = 0; i < sounds[snd].prog; i++) {
+            if (sounds[i + snd + 1].numVoices == -1) {
+                return PlaySoundVolPan(block, snd + (s16)(i + 1), vol, pan);
+            }
+            if ((sounds[i + snd + 1].flags & 0x1F) == SND_TYPE_VOICED &&
+                SsVoiceCheck(GetVoiceFromField(sounds[snd].voices, i), (sounds[snd].vab << 8) | sounds[snd].prog, sounds[snd].tone) != 0) {
+                return PlaySoundVolPan(block, snd + (s16)(i + 1), vol, pan);
+            }
+        }
+        return -1;
+    }
+    if (vol != -2) {
+        if (vol == -1) {
+            sounds[snd].vol = sounds[snd].defVol;
+        } else {
+            sounds[snd].vol = vol;
+        }
+    }
+    if (pan != -2) {
+        if (pan == -1) {
+            sounds[snd].pan = sounds[snd].defPan;
+        } else {
+            sounds[snd].pan = pan;
+        }
+    }
+    if (gReverbWaiting != 0) {
+        ReverbOn();
+    }
+    switch (sounds[snd].flags & 0x1F) {
+    case SND_TYPE_ONESHOT:
+        GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+        if (left != 0 || right != 0) {
+            EnterCriticalSection();
+            SsVoKeyOn((sounds[snd].vab << 8) | sounds[snd].prog, (sounds[snd].tone << 8) | sounds[snd].note, left, right);
+            ExitCriticalSection();
+        }
+        break;
+    case SND_TYPE_VOICED:
+        GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+        if (left != 0 || right != 0) {
+            if (sounds[snd].numVoices != -1) {
+                for (i = 0; i < sounds[snd].numVoices; i++) {
+                    if (SsVoiceCheck(GetVoiceFromField(sounds[snd].voices, i), (sounds[snd].vab << 8) | sounds[snd].prog, sounds[snd].tone) == 0) {
+                        SsUtChangeADSR(GetVoiceFromField(sounds[snd].voices, i), sounds[snd].vab, sounds[snd].prog, sounds[snd].tone, 0, 0);
+                        SsUtKeyOffV(GetVoiceFromField(sounds[snd].voices, i));
+                    }
+                }
+            }
+            EnterCriticalSection();
+                sounds[snd].voices = SsVoKeyOn((sounds[snd].vab << 8) | sounds[snd].prog, (sounds[snd].tone << 8) | sounds[snd].note, left, right);
+            ExitCriticalSection();
+            sounds[snd].numVoices = 0;
+            for (i = 0; i < 24; i++) {
+                if ((sounds[snd].voices >> i) & 1) {
+                    sounds[snd].numVoices++;
+                }
+            }
+            if (sounds[snd].numVoices == 0) {
+                sounds[snd].numVoices = -1;
+            }
+        }
+        break;
+    case SND_TYPE_LOOP:
+        gLoopsPaused = 0;
+        if (sounds[snd].numVoices != -1) {
+            return -1;
+        }
+        GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+        EnterCriticalSection();
+        sounds[snd].voices = SsVoKeyOn((sounds[snd].vab << 8) | sounds[snd].prog, (sounds[snd].tone << 8) | sounds[snd].note, 1, 1);
+        ExitCriticalSection();
+        sounds[snd].numVoices = 0;
+        sounds[snd].playTone = sounds[snd].tone;
+        for (i = 0; i < 24; i++) {
+            if ((sounds[snd].voices >> i) & 1) {
+                sounds[snd].numVoices++;
+            }
+        }
+        if (sounds[snd].numVoices == 0) {
+            sounds[snd].numVoices = -1;
+        }
+        SetLoopingVolume(&sounds[snd], left, right);
+        break;
+    case SND_TYPE_SEQ:
+        GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+        if (left != 0 || right != 0) {
+            if (sounds[snd].sepNum == -1) {
+                SsSeqSetVol(sounds[snd].seq, left, right);
+                SsSeqPlay(sounds[snd].seq, 1, sounds[snd].prog);
+            } else {
+                SsSepSetVol(sounds[snd].seq, sounds[snd].sepNum, left, right);
+                SsSepPlay(sounds[snd].seq, sounds[snd].sepNum, 1, sounds[snd].prog);
+            }
+            break;
+        }
+    case 7:
+    case 8:
+    case 9:
+    case 10:
+        ret = -1;
+        break;
+    }
+    return ret;
+}
 
 s16 PlaySoundVolPanByID(s32 id, s16 snd, s16 vol, s16 pan) {
     SoundBlock *block = FindSoundBlockByID(id);
@@ -641,17 +863,17 @@ s16 PlaySoundVolPanByNum(u32 num, s16 snd, s16 vol, s16 pan) {
     return -1;
 }
 
-#ifdef NON_MATCHING
-/* addu operand order for &xa->offsets[file] (v0+t0 vs t0+v0) */
 s32 PlayXADirect(XABlock *xa, s16 track, s16 vol, s16 pan, s16 allowCue, s32 arg5) {
     s16 left, right;
     s16 file = track / 15;
     s16 chan = track - file * 15;
+    s32 *offsets;
     s32 pos;
     s32 v;
 
     if (file != 0) {
-        pos = xa->pos + xa->offsets[file];
+        offsets = xa->offsets;
+        pos = xa->pos + offsets[file];
     } else {
         pos = xa->pos;
     }
@@ -676,9 +898,6 @@ s32 PlayXADirect(XABlock *xa, s16 track, s16 vol, s16 pan, s16 allowCue, s32 arg
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", PlayXADirect);
-#endif
 
 s32 PlayXADirectwCB(XABlock *xa, s16 vol, s16 pan, s16 a3, s16 arg4, s32 arg5, void (*cb)()) {
     if (PlayXADirect(xa, vol, pan, a3, arg4, arg5) != 0) {
@@ -822,9 +1041,206 @@ void AdjustRunningMusicVol(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetMusicUnderscoreVol);
+void SetMusicUnderscoreVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
+    SoundEntry *sounds;
+    s16 diff;
+    s16 stop;
+    s16 d;
+    SoundEvent *ev;
 
+    if (snd != -1 && block != NULL) {
+        sounds = block->sounds;
+        if (vol == -1) {
+            vol = sounds[snd].defVol;
+        }
+        stop = (vol == -3);
+        if (stop) {
+            vol = 0;
+        }
+        if (gPlayingMIDIUnderscore == NULL) {
+            sounds[snd].vol = vol;
+            return;
+        }
+        if (time == 0) {
+            RemoveSoundEvent(FindSoundEvent(10, block, snd));
+            sounds[snd].vol = vol;
+            AdjustRunningMusicVol();
+            if (stop) {
+                StopMusicUnderscore();
+            }
+            return;
+        }
+        diff = vol - sounds[snd].vol;
+        if (diff != 0) {
+            ev = FindSoundEvent(10, block, snd);
+            if (mode == 3 && ev != NULL) {
+                d = vol - ev->value;
+                if (d == 0) {
+                    sounds[snd].vol = vol;
+                    AdjustRunningMusicVol();
+                    if (stop) {
+                        StopMusicUnderscore();
+                    }
+                    RemoveSoundEvent(ev);
+                    return;
+                }
+                time = abs(diff * time / d);
+                if (time <= 0) {
+                    time = 1;
+                }
+            }
+            if (ev == NULL) {
+                ev = NewSoundEvent(10, block, snd);
+            }
+            if (time > abs(diff)) {
+                ev->unk08 = abs(time / diff);
+                ev->unk0E = 1;
+                ev->unk0C = ev->unk08;
+                if (vol >= sounds[snd].vol) {
+                    ev->step = 1;
+                } else {
+                    ev->step = -1;
+                }
+            } else {
+                ev->step = diff / time;
+                ev->unk0E = 0;
+            }
+            ev->value = vol;
+            if (stop) {
+                ev->unk14 = 1;
+            } else {
+                ev->unk14 = 0;
+            }
+        }
+    }
+}
+
+#ifdef NON_MATCHING
+/* regalloc: target gives snd/time/mode/diff/stop stack homes (frame 0x70 vs 0x60); structure matches */
+void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
+    SoundEntry *sounds;
+    SoundEntry *s;
+    SoundEvent *ev = NULL;
+    s16 left, right;
+    s16 stop;
+    s16 diff;
+    s16 d;
+    s16 i;
+    s32 t;
+    s32 type;
+    s32 master;
+    s32 newVol, oldVol;
+
+    if (snd != -1 && (u8)block->numSounds - 1 >= snd) {
+        sounds = block->sounds;
+        if (vol == -1) {
+            vol = sounds[snd].defVol;
+        }
+        stop = (vol == -3);
+        if (stop) {
+            vol = 0;
+        }
+        s = &sounds[snd];
+        type = s->flags & 0x1F;
+        if (type == SND_TYPE_GROUP) {
+            for (i = 0; i < s->prog; i++) {
+                if (sounds[i + snd + 1].numVoices == -1) {
+                    SetSoundVol(block, snd + (s16)(i + 1), vol, 0, 2);
+                }
+            }
+            return;
+        }
+        switch (type) {
+        case SND_TYPE_ONESHOT:
+        case SND_TYPE_VOICED:
+            sounds[snd].vol = vol;
+            break;
+        case SND_TYPE_LOOP:
+            gLoopsPaused = 0;
+            if (s->numVoices == -1) {
+                s->vol = vol;
+                return;
+            }
+            if (time == 0) {
+                RemoveSoundEvent(FindSoundEvent(4, block, snd));
+                s->vol = vol;
+                GetVolumesFromPan(s->vol, s->pan, &left, &right, s->unk12);
+                SetLoopingVolume(s, left, right);
+            } else {
+                diff = vol - s->vol;
+                if (diff == 0) {
+                    return;
+                }
+                ev = FindSoundEvent(4, block, snd);
+                if (mode == 3) {
+                    if (ev != NULL) {
+                        d = vol - ev->value;
+                        if (d == 0) {
+                            s->vol = vol;
+                            GetVolumesFromPan(s->vol, s->pan, &left, &right, s->unk12);
+                            SetLoopingVolume(s, left, right);
+                            RemoveSoundEvent(ev);
+                            goto done;
+                        }
+                        time = abs(diff * time / d);
+                        if (time <= 0) {
+                            time = 1;
+                        }
+                    }
+                }
+                if (ev == NULL) {
+                    ev = NewSoundEvent(4, block, snd);
+                }
+                if (time > abs(diff)) {
+                    ev->unk08 = abs(time / diff);
+                    ev->unk0E = 1;
+                    ev->unk0C = ev->unk08;
+                    if (vol >= sounds[snd].vol) {
+                        ev->step = 1;
+                    } else {
+                        ev->step = -1;
+                    }
+                } else {
+                    ev->step = diff / time;
+                    ev->unk0E = 0;
+                }
+                ev->value = vol;
+                if (stop) {
+                    ev->unk14 = 1;
+                } else {
+                    ev->unk14 = 0;
+                }
+                return;
+            }
+        done:
+            if (stop) {
+                StopSound(block, snd);
+            }
+            break;
+        case SND_TYPE_SEQ:
+            master = D_801101D0[s->unk12];
+            newVol = vol * master / 127;
+            oldVol = s->vol * master / 127;
+            if (newVol != oldVol) {
+                if (s->sepNum == -1) {
+                    SsSeqSetCrescendo(s->seq, newVol - oldVol, time);
+                } else {
+                    SsSepSetCrescendo(s->seq, s->sepNum, newVol - oldVol, time);
+                }
+                sounds[snd].vol = vol;
+                if (stop) {
+                    ev = NewSoundEvent(9, block, snd);
+                    ev->unk0E = 1;
+                    ev->unk0C = time;
+                }
+            }
+            break;
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetSoundVol);
+#endif
 
 void SetSoundVolByID(s32 id, s16 snd, s16 vol, s16 a3, s16 arg4) {
     SoundBlock *block = FindSoundBlockByID(id);
@@ -914,7 +1330,87 @@ void PauseAllLoops(s32 pause) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetSoundPan);
+void SetSoundPan(SoundBlock *block, s16 snd, s16 pan, s16 dir, s16 time) {
+    SoundEntry *sounds;
+    SoundEvent *ev;
+    s16 left, right;
+    s16 vl, vr;
+    s16 i;
+    s16 change;
+    s16 voice;
+    s32 t;
+    s32 type;
+
+    if (snd != -1 && (u8)block->numSounds - 1 >= snd) {
+        sounds = block->sounds;
+        if (pan == -1) {
+            pan = sounds[snd].defPan;
+        }
+        type = sounds[snd].flags & 0x1F;
+        if (type == SND_TYPE_GROUP) {
+            for (i = 0; i < sounds[snd].prog; i++) {
+                if (sounds[i + snd + 1].numVoices == -1) {
+                    SetSoundPan(block, snd + (s16)(i + 1), pan, 1, 0);
+                }
+            }
+        } else {
+            switch (type) {
+            case SND_TYPE_ONESHOT:
+            case SND_TYPE_VOICED:
+                sounds[snd].pan = pan;
+                break;
+            case SND_TYPE_LOOP:
+                if (sounds[snd].numVoices == -1) {
+                    sounds[snd].pan = pan;
+                    return;
+                }
+                if (time == 0) {
+                    sounds[snd].pan = pan;
+                    GetVolumesFromPan(sounds[snd].vol, pan, &left, &right, sounds[snd].unk12);
+                    for (i = 0; i < sounds[snd].numVoices; i++) {
+                        voice = GetVoiceFromField(sounds[snd].voices, i);
+                        GetVoiceVolume(gVabBlock[sounds[snd].vab], sounds[snd].prog, i, left, right, &vl, &vr);
+                        SsUtSetDetVVol(voice, vl, vr);
+                    }
+                } else {
+                    change = GetPanChange(dir, sounds[snd].pan, pan);
+                    if (change != 0) {
+                        ev = NewSoundEvent(3, block, snd);
+                        if (abs(change) < time) {
+                            ev->step = dir;
+                            ev->unk08 = abs(time / change);
+                            ev->unk0E = 1;
+                            ev->unk0C = ev->unk08;
+                        } else {
+                            ev->step = change / time;
+                            ev->unk0E = 0;
+                        }
+                        ev->value = pan;
+                        ev->unk12 = -change;
+                    }
+                }
+                break;
+            case SND_TYPE_SEQ:
+                if (pan != sounds[snd].pan) {
+                    change = GetPanChange(dir, sounds[snd].pan, pan);
+                    ev = NewSoundEvent(2, block, snd);
+                    if (time > abs(change)) {
+                        ev->step = dir;
+                        ev->unk08 = abs(time / change);
+                        ev->unk0E = 1;
+                        ev->unk0C = ev->unk08;
+                    } else {
+                        ev->step = change / time;
+                        ev->unk0E = 0;
+                    }
+                    ev->value = pan;
+                    ev->unk12 = -change;
+                }
+                break;
+            }
+        }
+    }
+}
 
 void SetSoundPanByID(s32 id, s16 snd, s16 pan, s16 a3, s16 arg4) {
     SoundBlock *block = FindSoundBlockByID(id);
@@ -930,7 +1426,92 @@ void SetSoundPanByNum(u32 num, s16 snd, s16 pan, s16 a3, s16 arg4) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetSoundNote);
+void SetSoundNote(SoundBlock *block, s16 snd, s16 note, s16 time, s16 mode) {
+    SoundEntry *sounds;
+    SoundEvent *ev;
+    s32 i;
+    s32 diff;
+    s32 target;
+    s32 d;
+    s32 t;
+    s32 type;
+
+    if (snd != -1 && (u8)block->numSounds - 1 >= snd) {
+        sounds = block->sounds;
+        type = sounds[snd].flags & 0x1F;
+        if (type == SND_TYPE_GROUP) {
+            for (i = 0; i < sounds[snd].prog; i++) {
+                if (sounds[i + snd + 1].numVoices == -1) {
+                    SetSoundNote(block, snd + (s16)(i + 1), note, 0, 2);
+                }
+            }
+            return;
+        }
+        if (note == -1) {
+            note = sounds[snd].seq;
+        }
+        if (note >= 0x80) {
+            note = 0x7F;
+        }
+        switch (type) {
+        case SND_TYPE_ONESHOT:
+        case SND_TYPE_VOICED:
+            sounds[snd].tone = note;
+            break;
+        case SND_TYPE_LOOP:
+            if (sounds[snd].numVoices == -1) {
+                sounds[snd].tone = note;
+                return;
+            }
+            ev = FindSoundEvent(0, block, snd);
+            if (time == 0) {
+                RemoveSoundEvent(ev);
+                sounds[snd].tone = note;
+                for (i = 0; i < sounds[snd].numVoices; i++) {
+                    SsUtChangePitch(GetVoiceFromField(sounds[snd].voices, i), sounds[snd].vab, sounds[snd].prog, sounds[snd].playTone, 0, sounds[snd].tone, sounds[snd].note);
+                }
+            } else {
+                target = note * 127;
+                diff = target - (sounds[snd].tone * 127 + sounds[snd].note);
+                if (diff == 0) {
+                    RemoveSoundEvent(ev);
+                    return;
+                }
+                if (mode == 3 && ev != NULL) {
+                    d = target - ((ev->value >> 8) * 127 + (ev->value & 0xFF));
+                    if (d != 0) {
+                        time = abs(diff * time / d);
+                        if (time <= 0) {
+                            time = 1;
+                        }
+                    } else {
+                        time = 1;
+                    }
+                }
+                if (ev == NULL) {
+                    ev = NewSoundEvent(0, block, snd);
+                }
+                if (time > abs(diff)) {
+                    ev->unk08 = abs(time / diff);
+                    ev->unk0E = 1;
+                    ev->unk0C = ev->unk08;
+                    if (note >= sounds[snd].tone) {
+                        ev->step = 1;
+                    } else {
+                        ev->step = -1;
+                    }
+                } else {
+                    ev->step = diff / time;
+                    ev->unk0E = 0;
+                }
+                ev->value = sounds[snd].note | (note << 8);
+            }
+            break;
+        case SND_TYPE_SEQ:
+            break;
+        }
+    }
+}
 
 void SetSoundNoteByID(s32 id, s16 snd, s16 note, s16 a3, s16 arg4) {
     SoundBlock *block = FindSoundBlockByID(id);
@@ -985,14 +1566,14 @@ s16 GetSoundNoteByNum(u32 num, s16 snd, s16 which) {
     return -1;
 }
 
-#ifdef NON_MATCHING
-/* switch decision tree lacks the target's 'type < 2 -> default' test */
 void StopSound(SoundBlock *block, s16 snd) {
     SoundEntry *sounds;
 
     if (snd != -1 && (u8)block->numSounds - 1 >= snd) {
         sounds = block->sounds;
         switch (sounds[snd].flags & 0x1F) {
+        case SND_TYPE_ONESHOT:
+            break;
         case SND_TYPE_LOOP:
             if (sounds[snd].numVoices != -1) {
                 SsVoKeyOff((sounds[snd].vab << 8) | sounds[snd].prog, (sounds[snd].playTone << 8) | sounds[snd].note);
@@ -1010,9 +1591,6 @@ void StopSound(SoundBlock *block, s16 snd) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", StopSound);
-#endif
 
 void StopSoundByID(s32 id, s16 snd) {
     SoundBlock *block = FindSoundBlockByID(id);
@@ -1090,8 +1668,6 @@ void PrepareMovieSound(void) {
     gCurrentMovieVol = 0x7F;
 }
 
-#ifdef NON_MATCHING
-/* scheduling: unk0E store lands in the bgez delay slot, v0/v1 swapped */
 void FadeDownMovieSound(s32 rate) {
     SoundEvent *ev = FindSoundEvent(0xB, NULL, 100);
     s32 min;
@@ -1109,10 +1685,7 @@ void FadeDownMovieSound(s32 rate) {
     if (rate > -min) {
         step = rate / min;
         ev->unk0E = 1;
-        if (step < 0) {
-            step = -step;
-        }
-        ev->unk08 = step;
+        ev->unk08 = abs(step);
         ev->step = -1;
         ev->unk0C = ev->unk08;
     } else {
@@ -1121,9 +1694,6 @@ void FadeDownMovieSound(s32 rate) {
     }
     ev->value = 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", FadeDownMovieSound);
-#endif
 
 SoundBlock *FindSoundBlockByID(s32 id) {
     s32 i;
@@ -1297,14 +1867,11 @@ s16 GetVoiceFromField(s32 field, s16 n) {
     return -1;
 }
 
-#ifdef NON_MATCHING
-/* only diff: target leaves the abs() bgez delay slot as nop and loads 90 into v1 after the join */
 void GetVolumesFromPan(s16 vol, s16 pan, s16 *left, s16 *right, s16 which) {
     s16 v = vol * D_801101D0[which] / 127;
     s32 rear;
     s16 p;
     s16 lr;
-    s32 d;
 
     if (v == 0) {
         *left = *right = 0;
@@ -1313,12 +1880,7 @@ void GetVolumesFromPan(s16 vol, s16 pan, s16 *left, s16 *right, s16 which) {
     p = pan;
     rear = 0;
     if (pan > 90 && pan < 270) {
-        d = pan - 180;
-        if (d < 0) {
-            d = -d;
-        }
-        rear = 90;
-        rear -= d;
+        rear = 90 - abs(pan - 180);
         pan = 180 - pan;
         p = pan;
         if (pan < 0) {
@@ -1358,39 +1920,30 @@ void GetVolumesFromPan(s16 vol, s16 pan, s16 *left, s16 *right, s16 which) {
         *right = 1;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", GetVolumesFromPan);
-#endif
 
-#ifdef NON_MATCHING
-/* if-branch: target sign-extends to/from into fresh regs and does not reassociate to-(from+360) */
 s16 GetPanChange(s16 flags, s16 from, s16 to) {
     s16 d;
 
     if (flags < 0) {
-        if (to > from) {
-            d = to - (s32)(from + 360);
+        s32 t = to;
+        s32 f = from;
+        if (t > f) {
+            d = t - (s16)(f + 360); /* angles wrap as s16 */
         } else {
-            d = to - from;
+            d = t - f;
         }
     } else if (to < from) {
-        d = (to + 360) - from;
+        d = (s16)(to + 360) - from;
     } else {
         d = to - from;
     }
     return d;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", GetPanChange);
-#endif
 
 #ifdef NON_MATCHING
-/* target computes (s16)(pan+add) into v0 then returns 1; dead computation is optimized away here */
+/* target computes (s16)(pan+add) into v0 then returns 1; the dead sum is optimized away here (permuter best 5 needs an artificial use) */
 s16 AddPan(s16 pan, s16 add) {
-    s16 sum = pan + add;
-
-    if (sum) {
-    }
+    pan += add;
     return 1;
 }
 #else
@@ -1450,7 +2003,190 @@ s16 GetStereoMode(void) {
     return gStereoMode;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", DoSoundTick);
+void DoSoundTick(void) {
+    SoundEvent *ev;
+    SoundEntry *sounds;
+    s16 left, right;
+    s32 tone;
+    s32 note;
+    s32 target;
+    s16 v;
+    s16 i;
+    void (*cb)();
+    s32 frame;
+    s32 pos;
+
+    ev = gSEvent;
+    if (ev == NULL) {
+        goto done;
+    }
+loop:
+    {
+        if (ev->unk0E == 1) {
+            ev->unk0C--;
+            if ((s16)ev->unk0C != -1) {
+                goto done;
+            }
+            if (ev->unk0E == 1) {
+                ev->unk0C = ev->unk08;
+            }
+        }
+        sounds = ev->block->sounds;
+        switch (ev->kind) {
+        case 0:
+            if (sounds[ev->id].numVoices != -1) {
+                tone = sounds[ev->id].tone;
+                note = sounds[ev->id].note + ev->step;
+                target = (s16)ev->value >> 8;
+                if (tone == target) {
+                    if ((ev->step < 0 && note < (ev->value & 0xFF)) || (ev->step > 0 && note > (ev->value & 0xFF))) {
+                        note = (u8)ev->value;
+                    }
+                } else {
+                    if (note >= 0x80) {
+                        tone++;
+                        note = 0;
+                    }
+                    if (note < 0) {
+                        tone--;
+                        note = (tone != target) ? 0x7F : 0;
+                    }
+                }
+                for (i = 0; i < sounds[ev->id].numVoices; i++) {
+                    SsUtChangePitch(GetVoiceFromField(sounds[ev->id].voices, i), sounds[ev->id].vab, sounds[ev->id].prog,
+                                    sounds[ev->id].playTone, 0, (s16)tone, (s16)note);
+                }
+                sounds[ev->id].tone = tone;
+                sounds[ev->id].note = note;
+            } else {
+                sounds[ev->id].tone = (u16)ev->value >> 8;
+                sounds[ev->id].note = ev->value;
+            }
+            if (sounds[ev->id].tone == ((s16)ev->value >> 8) && sounds[ev->id].note == (ev->value & 0xFF)) {
+                goto remove;
+            }
+            goto next;
+        case 9:
+            StopSound(ev->block, ev->id);
+            goto remove;
+        case 2:
+            sounds[ev->id].pan = AddPan(sounds[ev->id].pan, ev->step);
+            ev->unk12 += ev->step;
+            if ((ev->step > 0 && ev->unk12 > 0) || (ev->step < 0 && ev->unk12 < 0)) {
+                sounds[ev->id].pan = ev->value;
+            }
+            GetVolumesFromPan(sounds[ev->id].vol, sounds[ev->id].pan, &left, &right, sounds[ev->id].unk12);
+            if (sounds[ev->id].sepNum == -1) {
+                SsSeqSetVol(sounds[ev->id].seq, left, right);
+            } else {
+                SsSepSetVol(sounds[ev->id].seq, sounds[ev->id].sepNum, left, right);
+            }
+        pancheck:
+            if (sounds[ev->id].pan == ev->value) {
+                goto remove;
+            }
+            goto next;
+        case 3:
+            if (sounds[ev->id].numVoices != -1) {
+                sounds[ev->id].pan = AddPan(sounds[ev->id].pan, ev->step);
+                ev->unk12 += ev->step;
+                if ((ev->step > 0 && ev->unk12 > 0) || (ev->step < 0 && ev->unk12 < 0)) {
+                    sounds[ev->id].pan = ev->value;
+                }
+                GetVolumesFromPan(sounds[ev->id].vol, sounds[ev->id].pan, &left, &right, sounds[ev->id].unk12);
+                SetLoopingVolume(sounds + ev->id, left, right);
+            } else {
+                sounds[ev->id].pan = ev->value;
+            }
+            goto pancheck;
+        case 4:
+            if (sounds[ev->id].numVoices != -1) {
+                v = sounds[ev->id].vol + ev->step;
+                if ((ev->step > 0 && v > ev->value) || (ev->step < 0 && v < ev->value)) {
+                    v = ev->value;
+                }
+                GetVolumesFromPan(v, sounds[ev->id].pan, &left, &right, sounds[ev->id].unk12);
+                sounds[ev->id].vol = v;
+                SetLoopingVolume(sounds + ev->id, left, right);
+            } else {
+                sounds[ev->id].vol = ev->value;
+            }
+            if (sounds[ev->id].vol != ev->value) {
+                goto next;
+            }
+            if (ev->unk14 == 1) {
+                StopSound(ev->block, ev->id);
+            }
+            goto remove;
+        case 10:
+            if (gPlayingMIDIUnderscore != NULL) {
+                v = sounds[ev->id].vol + ev->step;
+                if ((ev->step > 0 && v > ev->value) || (ev->step < 0 && v < ev->value)) {
+                    v = ev->value;
+                }
+                sounds[ev->id].vol = v;
+                AdjustRunningMusicVol();
+            } else {
+                sounds[ev->id].vol = ev->value;
+            }
+            if (sounds[ev->id].vol != ev->value) {
+                goto next;
+            }
+            if (ev->unk14 == 1) {
+                StopMusicUnderscore();
+            }
+            goto remove;
+        case 11:
+            v = gCurrentMovieVol + ev->step;
+            if ((ev->step > 0 && v > ev->value) || (ev->step < 0 && v < ev->value)) {
+                v = ev->value;
+            }
+            gCurrentMovieVol = v;
+            SsSetSerialVol(0, v, v);
+            if (v != ev->value) {
+                goto next;
+            }
+        remove:
+            ev = RemoveSoundEvent(ev);
+            break;
+        case 1:
+        next:
+            ev = ev->next;
+            break;
+        }
+        if (ev != NULL) {
+            goto loop;
+        }
+    }
+done:
+    if (gXferingVAB != -1 && SoundRegisterVABComplete() != 0 && gVABDoneCallback != NULL) {
+        gVABDoneCallback(gVABDoneCallbackData_1, gVABDoneCallbackData_2);
+        gVABDoneCallback = NULL;
+    }
+    if (gUserXACallback != NULL) {
+        cb = gUserXACallback;
+        frame = gUserXACallbackFrame;
+        if (frame == -1) {
+            if (!PlayingXA()) {
+                goto fire;
+            }
+            if (gUserXACallbackFrame == frame) {
+                return;
+            }
+        }
+        if (PlayingXA()) {
+            pos = GetXAPos();
+            if (pos >= gUserXACallbackFrame) {
+                gUserXACallback = NULL;
+                cb(gUserXACallbackFrame, pos, gUserXACallbackData);
+            }
+        } else {
+        fire:
+            gUserXACallback = NULL;
+            cb(gUserXACallbackFrame, -1, gUserXACallbackData);
+        }
+    }
+}
 
 SoundEvent *NewSoundEvent(s16 kind, SoundBlock *block, s16 id) {
     SoundEvent *ev;
