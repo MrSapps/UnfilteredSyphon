@@ -27,10 +27,11 @@ s32 TextIsStringShowing(u16 str);
 void TextChangeStringDuration(u16 str, s32 ticks);
 void TextRemoveString(u16 str);
 void TargetAcquire(GameObjectRuntime *rt, s32 mode);
-s16 func_80032E24();
+int func_80032E24();
 u8 func_80032988(GameObjectRuntime *rt, s16 target, s32 arg2);
-s16 func_800333F8(GameObjectRuntime *rt);
+int func_800333F8(GameObjectRuntime *rt);
 void func_800323C4(TargetInfo *target);
+void TextRemoveString(u16 str);
 
 INCLUDE_ASM("asm/main/nonmatchings/target", TargetCalcProb);
 
@@ -74,7 +75,44 @@ static void func_800337C4(void) {
     D_8010F821 = 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetAcquireCAS);
+void TargetAcquireCAS(s16 id, s32 action) {
+    GameObjectRuntime *rt;
+    u8 wasTargeting;
+
+    rt = gameObjectsInfo[id].runtime;
+    if (action == 2) {
+        if (D_8010F822) {
+            gTargetModeFlag = 1;
+            TargetAcquire(rt, 1);
+            D_8010F822 = 0;
+            return;
+        }
+        wasTargeting = gTargetModeFlag;
+        TargetAcquire(rt, 0);
+        if (wasTargeting) {
+            if (TextIsStringShowing(D_8010FFDC)) {
+                if (rt->target->targetId < 0) {
+                    TextChangeStringDuration(D_8010FFDC, 40);
+                    return;
+                }
+                TextRemoveString(D_8010FFDC);
+                return;
+            }
+            D_8010FFDC = TextStatusMessage(gNoTgtMsg, 0);
+        }
+    } else if (action == 3) {
+        D_8010F821 = 0;
+        if (gTargetModeFlag) {
+            D_8010F822 = 1;
+            return;
+        }
+        if (gSniperMode) {
+            CASRequestAction(id, 13);
+        }
+        gTargetModeFlag = 1;
+        rt->target->targetId = -1;
+    }
+}
 
 void TargetAcquireNoneCAS(s16 id, s32 action) {
     GameObjectRuntime *rt;
@@ -92,7 +130,60 @@ INCLUDE_ASM("asm/main/nonmatchings/target", TargetAimCAS);
 
 INCLUDE_ASM("asm/main/nonmatchings/target", TargetSetCAS);
 
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetAcquire);
+/* mode 0: keep/auto-pick, 1: pick next, 2: drop target */
+void TargetAcquire(GameObjectRuntime *rt, s32 mode) {
+    TargetInfo *target;
+    int prev;
+    s32 id;
+    u8 targeting;
+
+    target = rt->target;
+    prev = target->targetId;
+    if (rt->npcState == 2) {
+        id = -1;
+        if (rt->npc->flags & 0x20000000) {
+            s32 ref = gameObjectsInfo[rt->linkedId].refId;
+            if (gameObjectsInfo[ref].runtime->healthInfo->maxHealth > 0) {
+                id = ref;
+            }
+        }
+        if (id < 0) {
+            id = func_80032E24(rt, id);
+        }
+        target->targetId = id;
+    } else {
+        targeting = gTargetModeFlag;
+        if (mode == 0 || (prev < 0 && mode != 2)) {
+            if (targeting && prev >= 0) {
+                if (!func_80032988(rt, prev, 0)) {
+                    target->targetId = -1;
+                }
+            } else {
+                target->targetId = func_80032E24(rt);
+            }
+        } else if (mode == 1) {
+            target->targetId = func_800333F8(rt);
+            target->flags |= 8;
+        } else if (mode == 2) {
+            target->targetId = -1;
+            gTargetModeFlag = 0;
+        }
+        if (!(*rt->flagsPtr & 0x02000000) && !gPlayerFlashlight) {
+            if (rt->target->targetId >= 0) {
+                CASRequestAction(rt->linkedId, 0x2B);
+            } else {
+                if (mode != 2) {
+                    CASRequestAction(rt->linkedId, 0x2D);
+                }
+                gTargetModeFlag = 0;
+            }
+        }
+    }
+    if (target->targetId != prev) {
+        func_800323C4(target);
+        TargetCameraUpdate();
+    }
+}
 
 void TargetClear(GameObjectRuntime *rt) {
     TargetInfo *target;

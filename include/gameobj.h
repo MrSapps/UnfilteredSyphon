@@ -77,8 +77,8 @@ typedef struct TargetInfo {
     /* 0x02 */ u8 unk02[2];
     /* 0x04 */ u32 flags;
     /* 0x08 */ u8 unk08[0x50];
-    /* 0x58 */ s32 unk58;
-    /* 0x5C */ u8 unk5C[2];
+    /* 0x58 */ s16 unk58;
+    /* 0x5A */ u8 unk5A[4];
     /* 0x5E */ s16 unk5E;
     /* 0x60 */ u8 unk60[0x4C];
     /* 0xAC */ s32 unkAC;
