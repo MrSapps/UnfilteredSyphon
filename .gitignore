@@ -27,3 +27,6 @@ __pycache__/
 
 # Editor
 /.vscode/
+
+# Claude Code session state (agent worktrees etc.)
+/.claude/

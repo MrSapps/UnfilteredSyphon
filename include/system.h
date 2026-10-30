@@ -151,7 +151,7 @@ extern u8 D_80140FE0[]; /* load address of level overlays */
 
 void SysSoundSetMasterVolume(s32 channel, s32 vol);
 s32 SysSoundGetMasterVolume(s32 channel);
-void GameSysSetLetterBoxMode(s32 mode);
+void GameSysSetLetterBoxMode(u32 mode);
 void InterfaceForceOff(void);
 void EGSDisplayFadeOff(void);
 void EGSListRemove(EGSListNode **list, EGSListNode *node);
