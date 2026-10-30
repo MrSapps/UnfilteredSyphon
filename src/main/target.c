@@ -16,7 +16,8 @@ extern s32 gSniperMode;
 extern void *gNoTgtMsg;
 typedef struct TargetTimer {
     s16 id;
-    u8 unk02[6];
+    u8 unk02[2];
+    s32 tick;
 } TargetTimer;
 extern TargetTimer mTargetTimerList[8];
 extern s16 D_8010562A;
@@ -26,6 +27,15 @@ void GameCameraSetModeTarget(s32 on, s32 arg1, GameObjectRuntime *target, s32 ar
 s32 TextIsStringShowing(u16 str);
 void TextChangeStringDuration(u16 str, s32 ticks);
 void TextRemoveString(u16 str);
+extern u8 D_801055A6[];   /* targeting profiles, 0x36 bytes per kind */
+extern s32 D_8012C8AC[];  /* mTargetTimerList[i] start tick (aliases its +4) */
+extern s32 gExeTick;
+void func_80031AEC();
+void func_80031BDC();
+void func_80031C70();
+void func_80031E10();
+void func_80031F6C();
+void func_80032304();
 void TargetAcquire(GameObjectRuntime *rt, s32 mode);
 int func_80032E24();
 u8 func_80032988(GameObjectRuntime *rt, s16 target, s32 arg2);
@@ -64,7 +74,64 @@ void TargetInit(void) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/target", D_8001149C);
 
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetInitGobj);
+void TargetInitGobj(GameObjectRuntime *rt, TargetInfo *target, s32 kind, u8 arg3) {
+    int i;
+
+    if (target == NULL) {
+        target = EGSMemMalloc(sizeof(TargetInfo));
+#line 1263
+        ASSERT(target != NULL);
+    }
+    rt->target = target;
+    for (i = 0; i < 15; i++) {
+        target->unk34[i] = 0;
+    }
+    target->profile = &D_801055A6[kind * 0x36];
+    if (kind == 1) {
+        target->actions[0] = func_80031AEC;
+        target->actions[1] = func_80031BDC;
+        target->actions[2] = func_80031C70;
+        target->actions[3] = func_80031E10;
+        target->actions[4] = func_80031F6C;
+        target->unk1C = NULL;
+    } else if (kind == 2) {
+        target->actions[0] = func_80031AEC;
+        target->actions[1] = func_80031BDC;
+        target->actions[2] = func_80031C70;
+        target->actions[3] = func_80031E10;
+        target->actions[4] = func_80031F6C;
+        target->unk1C = NULL;
+    } else if (kind == 3) {
+        target->actions[0] = func_80031AEC;
+        target->actions[1] = func_80031C70;
+        target->actions[2] = func_80031E10;
+        target->actions[3] = func_80031F6C;
+        target->actions[4] = func_80032304;
+        target->unk1C = NULL;
+    } else if (kind == 0) {
+        target->actions[0] = NULL;
+    }
+    target->unkAC = arg3;
+    target->unkB0 = arg3;
+    target->unkA8 = -1;
+    target->unk52 = 0;
+    target->unk54 = 0;
+    target->unk56 = 0;
+    target->unkA4 = 0;
+    target->unk60 = 0;
+    target->unk02 = 0;
+    target->threat = 0;
+    target->unkC0 = 0;
+    target->flags &= ~8;
+    target->flags &= ~2;
+    target->targetId = -1;
+    target->unkBC = -1;
+    target->unk5A = -1;
+    target->unk5E = -1;
+    target->startTick = gExeTick;
+    target->lastTick = gExeTick;
+    target->flags |= 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/target", func_800333F8);
 
@@ -128,7 +195,35 @@ void TargetAcquireNoneCAS(s16 id, s32 action) {
 
 INCLUDE_ASM("asm/main/nonmatchings/target", TargetAimCAS);
 
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetSetCAS);
+void TargetSetCAS(s16 id, s32 action) {
+    int i;
+    int freeSlot;
+    u8 found;
+
+    freeSlot = -1;
+    found = 0;
+    for (i = 0; i < 8; i++) {
+        if (mTargetTimerList[i].id == id) {
+            if (action == 0x2B) {
+                mTargetTimerList[i].tick = gExeTick;
+            } else if (action == 0x2C) {
+                mTargetTimerList[i].id = -1;
+            } else if (action == 0x2D && (u32)(gExeTick - mTargetTimerList[i].tick) >= 61 &&
+                       (id != gPlayerOffset || !gPlayerFlashlight)) {
+                CASRequestAction(id, 0x2C);
+            }
+            found = 1;
+            break;
+        }
+        if (mTargetTimerList[i].id == -1) {
+            freeSlot = i;
+        }
+    }
+    if (!found && freeSlot != -1 && action == 0x2B) {
+        mTargetTimerList[freeSlot].id = id;
+        mTargetTimerList[freeSlot].tick = gExeTick;
+    }
+}
 
 /* mode 0: keep/auto-pick, 1: pick next, 2: drop target */
 void TargetAcquire(GameObjectRuntime *rt, s32 mode) {

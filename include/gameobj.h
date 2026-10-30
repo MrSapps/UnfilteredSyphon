@@ -71,16 +71,27 @@ typedef struct GameObjectRuntime {
 
 #define GOBJ_MODEL_FLAG_400000 0x400000
 
-/* Who/what an object is targeting (GameObjectRuntime.target). */
+/* Who/what an object is targeting (GameObjectRuntime.target), 0xD8 bytes. */
 typedef struct TargetInfo {
     /* 0x00 */ s16 targetId; /* gameObjectsInfo index, -1 for none */
-    /* 0x02 */ u8 unk02[2];
+    /* 0x02 */ s16 unk02;
     /* 0x04 */ u32 flags;
-    /* 0x08 */ u8 unk08[0x50];
+    /* 0x08 */ void (*actions[5])(); /* per-kind targeting steps, NULL for none */
+    /* 0x1C */ void *unk1C;
+    /* 0x20 */ u8 unk20[0x10];
+    /* 0x30 */ void *profile; /* entry in the per-kind profile table (0x36 bytes each) */
+    /* 0x34 */ s16 unk34[15];
+    /* 0x52 */ s16 unk52;
+    /* 0x54 */ s16 unk54;
+    /* 0x56 */ s16 unk56;
     /* 0x58 */ s16 unk58;
-    /* 0x5A */ u8 unk5A[4];
+    /* 0x5A */ s16 unk5A;
+    /* 0x5C */ u8 unk5C[2];
     /* 0x5E */ s16 unk5E;
-    /* 0x60 */ u8 unk60[0x4C];
+    /* 0x60 */ s16 unk60;
+    /* 0x62 */ u8 unk62[0x42];
+    /* 0xA4 */ s32 unkA4;
+    /* 0xA8 */ s32 unkA8;
     /* 0xAC */ s32 unkAC;
     /* 0xB0 */ s32 unkB0;
     /* 0xB4 */ u8 unkB4[4];
@@ -88,9 +99,11 @@ typedef struct TargetInfo {
     /* 0xBC */ s16 unkBC;
     /* 0xBE */ u8 unkBE[2];
     /* 0xC0 */ s32 unkC0;
-    /* 0xC4 */ u8 unkC4[0x10];
+    /* 0xC4 */ u8 unkC4[8];
+    /* 0xCC */ s32 startTick;
+    /* 0xD0 */ s32 lastTick;
     /* 0xD4 */ s32 threat; /* 0..0x1000 */
-} TargetInfo;
+} TargetInfo; /* size 0xD8 */
 
 /* Object id 666 is a fixed object with its own dispatch slot rather than a placed one. */
 #define GOBJ_ID_666 0x29A
