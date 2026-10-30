@@ -1,6 +1,7 @@
 #include "common.h"
 #include "game.h"
 #include "gameobj.h"
+#include "gobj.h"
 
 /* save.c's small data, still assembled from asm */
 SDATA_LOCAL(gContinueLevel)
@@ -40,8 +41,7 @@ typedef struct SaveData {
 typedef struct ContinueObject {
     /* 0x00 */ s16 id;
     /* 0x02 */ s16 data0;
-    /* 0x04 */ s16 data1;
-    /* 0x06 */ s16 pad;
+    /* 0x04 */ s32 data1;
 } ContinueObject;
 
 #define CONTINUE_OBJECTS_MAX 0x82
@@ -233,14 +233,142 @@ s32 SavePlayerRestore(void) {
     return 1;
 }
 
-void func_80090724(void); /* still asm */
+#define SAVE_OBJECT_MAX 0x280
+#define SAVE_GENERATOR_MAX 100
+
+/* Bit n of a bit array that may start at any byte (the code allows for an unaligned base). */
+#define BITARRAY_SET(base, n)                               \
+    {                                                       \
+        u8 *p_ = (u8 *)(base);                              \
+        s32 b_ = (n);                                       \
+        s32 w_;                                             \
+        u32 m_;                                             \
+        if ((u32)p_ & 3) {                                  \
+            b_ = (n) + ((u32)p_ & 3) * 8;                   \
+            p_ = (u8 *)((u32)p_ & ~3);                      \
+        }                                                   \
+        w_ = b_ >> 5;                                       \
+        m_ = 1 << (b_ & 0x1F);                              \
+        ((u32 *)p_)[w_] |= m_;                              \
+    }
+#define BITARRAY_CLEAR(base, n)                             \
+    {                                                       \
+        u8 *p_ = (u8 *)(base);                              \
+        s32 b_ = (n);                                       \
+        s32 w_;                                             \
+        u32 m_;                                             \
+        if ((u32)p_ & 3) {                                  \
+            b_ = (n) + ((u32)p_ & 3) * 8;                   \
+            p_ = (u8 *)((u32)p_ & ~3);                      \
+        }                                                   \
+        w_ = b_ >> 5;                                       \
+        m_ = 1 << (b_ & 0x1F);                              \
+        ((u32 *)p_)[w_] &= ~m_;                             \
+    }
+
+typedef struct LevData {
+    /* 0x00 */ u8 unk00[0x7C];
+    /* 0x7C */ s32 sector;
+} LevData;
+
+extern u8 gMissionFailed;
+extern u8 gGabeSector;
+extern LevData *gLevData;
+extern s32 gNPCGeneratorCount;
+extern u16 *generatorInfo; /* 0x10-byte records, id first */
+extern s32 gSaveLevelData[1];
+extern s32 gExeTick;
+extern char D_80013354[]; /* "s/save.c" */
+
+s32 FriendlyGobjGetReferenceY(GameObjectRuntime *obj, s32 arg1);
+s16 InterfaceCountdownGet(void);
+void WeaponGetSaveInfo(u8 *out);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
+void EGSDebugAssert(int, int, char *file, int line);
+
+void func_80090724(void);
 
 s32 SaveCreateContinue(void) {
     EGSDisplayQueueInterrupt(func_80090724, 2, 0xE0C00000);
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/save", func_80090724);
+/* Store the continue point (run from the display interrupt queue). */
+void func_80090724(void) {
+    s16 saved = 0;
+    s32 i;
+    GameObjectRuntime *obj;
+    ContinueObject *entry;
+
+    if (gMissionFailed || gObjPlayer->healthInfo->health <= 0) {
+        return;
+    }
+    SavePlayerPreserve();
+    if (gLevelGameObjCount >= SAVE_OBJECT_MAX) {
+        EGSDebugAssert(1, 0, D_80013354, 0x136);
+    }
+    if (gNPCGeneratorCount >= SAVE_GENERATOR_MAX) {
+        EGSDebugAssert(1, 0, D_80013354, 0x137);
+    }
+    gLevData->sector = D_80121B08.sector = gGabeSector;
+    D_80121B08.orient[0] = gObjPlayer->anim->frame->m[0][2];
+    D_80121B08.orient[1] = gObjPlayer->anim->frame->m[1][2];
+    D_80121B08.orient[2] = gObjPlayer->anim->frame->m[2][2];
+    D_80121B08.orient[1] = -D_80121B08.orient[1];
+    *(VECTOR32 *)D_80121B08.position = gObjPlayer->move->pos;
+    D_80121B08.position[1] = FriendlyGobjGetReferenceY(gObjPlayer, 1) + 0x69;
+    if (gObjectives == NULL) {
+        EGSDebugAssert(1, 0, D_80013354, 0x145);
+    }
+    D_80121B08.objectives[0] = gObjectives->bits[0];
+    D_80121B08.objectives[1] = gObjectives->bits[1];
+    D_80121B08.objectives[2] = gObjectives->bits[2];
+    D_80121B08.objectives[3] = gObjectives->bits[3];
+    D_80121B08.objectives[4] = gObjectives->bits[4];
+    D_80121B08.objectives[5] = gObjectives->bits[5];
+    D_80121B08.countdown = InterfaceCountdownGet();
+    D_80121B08.objects[0].id = -1;
+    D_80121B08.objects[0].data0 = 0;
+    D_80121B08.objects[0].data1 = 0;
+    D_80121B08.exeTick = gExeTick;
+    for (i = 0; i < gLevelGameObjCount; i++) {
+        obj = gameObjectsInfo[i].runtime;
+        entry = &D_80121B08.objects[saved];
+        if (saved >= CONTINUE_OBJECTS_MAX) {
+            EGSDebugAssert(1, 0, D_80013354, 0x15E);
+        }
+        if (obj != NULL) {
+            if (obj->healthInfo->health > 0) {
+                BITARRAY_SET(D_80121B08.objAlive, i);
+            } else {
+                BITARRAY_CLEAR(D_80121B08.objAlive, i);
+            }
+        }
+        SysPostMessage(0x29, 5, 0xFFFE, i, (s32)&entry->data1, (s32)&entry->data0, 0, 0);
+        if (entry->data0 != 0 || entry->data1 != 0) {
+            saved++;
+            entry->id = i;
+            entry = &D_80121B08.objects[saved];
+            entry->data0 = 0;
+            entry->data1 = 0;
+        }
+    }
+    for (i = saved; i < CONTINUE_OBJECTS_MAX && D_80121B08.objects[i].id != -1; i++) {
+        D_80121B08.objects[i].id = -1;
+    }
+    for (i = 0; i < gNPCGeneratorCount; i++) {
+        D_80121B08.generators[i] = generatorInfo[i * 8];
+    }
+    WeaponGetSaveInfo(D_80121B08.weaponInfo);
+    D_80121B08.savedObjCount = saved;
+    D_80121B08.objCount = gLevelGameObjCount;
+    D_80121B08.generatorCount = gNPCGeneratorCount;
+    for (i = 0; i <= 0; i++) {
+        D_80121B08.levelData[i] = gSaveLevelData[i];
+    }
+    gContinueLevel = 1;
+}
+
 
 INCLUDE_ASM("asm/main/nonmatchings/save", SaveRestoreContinue);
 
