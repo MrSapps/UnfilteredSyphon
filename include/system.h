@@ -52,7 +52,40 @@ typedef struct SysInfo {
 extern SysInfo gSysInfo;
 extern SysMsgHandler gDispatchFunctions[];
 
+#define SYS_EXE_TICK_TIMER_MAX 16
+
+typedef struct ExeTickTimer {
+    /* 0x00 */ void (*callback)(s32 arg);
+    /* 0x04 */ s32 ticks;
+    /* 0x08 */ s32 arg;
+} ExeTickTimer; /* size 0xC */
+
+typedef struct EGSListNode {
+    /* 0x00 */ void *data;
+    /* 0x04 */ struct EGSListNode *prev;
+    /* 0x08 */ struct EGSListNode *next;
+} EGSListNode;
+
+/* Movie playback state (system.c static). */
+typedef struct SysMovie {
+    /* 0x00 */ u8 unk00;
+    /* 0x01 */ u8 doneMsgId; /* message posted when the movie ends (0x21: end of level) */
+    /* 0x02 */ u8 unk02[2];
+    /* 0x04 */ s32 doneMsgFrom;
+    /* 0x08 */ s32 doneMsgTo;
+    /* 0x0C */ s32 unk0C;
+    /* 0x10 */ u8 playing;
+} SysMovie;
+
 /* system.c statics, still defined in the asm .bss */
+extern ExeTickTimer mExeTickTimers[SYS_EXE_TICK_TIMER_MAX];
+extern EGSListNode *exeTickTimerList;
+extern SysMovie mSysMovie;
+extern char tcOverlay[];
+extern u8 D_801377E0[]; /* load address of texture-cache/menu/movie overlays */
+extern u8 gStallLoaded;
+extern u8 gStallFaded;
+extern u8 gPlayerRadioFlag;
 extern SysMsgQueue mSysMsgQueue;
 extern SysMsgQueue mSysMsgQueueNext;
 
@@ -77,6 +110,17 @@ void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2
 void SysLoadOverlay(char *name, void *addr, s32 arg2);
 void SysLoadTextureCacheOverlay(char *name, s32 arg1);
 void func_80015A64(int state, int push);
+
+void SysSoundSetMasterVolume(s32 channel, s32 vol);
+s32 SysSoundGetMasterVolume(s32 channel);
+void GameSysSetLetterBoxMode(s32 mode);
+void InterfaceForceOff(void);
+void EGSDisplayFadeOff(void);
+void EGSListRemove(EGSListNode **list, EGSListNode *node);
+int strcmp(const char *, const char *);
+char *strcpy(char *, const char *);
+void func_801445A4(void);
+void func_801470B0(void);
 
 void UnpauseTerrainStream(void);
 void PauseTerrainStream(void);

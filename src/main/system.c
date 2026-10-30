@@ -7,6 +7,10 @@ SDATA_LOCAL(mSystemStateDepth)
 SDATA_LOCAL(gSystemState)
 SDATA_LOCAL(gSysHaltState)
 SDATA_LOCAL(D_8010F622)
+SDATA_LOCAL(gSysMovieDoneCallback)
+SDATA_LOCAL(gStallLoaded)
+SDATA_LOCAL(gStallFaded)
+SDATA_LOCAL(exeTickTimerList)
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
 
@@ -113,15 +117,32 @@ INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadData);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadOverlay);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadTextureCacheOverlay);
+void SysLoadTextureCacheOverlay(char *name, u8 arg1) {
+    if (name == NULL) {
+        tcOverlay[0] = 0;
+        return;
+    }
+    if (strcmp(name, tcOverlay) != 0) {
+        SysLoadOverlay(name, D_801377E0, arg1);
+        strcpy(tcOverlay, name);
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStreamTextureCacheOverlay);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_8001593C);
+void func_8001593C(void) {
+    InterfaceForceOff();
+    EGSDisplayFadeOff();
+    SysStatePop();
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", StallOverlayCallback);
+void StallOverlayCallback(void) {
+    gStallLoaded = 1;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", StallFadeCallback);
+void StallFadeCallback(void) {
+    gStallFaded = 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStall);
 
@@ -131,24 +152,31 @@ INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", func_80015A64);
 
-/* Matches as C (see SysStatePush below), but its ASSERT's __FILE__ string must be
- * emitted at the first assert in this file (in SysInit), so it waits until the
- * earlier asserting functions are decompiled:
- *
- * #line 1361
- * void SysStatePush(int state) {
- *     ASSERT(mSystemStateDepth < SYS_STATE_STACK_MAX);
- *     mSystemStateStack[++mSystemStateDepth] = state;
- *     func_80015A64(state, 1);
- * }
- */
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStatePush);
+void SysStatePush(int state) {
+#line 1364
+    ASSERT(mSystemStateDepth < SYS_STATE_STACK_MAX);
+    mSystemStateStack[++mSystemStateDepth] = state;
+    func_80015A64(state, 1);
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStatePop);
+void SysStatePop(void) {
+#line 1379
+    ASSERT(mSystemStateDepth > 0);
+    mSystemStateDepth--;
+    func_80015A64(mSystemStateStack[mSystemStateDepth], 0);
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysSetState);
+void SysSetState(int state) {
+    mSystemStateStack[mSystemStateDepth] = state;
+    func_80015A64(state, 1);
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysSaveScreen);
+void SysSaveScreen(void) {
+    GameSysSetLetterBoxMode(3);
+    PauseTerrainStream();
+    SysStatePush(4);
+    func_801445A4();
+}
 
 int SysIsPaused(void) {
     return gSystemState != 0 && gSystemState != 5 && gSystemState != 6 && gSystemState != 9;
@@ -171,11 +199,19 @@ void SysUnhalt(void) {
     gSysHaltState = 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysGetMovieStatus);
+u8 SysGetMovieStatus(void) {
+    return mSysMovie.playing;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_80015DDC);
+void func_80015DDC(void) {
+    func_801470B0();
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_80015DFC);
+void func_80015DFC(void) {
+    if (gPlayerRadioFlag == 0) {
+        GameSysSetLetterBoxMode(0);
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStopMovie);
 
@@ -183,12 +219,47 @@ INCLUDE_ASM("asm/main/nonmatchings/system", SysPlayMovieCB);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysPlayMovie);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysExeTickQueueInit);
+void SysExeTickQueueInit(void) {
+    int i;
+
+    exeTickTimerList = NULL;
+    for (i = 0; i < SYS_EXE_TICK_TIMER_MAX; i++) {
+        mExeTickTimers[i].callback = NULL;
+        mExeTickTimers[i].ticks = 0;
+        mExeTickTimers[i].arg = 0;
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysExeTickQueueTimer);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysExeTickGetTimerTicks);
+s32 SysExeTickGetTimerTicks(void (*callback)(s32)) {
+    int i;
+    ExeTickTimer *timer;
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_800164D0);
+    for (i = 0, timer = mExeTickTimers; i < SYS_EXE_TICK_TIMER_MAX; i++, timer++) {
+        if (timer->callback == callback) {
+            return timer->ticks;
+        }
+    }
+    return 0;
+}
+
+void func_800164D0(void) {
+    EGSListNode *node;
+    EGSListNode *next;
+    ExeTickTimer *timer;
+    void (*callback)(s32);
+
+    for (node = exeTickTimerList; node != NULL; node = next) {
+        timer = node->data;
+        next = node->next;
+        if (--timer->ticks == 0) {
+            callback = timer->callback;
+            timer->callback = NULL;
+            EGSListRemove(&exeTickTimerList, node);
+            callback(timer->arg);
+        }
+    }
+}
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", jtbl_800100A8);
