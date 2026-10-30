@@ -1,64 +1,786 @@
 #include "common.h"
+#include "system.h"
+#include "gameobj.h"
+#include "gobj.h"
+#include "scratch.h"
+
+SDATA_LOCAL(D_8010FAB4)
+
+/* SPAD_LEAVE followed by a use of $sp: the assembler put a load-delay nop there. */
+#define SPAD_LEAVE_NOP() __asm__ volatile("lui $29, 0x1F80\n\tlw $29, 0($29)\n\tnop")
+
+/* A collision polygon handed to the friendly-collision code: up to 4 vertices + normal. */
+typedef struct FriendlyPoly {
+    /* 0x00 */ s32 count;
+    /* 0x04 */ VECTOR32 v[4];
+    /* 0x44 */ s32 nx, ny, nz;
+    /* 0x50 */ s32 unk50;
+} FriendlyPoly;
+
+typedef struct VEC3 {
+    s32 vx, vy, vz;
+} VEC3;
+
+typedef struct FakeVertex {
+    s16 x, y, z, pad;
+} FakeVertex;
+
+/* Collision face as walked by the collision code (0x24 bytes). */
+typedef struct CollisionFace {
+    /* 0x00 */ s32 count;
+    /* 0x04 */ u8 *flags;
+    /* 0x08 */ s16 *normalPtr;
+    /* 0x0C */ s16 normal[3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ FakeVertex *verts[4];
+} CollisionFace;
+
+/* Temporary face linked into a model's face list (0x2C bytes). */
+typedef struct FakeFace {
+    /* 0x00 */ struct FakeFace *prev;
+    /* 0x04 */ struct FakeFace *next;
+    /* 0x08 */ CollisionFace face;
+} FakeFace;
+
+typedef struct FakeFacePool {
+    /* 0x000 */ s32 count;
+    /* 0x004 */ FakeFace faces[30];
+    /* 0x52C */ FakeVertex verts[30][4];
+    /* 0x8EC */ u8 flags[30];
+} FakeFacePool;
+
+extern FakeFacePool mCollisionFakeFacePool;
+extern s32 D_8010FAB4;              /* number of vertices in D_801212D8 */
+extern FakeVertex *D_801212D8[400]; /* vertices whose y is currently negated */
+
+void CollisionClearFakeFaces(void);
+
+/* A face found under/around an object (fields seen so far). */
+typedef struct FoundFace {
+    /* 0x00 */ VECTOR32 p0;
+    /* 0x10 */ VECTOR32 p1;
+    /* 0x20 */ VECTOR32 unk20;
+    /* 0x30 */ VECTOR32 normal;
+    /* 0x40 */ s32 midY;
+    /* 0x44 */ u8 unk44[8];
+    /* 0x4C */ u32 kind;
+} FoundFace;
+
+/* One class of collected faces (floor/wall/...). */
+typedef struct FaceGroup {
+    /* 0x00 */ u8 unk00[0x1C];
+    /* 0x1C */ s32 count;
+    /* 0x20 */ FoundFace *faces[16];
+    /* 0x60 */ FoundFace *best;
+} FaceGroup; /* size 0x64 */
+
+/* Faces collected around an object (one global instance, D_80106AEC). */
+typedef struct FaceCollect {
+    /* 0x000 */ FaceGroup groups[5];
+    /* 0x1F4 */ VECTOR32 pos;
+    /* 0x204 */ s32 dir[3];
+    /* 0x210 */ u8 unk210[4];
+    /* 0x214 */ s32 vel[3]; /* in whole units (>> 12) */
+    /* 0x220 */ u8 unk220[4];
+    /* 0x224 */ VECTOR32 ref; /* pos with vy = reference y */
+    /* 0x234 */ VECTOR32 unk234;
+    /* 0x244 */ VECTOR32 unk244;
+    /* 0x254 */ FoundFace found[32];
+    /* 0xC54 */ s32 foundCount;
+} FaceCollect;
+
+static void func_80087E0C();
+u8 JoystickGobjShouldCollideWithEdges(Gobj *gobj);
+s32 EGSMathFIXMul(s32 a, s32 b);
+void CollisionGobjAddFakeFace(Gobj *gobj, FriendlyPoly *poly, u8 flags);
+
+/* View of MoveInfo with the fields used here. */
+typedef struct FriendlyMove {
+    /* 0x000 */ u8 unk000[0x60];
+    /* 0x060 */ VECTOR32 unk60;
+    /* 0x070 */ VECTOR32 unk70;
+    /* 0x080 */ u8 unk080[0x8C];
+    /* 0x10C */ VECTOR32 unk10C;
+    /* 0x11C */ VECTOR32 unk11C;
+    /* 0x12C */ s32 floorY; /* 0x80000001: none */
+    /* 0x130 */ u8 unk130[0x10];
+    /* 0x140 */ VECTOR32 groundA;
+    /* 0x150 */ VECTOR32 groundB;
+    /* 0x160 */ u8 unk160[0x44];
+    /* 0x1A4 */ u32 flags1A4;
+    /* 0x1A8 */ struct FriendlyEdgeInfo *edgeInfo;
+    /* 0x1AC */ u8 unk1AC[4];
+    /* 0x1B0 */ void *ride; /* FriendlyRide */
+} FriendlyMove;
+
+typedef struct FriendlyRideTarget {
+    /* 0x00 */ s32 bone;
+} FriendlyRideTarget;
+
+/* What an object is standing on / attached to. */
+typedef struct FriendlyRide {
+    /* 0x00 */ s32 type;
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ FriendlyRideTarget *target;
+    /* 0x0C */ u8 unk0C[0x2C];
+    /* 0x38 */ struct GroundFace *ground;
+} FriendlyRide;
+
+/* The face an object stands on, as returned by func_80087088. */
+typedef struct GroundFace {
+    /* 0x00 */ s32 type;
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ s16 *normal;
+    /* 0x0C */ u8 unk0C[2];
+    /* 0x0E */ s16 unkE;
+    /* 0x10 */ u8 unk10[4];
+    /* 0x14 */ s16 *point;
+} GroundFace;
+
+
+typedef struct FriendlyEdgeInfo {
+    /* 0x00 */ u8 unk00[0x7C];
+    /* 0x7C */ VECTOR32 a;
+    /* 0x8C */ VECTOR32 b;
+    /* 0x9C */ VECTOR32 c;
+    /* 0xAC */ u8 unkAC[0x58];
+    /* 0x104 */ u8 shadow;
+    /* 0x105 */ u8 unk105[3];
+    /* 0x108 */ u8 shadowMatrix[1];
+} FriendlyEdgeInfo;
+
+extern FaceCollect D_80106AEC;
+static void func_80088270();
+s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove);
+s32 GobjCollideLoop(Gobj *gobj);
+static void func_80086D24(Gobj *gobj, u8 unnegate);
+static s32 func_80086E94(Gobj *gobj);
+static void func_80087088(Gobj *gobj, u8 *found, struct GroundFace **face, s32 *arg3, s32 *dist);
+u8 ShadowCalculateProjectionMatrix(VECTOR32 *normal, void *out);
+static void func_800874C0(Gobj *gobj);
+static void func_80088EE4(Gobj *gobj);
+static void func_80089544(Gobj *gobj);
+void FriendlyGobjNegateFaceListYs(Gobj *gobj);
+void FriendlyGobjUnNegateFaceListYs(Gobj *gobj);
+void FriendlyGobjCollectGameObjectBoxFaces(Gobj *gobj);
+
+/* One collision test handed to CobjLoop (0x8C bytes). */
+typedef struct CobjTest {
+    /* 0x00 */ void (*handler)();
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ VECTOR32 pos;
+    /* 0x18 */ Gobj *gobj;
+    /* 0x1C */ s32 radius;
+    /* 0x20 */ u8 unk20[0x6C];
+} CobjTest;
+
+typedef struct CobjRequest {
+    /* 0x00 */ s16 sector;
+    /* 0x04 */ s32 flags;
+    /* 0x08 */ u8 unk08;
+    /* 0x0C */ CobjTest tests[2];
+} CobjRequest;
+
+extern u16 gGabeSector;
+void CobjLoop(CobjRequest *req);
+void CobjHandleHotBoxXZ();
+void CobjHandleHotBox();
+
+/* GameObjectAnim with its collision face list. */
+typedef struct FriendlyAnim {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ u8 flag8;
+    /* 0x09 */ u8 unk09[2];
+    /* 0x0B */ u8 flagB;
+    /* 0x0C */ GOBJ_MATRIX *frame;
+    /* 0x10 */ GameObjectModel *model;
+    /* 0x14 */ u8 unk14[4];
+    /* 0x18 */ GOBJ_MATRIX **frames; /* per-bone world matrices */
+    /* 0x1C */ u8 unk1C[0xC];
+    /* 0x28 */ FakeFace *faceList;
+} FriendlyAnim;
+
+/* The camera's anim block, wrapped in a temporary gobj to reuse the face-list code. */
+extern FriendlyAnim gCameraAnim;
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyInit);
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086B24);
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", CollisionClearFakeFaces);
+void CollisionClearFakeFaces(void) {
+    mCollisionFakeFacePool.count = 0;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", CollisionGobjAddFakeFace);
+void CollisionGobjAddFakeFace(Gobj *gobj, FriendlyPoly *poly, u8 flags) {
+    FakeFace *f;
+    CollisionFace *face;
+    int i;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086D24);
+    if (mCollisionFakeFacePool.count < 30) {
+        f = &mCollisionFakeFacePool.faces[mCollisionFakeFacePool.count];
+        face = &f->face;
+        face->count = poly->count;
+        for (i = 0; i < poly->count; i++) {
+            face->verts[i]->x = poly->v[i].vx;
+            face->verts[i]->y = poly->v[i].vy;
+            face->verts[i]->z = poly->v[i].vz;
+        }
+        face->normal[0] = poly->nx;
+        face->normal[1] = poly->ny;
+        face->normal[2] = poly->nz;
+        face->normalPtr = face->normal;
+        *face->flags = flags;
+        f->prev = NULL;
+        f->next = ((FriendlyAnim *)gobj->anim)->faceList;
+        ((FriendlyAnim *)gobj->anim)->faceList = f;
+        if (f->next != NULL) {
+            f->next->prev = f;
+        }
+        mCollisionFakeFacePool.count++;
+    }
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086E94);
+/* Negate (or restore) the y of every vertex and normal in gobj's face list. */
+static void func_80086D24(Gobj *gobj, u8 unnegate) {
+    FakeFace *f;
+    FakeVertex *v;
+    int i;
+    int j;
+    int n;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086F60);
+    f = ((FriendlyAnim *)gobj->anim)->faceList;
+    if (unnegate == 1) {
+        for (i = 0; i < D_8010FAB4; i++) {
+            D_801212D8[i]->y = -D_801212D8[i]->y;
+        }
+        D_8010FAB4 = 0;
+        while (f != NULL) {
+            f->face.normalPtr[1] = -f->face.normalPtr[1];
+            f = f->next;
+        }
+    } else {
+        while (f != NULL) {
+            n = f->face.count;
+            for (i = 0; i < n; i++) {
+                v = f->face.verts[i];
+                for (j = 0; j < D_8010FAB4; j++) {
+                    if (D_801212D8[j] == v) {
+                        break;
+                    }
+                }
+                if (j >= D_8010FAB4) {
+                    if (D_8010FAB4 >= 400) {
+                        return;
+                    }
+                    v->y = -v->y;
+                    D_801212D8[D_8010FAB4++] = v;
+                }
+            }
+            f->face.normalPtr[1] = -f->face.normalPtr[1];
+            f = f->next;
+        }
+    }
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086FAC);
+static s32 func_80086E94(Gobj *gobj) {
+    VECTOR32 pos;
+    CobjRequest req;
+
+    pos = *(VECTOR32 *)gobj->move;
+    req.sector = gGabeSector;
+    req.flags = 4;
+    req.unk08 = 0;
+    req.tests[0].handler = CobjHandleHotBoxXZ;
+    req.tests[0].pos = pos;
+    req.tests[0].radius = 0x2580;
+    req.tests[0].gobj = gobj;
+    req.tests[1].handler = CobjHandleHotBox;
+    req.tests[1].pos = pos;
+    req.tests[1].gobj = gobj;
+    req.tests[1].radius = 0xA00;
+    CobjLoop(&req);
+    return 0;
+}
+
+static s32 func_80086F60(Gobj *gobj) {
+    SCRATCH_CALL1(GobjCollideLoop, gobj);
+    return 0;
+}
+
+/* Is pt inside the (convex, XZ) polygon? */
+static s32 func_80086FAC(VECTOR32 *pt, FriendlyPoly *poly, u8 *inside) {
+    VECTOR32 edge;
+    VECTOR32 rel;
+    struct {
+        s32 vx, vy;
+    } dot;
+    int i;
+    int next;
+
+    *inside = 1;
+    for (i = 0; i < poly->count; i++) {
+        if (i + 1 == poly->count) {
+            next = 0;
+        } else {
+            next = i + 1;
+        }
+        edge.vx = poly->v[i].vz - poly->v[next].vz;
+        edge.vz = poly->v[next].vx - poly->v[i].vx;
+        rel.vx = pt->vx - poly->v[i].vx;
+        rel.vz = pt->vz - poly->v[i].vz;
+        dot.vx = rel.vx * edge.vx + rel.vz * edge.vz;
+        if (dot.vx > 0) {
+            *inside = 0;
+            break;
+        }
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087088);
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_800874C0);
+static void func_800874C0(Gobj *gobj) {
+    u8 found;
+    GroundFace *face;
+    s32 unk20;
+    s32 dist;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjGetReferenceY);
+    if (gobj == NULL || gobj->move == NULL || ((FriendlyMove *)gobj->move)->ride == NULL) {
+        return;
+    }
+    if (((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->type == 1) {
+        ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x100;
+        ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x80000;
+    } else {
+        if (((FriendlyMove *)gobj->move)->flags1A4 & 4) {
+            ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x100;
+        }
+        if (((FriendlyMove *)gobj->move)->flags1A4 & 0x100000) {
+            ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x80000;
+        }
+    }
+    func_80087088(gobj, &found, &face, &unk20, &dist);
+    ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->ground = face;
+    if (face != NULL && face->type == 3) {
+        ((FriendlyAnim *)gobj->anim)->flagB |= 0x80;
+    } else {
+        ((FriendlyAnim *)gobj->anim)->flagB &= 0x7F;
+    }
+    if (face != NULL) {
+        VECTOR32 point;
+        VECTOR32 normal;
+        FriendlyMove *move;
 
+        point.vx = face->point[0];
+        point.vy = face->point[1];
+        point.vz = face->point[2];
+        normal.vx = face->normal[0];
+        normal.vy = face->normal[1];
+        normal.vz = face->normal[2];
+        move = (FriendlyMove *)gobj->move;
+        move->groundA = point;
+        move->groundB = normal;
+        ((FriendlyMove *)gobj->move)->edgeInfo->shadow = ShadowCalculateProjectionMatrix(
+            &normal, ((FriendlyMove *)gobj->move)->edgeInfo->shadowMatrix);
+    } else {
+        ((FriendlyMove *)gobj->move)->edgeInfo->shadow = 0;
+    }
+    if (found && dist <= 0x40 && ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->type != 1 &&
+        !(((FriendlyMove *)gobj->move)->flags1A4 & 0x100000) && face->unkE < 0xB50) {
+        ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x100;
+        ((FriendlyMove *)gobj->move)->flags1A4 |= 0x80000;
+    } else if (!found || dist > 0x40) {
+        if (((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->type != 1 &&
+            !(((FriendlyMove *)gobj->move)->flags1A4 & 4)) {
+            ((FriendlyMove *)gobj->move)->flags1A4 |= 0x100;
+            ((FriendlyMove *)gobj->move)->flags1A4 &= ~0x80000;
+        }
+    }
+}
+
+s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove) {
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 c;
+    FriendlyRide *ride;
+    FriendlyAnim *anim;
+    s32 floorY;
+
+    ride = NULL;
+    if (gobj != NULL && gobj->move != NULL) {
+        if (((FriendlyMove *)gobj->move)->ride != NULL) {
+            ride = ((FriendlyMove *)gobj->move)->ride;
+        }
+    }
+    if (gobj->cas->active == 8) {
+        if ((u8)(gobj->npcState - 1) < 2 &&
+            ((anim = (FriendlyAnim *)gobj->anim)->model->flags & GOBJ_MODEL_FLAG_400000) &&
+            !(anim->flag8 & 0x10) && gobj->move != NULL && ride != NULL && ride->type == 1 &&
+            ride->target != NULL && (ride->target->bone == 8 || ride->target->bone == 2)) {
+            a.vx = anim->frames[ride->target->bone]->t[0];
+            a.vy = ((FriendlyAnim *)gobj->anim)->frames[ride->target->bone]->t[1];
+            a.vz = ((FriendlyAnim *)gobj->anim)->frames[ride->target->bone]->t[2];
+            a.vy = -a.vy;
+            return a.vy - 0xD0;
+        }
+        b.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+        b.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+        b.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+        b.vy = -b.vy;
+        c.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+        c.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+        c.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+        c.vy = -c.vy;
+        if (b.vy < c.vy) {
+            return c.vy - 0xD0;
+        }
+        return b.vy - 0xD0;
+    }
+    floorY = ((FriendlyMove *)gobj->move)->floorY;
+    a = ((FriendlyMove *)gobj->move)->unk10C;
+    a.vy -= 9;
+    if ((gobj->cas->flags & 0x9000) || gobj->cas->active == 4 || gobj->cas->active == 10 ||
+        (gobj->cas->flags & 0x800000) || (((FriendlyMove *)gobj->move)->flags1A4 & 0x100) ||
+        floorY == 0x80000001 || a.vy - floorY > 0x40 || (ride != NULL && ride->type == 1)) {
+        if (useMove) {
+            return a.vy;
+        }
+        b = *(VECTOR32 *)gobj->move;
+        return b.vy - 0x69;
+    }
+    return floorY;
+}
+
+#ifdef NON_MATCHING
+/* One instruction longer: the original computes mid right after the halving and
+ * loads y0/y1 afterwards (different register allocation). */
+static void func_80087B8C(void *arg0, FaceCollect *c, FoundFace *face) {
+    s32 ref;
+    s32 mid;
+    s32 sum;
+    s32 lo;
+    s32 hi;
+
+    ref = c->ref.vy;
+    sum = face->p0.vy + face->p1.vy;
+    if (sum >= 0) {
+        sum >>= 1;
+    } else {
+        sum = -(-sum >> 1);
+    }
+    mid = sum - ref;
+    if (face->p0.vy < face->p1.vy) {
+        lo = face->p0.vy - ref;
+        hi = face->p1.vy - ref;
+    } else {
+        lo = face->p1.vy - ref;
+        hi = face->p0.vy - ref;
+    }
+    if (lo <= 0x20 && hi >= -0x80 && c->groups[0].count < 16) {
+        c->groups[0].faces[c->groups[0].count++] = face;
+        face->midY = mid;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087B8C);
+#endif
 
+#ifdef NON_MATCHING
+/*
+ * Same instructions modulo scheduling/registers: the original keeps the mid subtraction
+ * ahead of the y0/y1 loads (as if a scheduling barrier sat there) and allocates
+ * ref/mid/lo/hi to a3/t1/t0/a0. Shares its prologue with func_80087B8C.
+ */
+#define FACE_LIST_ADD(list)                     \
+    if ((list).count >= 16) {                   \
+        return;                                 \
+    }                                           \
+    (list).faces[(list).count++] = face;        \
+    face->midY = mid;
+
+static void func_80087C28(void *arg0, FaceCollect *c, FoundFace *face) {
+    s32 ref;
+    s32 mid;
+    s32 sum;
+    s32 lo;
+    s32 hi;
+
+    ref = c->ref.vy;
+    sum = face->p0.vy + face->p1.vy;
+    if (sum >= 0) {
+        sum >>= 1;
+    } else {
+        sum = -(-sum >> 1);
+    }
+    mid = sum - ref;
+    if (face->p0.vy < face->p1.vy) {
+        lo = face->p0.vy - ref;
+        hi = face->p1.vy - ref;
+    } else {
+        lo = face->p1.vy - ref;
+        hi = face->p0.vy - ref;
+    }
+    if (face->kind >= 3 && ((c->vel[1] >= 0 && hi >= 200 && lo <= c->vel[1] + 0xD8) ||
+                            (hi >= c->vel[1] + 200 && lo <= 0xD8))) {
+        FACE_LIST_ADD(c->groups[3]);
+    } else if (face->kind >= 2 && lo < 0x50) {
+        if (lo <= 0x20 && hi >= -0x80) {
+            FACE_LIST_ADD(c->groups[0]);
+        }
+        FACE_LIST_ADD(c->groups[1]);
+    } else if (face->kind >= 2 && hi >= 0x50 && lo <= 0xC8) {
+        FACE_LIST_ADD(c->groups[2]);
+    } else if (face->kind >= 3 && hi >= 0xD8 && lo <= 0x1A0) {
+        FACE_LIST_ADD(c->groups[4]);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087C28);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087E0C);
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088270);
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088BAC);
+/* Turn each found edge into a 0x40-high fake wall face pushed 8 units out along its normal. */
+static void func_80088BAC(Gobj *gobj, FaceCollect *c) {
+    FriendlyPoly poly;
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 n;
+    VECTOR32 off;
+    FoundFace **edges;
+    int i;
+    int count;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088DE4);
-
-void func_80088E7C(void) {
+    if (JoystickGobjShouldCollideWithEdges(gobj)) {
+        count = c->groups[0].count;
+        poly.count = 4;
+        edges = c->groups[0].faces;
+        for (i = 0; i < count; i++) {
+            a = edges[i]->p0;
+            b = edges[i]->p1;
+            n = edges[i]->normal;
+            off.vx = EGSMathFIXMul(n.vx, 8);
+            off.vy = EGSMathFIXMul(n.vy, 8);
+            off.vz = EGSMathFIXMul(n.vz, 8);
+            a.vx += off.vx;
+            a.vy += off.vy;
+            a.vz += off.vz;
+            b.vx += off.vx;
+            b.vy += off.vy;
+            b.vz += off.vz;
+            poly.v[0] = b;
+            poly.v[1] = a;
+            poly.v[2] = a;
+            poly.v[3] = b;
+            poly.v[2].vy += 0x40;
+            poly.v[3].vy += 0x40;
+            poly.nx = -n.vx;
+            poly.ny = -n.vy;
+            poly.nz = -n.vz;
+            CollisionGobjAddFakeFace(gobj, &poly, 0);
+        }
+    }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088E84);
+static void func_80088DE4(void *arg0, FaceCollect *c) {
+    int i;
+    FoundFace *face;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EA4);
+    for (i = 0; i < c->groups[0].count; i++) {
+        face = c->groups[0].faces[i];
+        if (face->kind < 2) {
+            c->groups[0].faces[i] = c->groups[0].faces[c->groups[0].count - 1];
+            c->groups[0].faces[c->groups[0].count - 1] = face;
+            c->groups[0].count--;
+        }
+    }
+    func_80087E0C(arg0, c, c);
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EC4);
+static void func_80088E7C(Gobj *gobj, FaceCollect *c) {
+}
+
+static void func_80088E84(void *arg0, u8 *arg1) {
+    func_80088270(arg0, arg1, arg1 + 0xC8);
+}
+
+static void func_80088EA4(void *arg0, u8 *arg1) {
+    func_80088270(arg0, arg1, arg1 + 0x12C);
+}
+
+static void func_80088EC4(void *arg0, u8 *arg1) {
+    func_80088270(arg0, arg1, arg1 + 0x190);
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
 
+#define FIX_TO_INT(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+
+#ifdef NON_MATCHING
+/*
+ * Logic matches; the original never CSEs the D_80106AEC field addresses (each store is
+ * lui/sw, and c is rematerialised after the call), and its pos block copy moves 3+1 words.
+ */
+static void func_80089544(Gobj *gobj) {
+    FaceCollect *c;
+    int i;
+
+    D_80106AEC.pos = *(VECTOR32 *)gobj->move;
+    D_80106AEC.unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+    D_80106AEC.unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+    D_80106AEC.unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+    D_80106AEC.unk234.vy = -D_80106AEC.unk234.vy;
+    D_80106AEC.unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
+    D_80106AEC.unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
+    D_80106AEC.unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
+    D_80106AEC.unk244.vy = -D_80106AEC.unk244.vy;
+    D_80106AEC.ref = D_80106AEC.pos;
+    D_80106AEC.ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
+    D_80106AEC.dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
+    D_80106AEC.dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
+    D_80106AEC.dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
+    D_80106AEC.dir[1] = -D_80106AEC.dir[1];
+    D_80106AEC.vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
+    D_80106AEC.vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
+    D_80106AEC.vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
+    c = &D_80106AEC;
+    c->vel[0] = FIX_TO_INT(c->vel[0]);
+    c->vel[1] = FIX_TO_INT(c->vel[1]);
+    c->vel[2] = FIX_TO_INT(c->vel[2]);
+    c->groups[0].count = 0;
+    c->groups[1].count = 0;
+    c->groups[2].count = 0;
+    c->groups[3].count = 0;
+    c->groups[4].count = 0;
+    for (i = 0; i < c->foundCount; i++) {
+        func_80087C28(gobj, c, &c->found[i]);
+    }
+    func_80088DE4(gobj, c);
+    func_80088E7C(gobj, c);
+    func_80088E84(gobj, c);
+    func_80088EA4(gobj, c);
+    func_80088EC4(gobj, c);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80089544);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjGetFoundEdge);
+s32 FriendlyGobjGetFoundEdge(Gobj *gobj, s32 kind) {
+    FaceGroup *slots;
+    FoundFace *edge;
+    FriendlyEdgeInfo *info;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjNegateFaceListYs);
+    slots = D_80106AEC.groups;
+    edge = NULL;
+    if (gobj == NULL) {
+        goto fail;
+    }
+    if (gobj->move == NULL) {
+        return 0;
+    }
+    if (((FriendlyMove *)gobj->move)->edgeInfo == NULL) {
+        return 0;
+    }
+    info = ((FriendlyMove *)gobj->move)->edgeInfo;
+    switch (kind) {
+        case 3:
+            edge = slots[0].best;
+            break;
+        case 4:
+            edge = slots[1].best;
+            break;
+        case 5:
+            edge = slots[2].best;
+            break;
+        case 6:
+            edge = slots[3].best;
+            break;
+        case 7:
+            edge = slots[4].best;
+            break;
+    }
+    if (edge == NULL) {
+    fail:
+        return 0;
+    }
+    info->a = edge->p0;
+    info->b = edge->unk20;
+    info->c = edge->normal;
+    return 1;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjUnNegateFaceListYs);
+void FriendlyGobjNegateFaceListYs(Gobj *gobj) {
+    SPAD_ENTER();
+    func_80086D24(gobj, 0);
+    SPAD_LEAVE_NOP();
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjCollectGameObjectBoxFaces);
+void FriendlyGobjUnNegateFaceListYs(Gobj *gobj) {
+    SPAD_ENTER();
+    func_80086D24(gobj, 1);
+    SPAD_LEAVE_NOP();
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjUpdateBeforeCollision);
+void FriendlyGobjCollectGameObjectBoxFaces(Gobj *gobj) {
+    func_80086F60(gobj);
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyGobjUpdateAfterCollision);
+void FriendlyGobjUpdateBeforeCollision(Gobj *gobj) {
+    FriendlyMove *move;
+    VECTOR32 v;
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyPreparePlayerAndCameraFaceListsBeforeUse);
+    SPAD_ENTER();
+    func_80088EE4(gobj);
+    SPAD_LEAVE();
+    move = (FriendlyMove *)gobj->move;
+    if ((move->flags1A4 & 0x100) || (gobj->cas->flags & 0x1000)) {
+        v = move->unk10C;
+        ((FriendlyMove *)gobj->move)->unk11C = v;
+    }
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyRevertPlayerAndCameraFaceListsAfterUse);
+void FriendlyGobjUpdateAfterCollision(Gobj *gobj) {
+    func_80086E94(gobj);
+    SPAD_ENTER();
+    func_800874C0(gobj);
+    SPAD_LEAVE();
+    SPAD_ENTER();
+    func_80089544(gobj);
+    SPAD_LEAVE();
+    SPAD_ENTER();
+    CollisionClearFakeFaces();
+    SPAD_LEAVE_NOP();
+}
+
+void FriendlyPreparePlayerAndCameraFaceListsBeforeUse(u8 collect) {
+    Gobj camera;
+    FriendlyAnim *anim;
+
+    if (gObjPlayer != NULL) {
+        FriendlyGobjNegateFaceListYs(gObjPlayer);
+        if (collect) {
+            FriendlyGobjCollectGameObjectBoxFaces(gObjPlayer);
+        }
+    }
+    anim = &gCameraAnim;
+    if ((u32)anim->faceList > 0x80000000) {
+        camera.anim = (GameObjectAnim *)anim;
+        FriendlyGobjNegateFaceListYs(&camera);
+    }
+}
+
+void FriendlyRevertPlayerAndCameraFaceListsAfterUse(void) {
+    Gobj camera;
+    FriendlyAnim *anim;
+
+    if (gObjPlayer != NULL) {
+        FriendlyGobjUnNegateFaceListYs(gObjPlayer);
+    }
+    anim = &gCameraAnim;
+    if ((u32)anim->faceList > 0x80000000) {
+        camera.anim = (GameObjectAnim *)anim;
+        FriendlyGobjUnNegateFaceListYs(&camera);
+    }
+}
