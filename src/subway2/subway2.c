@@ -18,10 +18,53 @@ extern s32 D_80142074;
 extern s32 D_80142078;
 extern s32 D_8014207C;
 extern s32 D_801077FC;
+extern u8 D_80142084[];           /* saved objective/timer state */
+typedef struct { u8 unk00[8]; void *msg; } Subway2Objective;
+extern Subway2Objective *D_80142088;
+extern u8 gEliminateRhoemerMsg[];
 
 static void func_801412D0();
+static void func_80141400(s16 id, s16 by);
+static void func_8014145C();
+static s32 func_801415A0();
+static void func_80141624(void);
+static void func_8014165C(s16 id);
+static s32 func_801417B0(s16 id);
+static s32 func_801418BC();
+static void func_80141AC0(s16 id);
+static s32 func_80141B78(void);
+static s32 func_80141B88(s16 id, s16 kind);
+static void func_80141C34(void);
 
+#ifdef NON_MATCHING
+/* Same instructions; the original schedules both index loads up front. */
+/* Countdown expired: the bomb goes off. */
+static void func_801412D0(void) {
+    s32 pos[4];
+    s16 bomb;
+    GameObjectRuntime *bombRt;
+    GameObjectHealth *health;
+
+    bomb = D_801420B0;
+    bombRt = gameObjectsInfo[bomb].runtime;
+    health = gameObjectsInfo[D_801420B4].runtime->healthInfo;
+    health->health = 1;
+    health->maxHealth = 1;
+    ObjectBigExplosionFX(bomb, pos, 0x1800, 5, 10);
+    DamageRadius(bomb, pos, 0x1C2, 0x1E0, 0x60, 0x11, 0);
+    health = bombRt->healthInfo;
+    health->health = -1;
+    health->maxHealth = -1;
+    bombRt->flags23 |= 2;
+    NPCHazmatStart(D_801420AC->linkedId);
+    SysPlayXA(0x8F, 0, 1);
+    InterfaceCountdownAbort();
+    D_801420B8 = 0;
+    D_801420BC = 1;
+}
+#else
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801412D0);
+#endif
 
 static void func_80141400(s16 id, s16 by) {
     if (by == gPlayerOffset) {
@@ -30,7 +73,31 @@ static void func_80141400(s16 id, s16 by) {
     }
 }
 
+#ifdef NON_MATCHING
+/* Right length and logic; register allocation of the id copy differs. */
+static void func_8014145C(s32 id, s16 by) {
+    GameObjectRuntime *rt;
+    s16 type;
+
+    rt = gameObjectsInfo[(s16)id].runtime;
+    type = GOBJ_TYPE((s16)id);
+    if (type == GOBJ_TYPE_COP) {
+        if (!gDeviceDetonated) {
+            NPCCopKilledWashington(id, by, (s16)gameObjectsInfo[(s16)id].refId, 0, 1);
+        }
+    } else if (type == GOBJ_TYPE_BOMB) {
+        if (!(rt->flags1 & 0x80)) {
+            ObjectBombDeath(1, 0x82, 0, id);
+        }
+    } else if (type == SUBWAY2_TYPE_BOMB) {
+        if (rt->flags0 & 0x20) {
+            func_801412D0();
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_8014145C);
+#endif
 
 static s32 func_801415A0(s32 arg0, s32 arg1, s32 arg2, s32 id) {
     s32 ret;
@@ -141,6 +208,74 @@ static void func_80141C34(void) {
     SysPlaySong(0, 13, 0, 0);
 }
 
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", iSubway2Init);
+void iSubway2Init(s32 mode) {
+    int i;
+    GameObjectRuntime *rt;
+    s16 type;
+    s16 linkedType;
+    GameObjectHealth *health;
+
+    D_801420AC = NULL;
+    D_801420B0 = -1;
+    D_801420B4 = -1;
+    D_801420B8 = 0;
+    D_801420BC = 0;
+    InterfaceViralRadarInit();
+    SaveObjectivesNTimersReinit(D_80142084, 0);
+    if (gObjectives->unk18 == 0) {
+        LevelObjectiveAdd(2, -1);
+    }
+    if (mode == 3) {
+        func_80141C34();
+    } else {
+        gSysMovieDoneCallback = func_80141C34;
+    }
+    gUsingSndBigFire = 1;
+    D_80142088->msg = gEliminateRhoemerMsg;
+    SysStopSong(0, 0x18);
+
+    DamageSetDamagedCallback(func_80141400);
+    DamageSetDestroyedCallback((void (*)(s16, s16))func_8014145C);
+    LevelSetEOLCallback(func_801415A0);
+    UseSetBombCallback(func_80141624);
+    UseSetLevSpecObjCallback(func_8014165C);
+    UseSetSwitchCallback(func_801417B0);
+    ObjectSetQuipObjectCallback(func_801418BC);
+    ObjectSetSpecialObjectCallback(func_80141AC0);
+    SetLockedStringCallback(func_80141B78);
+    SetUseStringCallback(func_80141B88);
+
+    for (i = 0; i < gLevelGameObjCount; i++) {
+        rt = gameObjectsInfo[i].runtime;
+        type = GOBJ_TYPE(i);
+        if (type == SUBWAY2_TYPE_BOMB) {
+            D_801420B0 = i;
+            if (gObjectives == NULL || !(gObjectives->completed & 1)) {
+                rt->flags0 |= 0x10;
+            }
+        } else if (type == SUBWAY2_TYPE_DEVICE) {
+            D_801420B4 = i;
+            if (gObjectives == NULL || !(gObjectives->completed & 2)) {
+                health = rt->healthInfo;
+                health->health = 0x7FFF;
+                health->maxHealth = 0x7FFF;
+            }
+        } else if (type == GOBJ_TYPE_BOMB) {
+            D_801420AC = ObjectMatchToRefID(i, GOBJ_TYPE_COP);
+            linkedType = GOBJ_TYPE(D_801420AC->linkedId);
+            rt->flags0 |= 0x20;
+            if (D_801420AC->linkedId == i || linkedType != GOBJ_TYPE_COP) {
+                D_801420AC = NULL;
+            } else {
+                D_801420AC->flags23 |= 2;
+            }
+            /* reads through D_801420AC even when it was just cleared */
+            if (D_801420AC->healthInfo->maxHealth <= 0) {
+                gLevelInnocentsKilled++;
+            }
+        }
+    }
+    gDefaultLevelDmgFX = 11;
+}
 
 INCLUDE_RODATA("asm/subway2/nonmatchings/subway2", D_80140FE4);

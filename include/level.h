@@ -18,7 +18,7 @@ void SetUseStringCallback(void (*cb)());
 
 void NPCCopDamagedCallback(s16 id, s16 by);
 void ObjectBombDamagedCallback(s16 id, s16 by);
-void NPCCopKilledWashington(s16 id, s16 by, s32 arg2, s32 arg3, s32 arg4);
+void NPCCopKilledWashington(s16 id, s16 by, s32 refId, s32 arg3, s32 arg4);
 void ObjectBombDeath(s32 arg0, s32 arg1, s32 arg2, s32 id);
 void ObjectBigExplosionFX(s16 id, void *pos, s32 radius, s32 arg3, s32 arg4);
 void DamageRadius(s16 id, void *pos, s32 arg2, s32 arg3, s32 arg4, s32 arg5, s32 arg6);
@@ -49,6 +49,15 @@ void SysPlaySong(s32 arg0, s32 song, s32 arg2, s32 arg3);
 
 int ObjectInvisibleMatchToRefID(s16 id, s32 type);
 extern u8 gPlayerFlashlight;
+
+void InterfaceViralRadarInit(void);
+void SaveObjectivesNTimersReinit(void *info, s32 arg1);
+void SysStopSong(s32 arg0, s32 song);
+GameObjectRuntime *ObjectMatchToRefID(s16 id, s32 type);
+extern u8 gUsingSndBigFire;
+extern s32 gLevelInnocentsKilled;
+extern s16 gDefaultLevelDmgFX;
+extern void (*gSysMovieDoneCallback)(void);
 
 extern s32 gPlayerOffset; /* object id of the player */
 extern u8 gDeviceDetonated;
