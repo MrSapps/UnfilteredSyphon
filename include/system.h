@@ -162,7 +162,7 @@ void func_801445A4(void);
 void EGSDisplayFade(s32 dir, s32 speed, void (*done)(void));
 void SysStopXA(void);
 void SysStreamTextureCacheOverlay(char *name, void (*done)(s32));
-void StreamOverlay(char *path, void *dst, s32 size, u32 tag, void (*done)(s32));
+s32 StreamOverlay(char *path, void *dst, s32 size, u32 tag, void (*done)(s32));
 void StallFadeCallback(void);
 void SysPauseSound(s32);
 void StreamSynchronous(void);
