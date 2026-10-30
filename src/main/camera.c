@@ -1,6 +1,8 @@
 #include "common.h"
 #include "game.h"
 #include "gobj.h"
+#include "scratch.h"
+
 
 /* camera.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F70A)
@@ -46,7 +48,8 @@ typedef struct CameraAccess {
     /* 0x1C */ s32 mask[3]; /* which of vec's components to use */
     /* 0x28 */ u8 unk28[4];
     /* 0x2C */ u8 apply;
-    /* 0x2D */ u8 unk2D[7];
+    /* 0x2D */ u8 unk2D[3];
+    /* 0x30 */ struct CameraModeParams *params; /* current mode's parameters */
 } CameraAccess; /* size 0x34 */
 
 /* One animated camera parameter (0x144 bytes). */
@@ -54,7 +57,7 @@ typedef struct CameraMoveInfo {
     /* 0x000 */ u8 active;
     /* 0x001 */ u8 unk001[3];
     /* 0x004 */ s32 type; /* 0: scalar, else vector */
-    /* 0x008 */ u8 unk008[4];
+    /* 0x008 */ s32 unk008;
     /* 0x00C */ CameraMotion input;
     /* 0x03C */ VECTOR32 value;
     /* 0x04C */ VECTOR32 target;
@@ -73,10 +76,38 @@ typedef struct CameraMoveInfo {
 
 #define CAMERA_MOVE_MAX 9
 
+struct Camera;
+
+/* How a camera mode drives one of the CameraMoveInfo slots (0x1C bytes). */
+typedef struct CameraModeMove {
+    /* 0x00 */ u8 active;
+    /* 0x04 */ s32 type;
+    /* 0x08 */ s32 unk08;
+    /* 0x0C */ s32 moveIndex; /* move slot whose value is the origin, if moveKind < 2 */
+    /* 0x10 */ u32 moveKind;
+    /* 0x14 */ s32 frameIndex; /* -1: none */
+    /* 0x18 */ s32 frameKind; /* -1: none, 0: frame reference, else origin */
+} CameraModeMove;
+
+/* A camera mode: hooks plus the setup of every move slot. */
+typedef struct CameraModeFuncs {
+    /* 0x00 */ u8 (*init)(struct Camera *cam);
+    /* 0x04 */ void (*preUpdate)(struct Camera *cam);
+    /* 0x08 */ void (*update)(struct Camera *cam);
+    /* 0x0C */ CameraModeMove moves[9];
+} CameraModeFuncs;
+
+/* Per-mode parameters (Camera.access.params). */
+typedef struct CameraModeParams {
+    /* 0x00 */ s32 fov;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ VECTOR32 limit[9][3];
+} CameraModeParams;
+
 typedef struct Camera {
     /* 0x000 */ EGSCamera *display;
     /* 0x004 */ s32 mode;
-    /* 0x008 */ u8 unk008[4];
+    /* 0x008 */ CameraModeFuncs *funcs;
     /* 0x00C */ CameraFrameInfo self;
     /* 0x098 */ CameraFrameInfo lead;
     /* 0x124 */ CameraFrameInfo watch;
@@ -116,7 +147,7 @@ u8 func_80019218(CameraMoveInfo *move, CameraAccess *access);
 void func_800197D4(Camera *cam);
 void func_80019834(Camera *cam);
 void func_8001967C(CameraMotion *m, VECTOR32 *value, u8 full);
-void func_8001ACA0(VECTOR32 *v, void *arg1, Camera *cam);
+void func_8001ACA0(VECTOR32 *v, VECTOR32 *out, Camera *cam);
 void EGSMath_ValueModulus(s32 value, s32 mod, s32 *out);
 void EGSFrameTransformPoint(VECTOR32 *point, EGSFrame *frame, s32 arg2, VECTOR32 *out);
 void EGSFrameGetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *out);
@@ -132,7 +163,8 @@ void EGSCameraCreate(s32 arg0, VECTOR32 *pos, u16 dist, s32 arg3, u8 priority, s
 void EGSFrameSetRotationYXZ(EGSFrame *frame, s32 arg1, VECTOR32 *angle);
 void CameraSetLeadFrame(Camera *cam, EGSFrame *frame, VECTOR32 *offset);
 void CameraSetWatchFrame(Camera *cam, EGSFrame *frame, VECTOR32 *offset);
-void CameraSetMode(Camera *cam, s32 mode, void *params);
+u8 CameraSetMode(Camera *cam, CameraModeFuncs *funcs, CameraModeParams *params);
+u8 CameraAccessFrameInfo(Camera *cam, s32 op, s32 which, s32 arg3);
 u8 CameraAccessMoveInfo(Camera *cam, s32 op, s32 index, s32 arg3);
 extern GOBJ_MATRIX gCameraOriginalMatrices[2];
 extern s32 gCameraOriginalProjections[2];
@@ -149,7 +181,7 @@ void EGSMath_VectorINTtoFIX(VECTOR32 *in, VECTOR32 *out);
 s32 EGSMathFIXMul(s32 a, s32 b);
 u8 func_8001AB9C(Camera *cam);
 void func_80019594(Camera *cam);
-void func_80019B20(CameraMoveInfo *move);
+u8 func_80019B20(CameraMoveInfo *move);
 void EGSMiscMemcpy(void *dst, void *src, s32 size);
 void EGSGeometry_ReverseTransformVector(VECTOR32 *in, GOBJ_MATRIX *m, VECTOR32 *out);
 
@@ -157,13 +189,12 @@ void SYSCameraInit(void) {
     D_8010F70A = 0;
 }
 
-#ifdef NON_MATCHING
-/* camera id counter is reloaded (lh) instead of kept zero-extended in a3 */
 u8 CameraInit(Camera *cam, EGSCamera *display, VECTOR32 *pos, VECTOR32 *angle, s32 fov, s32 arg5,
               u8 priority, s32 arg7, s32 mode, void *params, u8 activate, u8 show) {
     u8 ret = 1;
     u16 dist;
     s32 id;
+    s32 next;
 
     if (cam == NULL || arg5 == 0) {
         ret = 0;
@@ -188,9 +219,10 @@ u8 CameraInit(Camera *cam, EGSCamera *display, VECTOR32 *pos, VECTOR32 *angle, s
         if (display == NULL) {
             EGSCameraCreate(0, pos, dist, arg5, priority, 11, arg7, cam);
             id = D_8010F70A;
+            next = id + 1;
             cam->display->id = (s16)id;
             cam->display->flags |= 8;
-            D_8010F70A = id + 1;
+            D_8010F70A = next;
             EGSFrameSetRotationYXZ(cam->display->frame, 0, angle);
         } else {
             cam->display = display;
@@ -212,7 +244,7 @@ u8 CameraInit(Camera *cam, EGSCamera *display, VECTOR32 *pos, VECTOR32 *angle, s
         cam->self.angle.accel.vz = 0;
         CameraSetLeadFrame(cam, NULL, NULL);
         CameraSetWatchFrame(cam, NULL, NULL);
-        CameraSetMode(cam, mode, params);
+        CameraSetMode(cam, (CameraModeFuncs *)mode, params);
         cam->access.vec.vx = fov;
         CameraAccessMoveInfo(cam, 1, 8, 0);
         cam->access.vec.vx = fov;
@@ -225,9 +257,6 @@ u8 CameraInit(Camera *cam, EGSCamera *display, VECTOR32 *pos, VECTOR32 *angle, s
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/camera", CameraInit);
-#endif
 
 u8 CameraActivate(Camera *cam, u8 on) {
     u8 ret = 1;
@@ -332,7 +361,100 @@ u8 CameraSetDisplayPriority(Camera *cam, u8 priority) {
     return ret;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", CameraSetMode);
+u8 CameraSetMode(Camera *cam, CameraModeFuncs *funcs, CameraModeParams *params) {
+    CameraModeFuncs *old;
+    u8 ret = 1;
+    s32 i;
+    CameraMoveInfo *move;
+    CameraModeMove *mm;
+    VECTOR32 *limit;
+    u8 ok1;
+    u8 ok2;
+    void *src;
+    void *frameSrc;
+    s32 *ptr;
+
+    if (params == NULL) {
+        ret = cam->access.params != NULL;
+    } else {
+        cam->access.params = params;
+    }
+    if (ret == 1) {
+        old = cam->funcs;
+        cam->funcs = funcs;
+        for (i = 0; i < CAMERA_MOVE_MAX; i++) {
+            move = &cam->move[i];
+            limit = cam->access.params->limit[i];
+            mm = &cam->funcs->moves[i];
+            if (move != NULL && limit != NULL && mm != NULL) {
+                move->active = mm->active;
+                move->type = mm->type;
+                move->unk008 = mm->unk08;
+                if (move->type == 0) {
+                    move->min.vx = move->nextMin.vx = 0x80000001;
+                    move->max.vx = move->nextMax.vx = 0x7FFFFFFF;
+                } else {
+                    move->min.vx = move->nextMin.vx = 0x80000001;
+                    move->min.vy = move->nextMin.vy = 0x80000001;
+                    move->min.vz = move->nextMin.vz = 0x80000001;
+                    move->max.vx = move->nextMax.vx = 0x7FFFFFFF;
+                    move->max.vy = move->nextMax.vy = 0x7FFFFFFF;
+                    move->max.vz = move->nextMax.vz = 0x7FFFFFFF;
+                }
+                EGSMiscMemcpy(move->limit, limit, 0xC);
+                EGSMiscMemcpy(move->nextLimit, limit, 0xC);
+                if (move->type == 0) {
+                    move->changed[0] = 0;
+                } else {
+                    move->changed[0] = 0;
+                    move->changed[1] = 0;
+                    move->changed[2] = 0;
+                }
+            } else {
+                ret = 0;
+            }
+        }
+        if (ret == 1) {
+            if (cam->move[5].active == ret) {
+                cam->access.vec.vx = cam->access.params->fov;
+                cam->access.apply = 1;
+                CameraAccessMoveInfo(cam, 1, 5, 1);
+            }
+            for (i = 0; i < CAMERA_MOVE_MAX; i++) {
+                move = &cam->move[i];
+                mm = &cam->funcs->moves[i];
+                if (mm->moveKind < 2) {
+                    ok1 = CameraAccessMoveInfo(cam, 0, mm->moveIndex, mm->moveKind);
+                } else {
+                    ok1 = 0;
+                }
+                src = cam->access.src;
+                ok2 = 0;
+                if (mm->frameIndex != -1 && mm->frameKind != -1) {
+                    ok2 = CameraAccessFrameInfo(cam, 0, mm->frameIndex, mm->frameKind);
+                }
+                frameSrc = cam->access.src;
+                ptr = cam->access.ptr;
+                if (ok1 == 1) {
+                    move->origin = src;
+                } else if (ok2 == 1 && mm->frameKind != 0) {
+                    move->origin = frameSrc;
+                } else {
+                    move->origin = NULL;
+                }
+                if (ok2 == 1 && mm->frameKind == 0) {
+                    move->frameRef = (EGSFrame **)ptr;
+                } else {
+                    move->frameRef = NULL;
+                }
+            }
+            if (ret == 1 && cam->funcs != old) {
+                ret = cam->funcs->init(cam);
+            }
+        }
+    }
+    return ret;
+}
 
 void CameraSetLeadFrame(Camera *cam, EGSFrame *frame, VECTOR32 *offset) {
     if (cam != NULL) {
@@ -921,7 +1043,15 @@ u8 func_8001950C(s32 op, VECTOR32 *p, u8 dir, CameraAccess *access) {
     return ret;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_80019594);
+void func_80019594(Camera *cam) {
+    SCRATCH_CALL1(func_800197D4, cam);
+    SCRATCH_CALL1(func_80019834, cam);
+    cam->funcs->preUpdate(cam);
+    SCRATCH_CALL1(func_800199A0, cam);
+    cam->funcs->update(cam);
+    SCRATCH_CALL1(func_80019894, cam);
+    __asm__ volatile("nop"); /* load delay after restoring $sp */
+}
 
 void func_8001967C(CameraMotion *m, VECTOR32 *value, u8 full) {
     VECTOR32 oldValue;
@@ -1040,22 +1170,266 @@ u8 func_800199A0(Camera *cam) {
     return ret;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_80019B20);
+/* One component of an animated camera parameter, stepped towards its target. */
+typedef struct CameraSpring {
+    /* 0x00 */ s32 value;
+    /* 0x04 */ s32 vel;
+    /* 0x08 */ s32 accel;
+    /* 0x0C */ s32 target;
+    /* 0x10 */ s32 unk10;
+    /* 0x14 */ s32 unk14;
+    /* 0x18 */ s32 maxVel;
+    /* 0x1C */ s32 maxAccel;
+    /* 0x20 */ s32 gain;
+} CameraSpring; /* size 0x24 */
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_8001A228);
+/* A vector parameter stepped towards its target (func_8001A3A0 works in the XZ plane). */
+typedef struct CameraSpringVec {
+    /* 0x00 */ VECTOR32 value;
+    /* 0x10 */ VECTOR32 vel;
+    /* 0x20 */ VECTOR32 accel;
+    /* 0x30 */ VECTOR32 target;
+    /* 0x40 */ VECTOR32 unk40;
+    /* 0x50 */ VECTOR32 unk50;
+    /* 0x60 */ s32 maxVel;
+    /* 0x64 */ s32 maxAccel;
+    /* 0x68 */ s32 gain;
+} CameraSpringVec;
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_8001A3A0);
+extern CameraSpring D_80112D40;
+extern CameraSpringVec D_80112D64;
+void func_8001A228(CameraSpring *s);
+void func_8001A3A0(CameraSpringVec *s);
+void func_8001A660(CameraSpringVec *s);
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_8001A660);
+/* Step one component of a move towards its motion target. */
+#define CAMERA_SPRING1(move, c)                          \
+    D_80112D40.value = (move)->input.value.c;            \
+    D_80112D40.vel = (move)->input.vel.c;                \
+    D_80112D40.accel = (move)->input.accel.c;            \
+    D_80112D40.target = (move)->motion.value.c;          \
+    D_80112D40.unk10 = (move)->motion.vel.c;             \
+    D_80112D40.unk14 = (move)->motion.accel.c;           \
+    D_80112D40.maxVel = (move)->limit[0].c;              \
+    D_80112D40.maxAccel = (move)->limit[1].c;            \
+    D_80112D40.gain = (move)->limit[2].c;                \
+    func_8001A228(&D_80112D40);                          \
+    (move)->input.value.c = D_80112D40.value;            \
+    (move)->input.vel.c = D_80112D40.vel;                \
+    (move)->input.accel.c = D_80112D40.accel
 
-#ifdef NON_MATCHING
-/* projection index is strength-reduced to a pointer instead of recomputed per iteration */
+#define CAMERA_SPRING_VEC(move, fn)                      \
+    D_80112D64.value = (move)->input.value;              \
+    D_80112D64.vel = (move)->input.vel;                  \
+    D_80112D64.accel = (move)->input.accel;              \
+    D_80112D64.target = (move)->motion.value;            \
+    D_80112D64.unk40 = (move)->motion.vel;               \
+    D_80112D64.unk50 = (move)->motion.accel;             \
+    D_80112D64.maxVel = (move)->limit[0].vx;             \
+    D_80112D64.maxAccel = (move)->limit[1].vx;           \
+    D_80112D64.gain = (move)->limit[2].vx;               \
+    fn(&D_80112D64);                                     \
+    (move)->input.value = D_80112D64.value;              \
+    (move)->input.vel = D_80112D64.vel;                  \
+    (move)->input.accel = D_80112D64.accel
+
+u8 func_80019B20(CameraMoveInfo *move) {
+    u8 ret = 1;
+
+    if (move->active == 1) {
+        if (move->type == 0) {
+            CAMERA_SPRING1(move, vx);
+        } else {
+            switch (move->unk008) {
+            case 0:
+                CAMERA_SPRING_VEC(move, func_8001A660);
+                break;
+            case 1:
+                CAMERA_SPRING_VEC(move, func_8001A3A0);
+                CAMERA_SPRING1(move, vy);
+                break;
+            case 2:
+                CAMERA_SPRING1(move, vx);
+                CAMERA_SPRING1(move, vy);
+                CAMERA_SPRING1(move, vz);
+                break;
+            default:
+                ret = 0;
+                break;
+            }
+        }
+    }
+    return ret;
+}
+
+
+static inline void CameraClampAbs(s32 *v, s32 max) {
+    if (max >= 0) {
+        if (max < *v) {
+            *v = max;
+        } else if (*v < -max) {
+            *v = -max;
+        }
+    }
+}
+
+static inline void CameraClampAbsAlways(s32 *v, s32 max) {
+    s32 x = *v;
+
+    if (max >= 0 && (max < x || x < (max = -max))) {
+        *v = max;
+    } else {
+        *v = x;
+    }
+}
+
+void func_8001A228(CameraSpring *s) {
+    s32 accel;
+    s32 vel;
+    s32 want;
+    s32 v;
+
+    if (s->value == s->target && s->vel == 0 && s->accel == 0) {
+        return;
+    }
+    want = (s->target - s->value) * s->gain;
+    accel = want - s->vel;
+    CameraClampAbs(&accel, s->maxAccel);
+    vel = s->vel + accel;
+    if ((vel > 0 && want <= 0) || (vel < 0 && want >= 0)) {
+        vel = 0;
+    } else if ((vel > 0 && vel >= want) || (vel < 0 && vel <= want)) {
+        vel = want;
+    }
+    CameraClampAbsAlways(&vel, s->maxVel);
+    s->accel = vel - s->vel;
+    s->vel = vel;
+    v = vel;
+    if (v >= 0) {
+        v += 0xFFF;
+    } else {
+        v -= 0xFFF;
+    }
+    if (v >= 0) {
+        v >>= 12;
+    } else {
+        v = -(-v >> 12);
+    }
+    s->value += v;
+    {
+        s32 unused[2]; /* the original frame has 8 more bytes above accel/vel */
+    }
+}
+
+
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
+
+/* 20.12 fixed point to integer, rounding away from zero. */
+static inline s32 CameraFixRound(s32 x) {
+    x = x >= 0 ? x + 0xFFF : x - 0xFFF;
+    return x >= 0 ? x >> 12 : -(-x >> 12);
+}
+
+
+void func_8001A3A0(CameraSpringVec *s) {
+    VECTOR32 d;
+    VECTOR32 dir;
+    VECTOR32 step;
+    CameraSpring sp;
+
+    if (s->value.vx == s->target.vx && s->vel.vx == 0 && s->accel.vx == 0 &&
+        s->value.vz == s->target.vz && s->vel.vz == 0 && s->accel.vz == 0) {
+        return;
+    }
+    d.vx = s->target.vx - s->value.vx;
+    d.vy = 0;
+    d.vz = s->target.vz - s->value.vz;
+    if (d.vx != 0 || d.vz != 0) {
+        GTEMath_VectorNormal(&d, &dir);
+        sp.value = 0;
+        sp.target = EGSMathFIXMul(d.vx, dir.vx) + EGSMathFIXMul(d.vz, dir.vz);
+        sp.vel = EGSMathFIXMul(s->vel.vx, dir.vx) + EGSMathFIXMul(s->vel.vz, dir.vz);
+        sp.accel = EGSMathFIXMul(s->accel.vx, dir.vx) + EGSMathFIXMul(s->accel.vz, dir.vz);
+        sp.maxVel = s->maxVel;
+        sp.maxAccel = s->maxAccel;
+        sp.gain = s->gain;
+        func_8001A228(&sp);
+        step.vx = EGSMathFIXMul(dir.vx, sp.vel);
+        step.vy = dir.vy;
+        step.vz = EGSMathFIXMul(dir.vz, sp.vel);
+    } else {
+        step.vx = 0;
+        step.vy = 0;
+        step.vz = 0;
+    }
+    s->accel.vx = step.vx - s->vel.vx;
+    s->accel.vy = s->accel.vy;
+    s->accel.vz = step.vz - s->vel.vz;
+    s->vel.vx = step.vx;
+    s->vel.vy = s->vel.vy;
+    s->vel.vz = step.vz;
+    step.vx = CameraFixRound(step.vx);
+    step.vy = CameraFixRound(step.vy);
+    step.vz = CameraFixRound(step.vz);
+    s->value.vx += step.vx;
+    s->value.vy = s->value.vy;
+    s->value.vz += step.vz;
+}
+
+void func_8001A660(CameraSpringVec *s) {
+    VECTOR32 d;
+    VECTOR32 dir;
+    VECTOR32 step;
+    CameraSpring sp;
+
+    if (s->value.vx == s->target.vx && s->vel.vx == 0 && s->accel.vx == 0 &&
+        s->value.vy == s->target.vy && s->vel.vy == 0 && s->accel.vy == 0 &&
+        s->value.vz == s->target.vz && s->vel.vz == 0 && s->accel.vz == 0) {
+        return;
+    }
+    d.vx = s->target.vx - s->value.vx;
+    d.vy = s->target.vy - s->value.vy;
+    d.vz = s->target.vz - s->value.vz;
+    if (d.vx != 0 || d.vy != 0 || d.vz != 0) {
+        GTEMath_VectorNormal(&d, &dir);
+        sp.value = 0;
+        sp.target = EGSMathFIXMul(d.vx, dir.vx) + EGSMathFIXMul(d.vy, dir.vy) + EGSMathFIXMul(d.vz, dir.vz);
+        sp.vel = EGSMathFIXMul(s->vel.vx, dir.vx) + EGSMathFIXMul(s->vel.vy, dir.vy) +
+                 EGSMathFIXMul(s->vel.vz, dir.vz);
+        sp.accel = EGSMathFIXMul(s->accel.vx, dir.vx) + EGSMathFIXMul(s->accel.vy, dir.vy) +
+                   EGSMathFIXMul(s->accel.vz, dir.vz);
+        sp.maxVel = s->maxVel;
+        sp.maxAccel = s->maxAccel;
+        sp.gain = s->gain;
+        func_8001A228(&sp);
+        step.vx = EGSMathFIXMul(dir.vx, sp.vel);
+        step.vy = EGSMathFIXMul(dir.vy, sp.vel);
+        step.vz = EGSMathFIXMul(dir.vz, sp.vel);
+    } else {
+        step.vx = 0;
+        step.vy = 0;
+        step.vz = 0;
+    }
+    s->accel.vx = step.vx - s->vel.vx;
+    s->accel.vy = step.vy - s->vel.vy;
+    s->accel.vz = step.vz - s->vel.vz;
+    s->vel = step;
+    step.vx = CameraFixRound(step.vx);
+    step.vy = CameraFixRound(step.vy);
+    step.vz = CameraFixRound(step.vz);
+    s->value.vx += step.vx;
+    s->value.vy += step.vy;
+    s->value.vz += step.vz;
+}
+
 s32 CameraUpdateBeforeDisplay(void) {
     s32 i;
+    EGSFrame *frame;
 
     for (i = 0; i < 2; i++) {
         if (gCameraList[i] != NULL) {
-            EGSFrameGetMatrix(gCameraList[i]->display->frame, 0, &gCameraOriginalMatrices[i]);
+            frame = gCameraList[i]->display->frame;
+            EGSFrameGetMatrix(frame, 0, &gCameraOriginalMatrices[i]);
             gCameraOriginalProjections[i] = gCameraList[i]->display->projection;
         }
     }
@@ -1066,9 +1440,6 @@ s32 CameraUpdateBeforeDisplay(void) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/camera", CameraUpdateBeforeDisplay);
-#endif
 
 s32 CameraUpdateAfterDisplay(void) {
     s32 i;
@@ -1105,7 +1476,71 @@ u8 func_8001AB9C(Camera *cam) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/camera", func_8001ACA0);
+extern u8 D_80113BB2;
+void EGSGeometry_AngleToVectorYX(VECTOR32 *angle, VECTOR32 *out);
+
+/* Camera-relative move: v is (side, up, forward) in the camera's XZ heading. */
+void func_8001ACA0(VECTOR32 *v, VECTOR32 *out, Camera *cam) {
+    VECTOR32 angle;
+    VECTOR32 side;
+    VECTOR32 fwd;
+    VECTOR32 x;
+    GOBJ_MATRIX m;
+    s32 *ps;
+    s32 *pf;
+    s32 up;
+
+    if (D_80113BB2 == 0) {
+        m.m[0][0] = gCamera->display->frame->m[0][0];
+        m.m[0][1] = -gCamera->display->frame->m[0][1];
+        m.m[0][2] = gCamera->display->frame->m[0][2];
+        m.m[1][0] = -gCamera->display->frame->m[1][0];
+        m.m[1][1] = gCamera->display->frame->m[1][1];
+        m.m[1][2] = -gCamera->display->frame->m[1][2];
+        m.m[2][0] = gCamera->display->frame->m[2][0];
+        m.m[2][1] = -gCamera->display->frame->m[2][1];
+        m.m[2][2] = gCamera->display->frame->m[2][2];
+        x.vx = m.m[0][0];
+        x.vy = m.m[1][0];
+        x.vz = m.m[2][0];
+        fwd.vx = -x.vz;
+        fwd.vy = 0;
+        fwd.vz = x.vx;
+    } else {
+        if (gCamera->move[6].type == 0) {
+            angle.vx = gCamera->move[6].value.vx;
+        } else {
+            angle = gCamera->move[6].value;
+        }
+        EGSGeometry_AngleToVectorYX(&angle, &fwd);
+    }
+    if (fwd.vy != 0) {
+        fwd.vy = 0;
+        GTEMath_VectorNormal(&fwd, &fwd);
+    }
+    side.vx = fwd.vz;
+    side.vy = 0;
+    side.vz = -fwd.vx;
+    ps = &side.vx;
+    ps[0] = EGSMathFIXMul(side.vx, v->vx);
+    ps[1] = EGSMathFIXMul(side.vy, v->vx);
+    ps[2] = EGSMathFIXMul(side.vz, v->vx);
+    up = v->vy;
+    pf = &fwd.vx;
+    pf[0] = EGSMathFIXMul(fwd.vx, v->vz);
+    pf[1] = EGSMathFIXMul(fwd.vy, v->vz);
+    pf[2] = EGSMathFIXMul(fwd.vz, v->vz);
+    out->vx = 0;
+    out->vy = 0;
+    out->vz = 0;
+    out->vx += side.vx;
+    out->vy += side.vy;
+    out->vz += side.vz;
+    out->vy += up;
+    out->vx += fwd.vx;
+    out->vy += fwd.vy;
+    out->vz += fwd.vz;
+}
 
 void func_8001AF98(void) {
     VECTOR32 v;
@@ -1116,5 +1551,5 @@ void func_8001AF98(void) {
     } else {
         v = cam->move[1].input.value;
     }
-    func_8001ACA0(&v, &D_80113BB4, cam);
+    func_8001ACA0(&v, (VECTOR32 *)D_80113BB4, cam);
 }

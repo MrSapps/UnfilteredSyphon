@@ -27,7 +27,8 @@ SDATA_LOCAL(D_8010FA00)
 /* Terrain sector table (gSectorMap[], 0x10 bytes each). */
 typedef struct SectorMapEntry {
     /* 0x00 */ char *name;
-    /* 0x04 */ u8 unk04[5];
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ u8 numParts; /* streamed parts (sectors on disc) */
     /* 0x09 */ u8 id;
     /* 0x0A */ u8 originalId;
     /* 0x0B */ u8 unk0B[5];
@@ -85,7 +86,7 @@ typedef struct ActivationList {
 typedef struct TerrainCacheEntry {
     /* 0x00 */ void *data;
     /* 0x04 */ TerrainAnim *owner;
-    /* 0x08 */ u8 unk08[4];
+    /* 0x08 */ struct SectorMapEntry *map;
     /* 0x0C */ s32 sector;
     /* 0x10 */ s32 state; /* 1: free, 0: in use, < 0: loading, > 1: unused since gTUTime */
 } TerrainCacheEntry;
@@ -336,7 +337,78 @@ void FindBadCacheEntries(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/terrain", AllocateFromTerrainCache);
+/* Reserve cache blocks for a sector's parts. Returns blocks reserved, 0 if busy, -1 if cached. */
+s32 AllocateFromTerrainCache(TerrainAnim *owner, SectorMapEntry *map, TerrainCacheEntry **out) {
+    u8 found = 0;
+    s32 needed = map->numParts / gSectorsPerBlock;
+    s32 n = 0;
+    s32 remaining;
+    s32 oldest;
+    s32 i;
+    TerrainCacheEntry *entry;
+
+    for (i = 0; i < gNumTerrainDataBlocks; i++) {
+        TerrainCacheEntry *e = &gTerrainCache[i];
+        if (e->owner == owner) {
+            if (e->state <= 0) {
+                return 0;
+            }
+            if (e->state >= 2) {
+                found = 1;
+                e->state = 0;
+                gTerrainCacheInactiveBlocks--;
+            }
+        }
+    }
+    if (found) {
+        return -1;
+    }
+    if (gTerrainCacheInactiveBlocks < needed) {
+        FindBadCacheEntries();
+        if (gTerrainCacheInactiveBlocks < needed) {
+            __asm__ volatile(".word 0x00003FCD"); /* break 0, 255: out of cache */
+        }
+    }
+    while (gTerrainCacheFreeBlocks < needed) {
+        oldest = 0x7FFFFFFF;
+        for (i = 0; i < gNumTerrainDataBlocks; i++) {
+            TerrainCacheEntry *e = &gTerrainCache[i];
+            if (e->state >= 2 && e->state < oldest) {
+                oldest = e->state;
+            }
+        }
+        for (i = 0; i < gNumTerrainDataBlocks; i++) {
+            entry = &gTerrainCache[i];
+            if (entry->state == oldest) {
+                TASSERT(entry->state != -1, 0x2F3);
+                entry->state = 1;
+                entry->owner = NULL;
+                entry->sector = -1;
+                gTerrainCacheFreeBlocks++;
+            }
+        }
+    }
+    remaining = needed;
+    for (i = 0; remaining > 0; i++) {
+        if (i >= gNumTerrainDataBlocks) {
+            return n;
+        }
+        {
+            TerrainCacheEntry *e = &gTerrainCache[i];
+            if (e->state == 1) {
+                remaining--;
+                e->owner = owner;
+                e->map = map;
+                e->sector = map->id;
+                e->state = -1;
+                out[n++] = e;
+                gTerrainCacheFreeBlocks--;
+                gTerrainCacheInactiveBlocks--;
+            }
+        }
+    }
+    return n;
+}
 
 void StreamVramPage(s32 page, s32 bank) {
     StreamRequest(gTextureCache, CdPosToInt(gVRAMMap[bank][page].pos), 0x10, 0, VramSwap, page + bank * 32);
@@ -528,10 +600,75 @@ void DeactivateCurrentTerrain(void) {
     } while (sector != gGabeSector);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/terrain", ActivateSector);
+extern u8 gUsePCFiles;
 
-#ifdef NON_MATCHING
-/* loop registers allocated one higher (a0 unused in the original) */
+/* Sizes (in disc sectors) of up to four streamed parts. */
+typedef struct PartSizes {
+    s16 n[4];
+} PartSizes;
+
+/* Start streaming a sector into the cache (or just show it if it is still cached). */
+void ActivateSector(s32 sector, u8 tag) {
+    TerrSector *ts = &gTerrSector[sector];
+    TerrainAnim *anim = ts->anim;
+    SectorMapEntry *map;
+    TerrainCacheEntry *blocks[4];
+    PartSizes sizes;
+    s32 count;
+    s32 last;
+    s32 pos;
+    s32 i;
+
+    if (((s8 *)&anim->model->data)[3] != -0x80) {
+        map = &gSectorMap[sector];
+        count = AllocateFromTerrainCache(anim, map, blocks);
+        if (count == 0) {
+            return;
+        }
+        last = count - 1;
+        if (count < 0) {
+            anim->model->data |= 0x80000000;
+            SectorActivated(sector);
+        } else {
+            {
+                PartSizes init;
+
+                init.n[0] = gSectorsPerBlock;
+                init.n[1] = gSectorsPerBlock;
+                init.n[2] = gSectorsPerBlock;
+                init.n[3] = gSectorsPerBlock;
+                sizes = init;
+            }
+            pos = CdPosToInt(map->unk04);
+            for (i = 0; i < count; i++) {
+                ts->parts[i] = blocks[i]->data;
+            }
+            for (i = last; i > 0; i--) {
+                if ((u8 *)blocks[i - 1]->data + gSectorsPerBlock * 0x800 == blocks[i]->data) {
+                    sizes.n[i - 1] += sizes.n[i];
+                    sizes.n[i] = 0;
+                    if (i == last) {
+                        last = i - 1;
+                        count--;
+                    }
+                }
+            }
+            i = 0;
+            while (i < count) {
+                if (sizes.n[i] != 0) {
+                    StreamRequest(blocks[i]->data, pos, sizes.n[i], tag,
+                                  i < last ? (void (*)())TerrainPartCallback : (void (*)())TerrainStreamCallback,
+                                  sector);
+                }
+                i++;
+                pos += gUsePCFiles ? gSectorsPerBlock << 11 : gSectorsPerBlock;
+            }
+        }
+    } else {
+        SectorActivated(sector);
+    }
+}
+
 void DeactivateSector(s32 sector) {
     TerrainAnim *anim = gTerrSector[sector].anim;
     TerrainCacheEntry *entry;
@@ -542,8 +679,14 @@ void DeactivateSector(s32 sector) {
         entry = &gTerrainCache[i];
         if (entry->owner == anim) {
             if (entry->state == 0) {
-                entry->state = gTUTime;
-                gTerrainCacheInactiveBlocks++;
+                /* both arms are cross-jumped; the test only steers register allocation */
+                if (sector) {
+                    entry->state = gTUTime;
+                    gTerrainCacheInactiveBlocks++;
+                } else {
+                    entry->state = gTUTime;
+                    gTerrainCacheInactiveBlocks++;
+                }
             } else if (entry->state < 0) {
                 entry->owner = NULL;
                 entry->sector = -1;
@@ -560,9 +703,6 @@ void DeactivateSector(s32 sector) {
     }
     GSDeleteAnim(anim);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", DeactivateSector);
-#endif
 
 void GSAddAnim(void *anim) {
     DisplayCamera *sniper = gSniperCam;
@@ -610,21 +750,18 @@ void TerrainReplaceSector(s32 sector, s32 with) {
     ActivateSector(sector, 1);
 }
 
-#ifdef NON_MATCHING
-/* v0/v1 swapped for the gSectorMap load */
 s32 TerrainGetSectorIdByName(char *name) {
+    SectorMapEntry *entry;
     s32 i;
 
     for (i = 0; i < gTerrSectorCount; i++) {
-        if (strcmp(gSectorMap[i].name, name) == 0) {
+        entry = &gSectorMap[i];
+        if (strcmp(entry->name, name) == 0) {
             return i;
         }
     }
     return -1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", TerrainGetSectorIdByName);
-#endif
 
 u8 TerrainGetOriginalId(s32 sector) {
     return gSectorMap[sector].originalId;
@@ -651,15 +788,14 @@ void TerrainZoomAndOrient(s32 x, s32 y, s32 sector) {
     func_8008198C(sector);
 }
 
-#ifdef NON_MATCHING
-/* prologue: s5 saved before s4 */
 void FixupEMDGameObject(EMDHeader *emd, EMDOwner *owner) {
     s32 off;
+    EMDHeader *hdr = emd;
     s32 seg;
     s32 i;
 
     if (emd->fixed == -1) {
-        EGSDisplayGetSectorBox(emd, owner->unk10);
+        EGSDisplayGetSectorBox(hdr, owner->unk10);
         return;
     }
     emd->fixed = -1;
@@ -667,18 +803,15 @@ void FixupEMDGameObject(EMDHeader *emd, EMDOwner *owner) {
         emd->segments[i] = (u8 *)emd + i * 0x10000;
     }
     for (i = 0; i < EMD_OFFSET_COUNT; i++) {
-        off = emd->offsets[i];
+        off = hdr->offsets[i];
         seg = (u32)off >> 14;
         if (off == -1) {
             continue;
         }
         if (off != 0 && off > 0) {
             TASSERT(seg < 4, 0x6C7);
-            emd->offsets[i] = (s32)(emd->segments[seg] + (off & 0x3FFF));
+            hdr->offsets[i] = (s32)(hdr->segments[seg] + (off & 0x3FFF));
         }
     }
-    EGSDisplayGetSectorBox(emd, owner->unk10);
+    EGSDisplayGetSectorBox(hdr, owner->unk10);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", FixupEMDGameObject);
-#endif

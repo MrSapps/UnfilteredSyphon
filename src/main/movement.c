@@ -29,13 +29,33 @@ typedef struct MovementBasicInfo {
 
 /* Character (CAS driven) movement request (MovementInfo.charMove). */
 typedef struct CharacterMovement {
-    /* 0x00 */ u8 unk00[8];
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ s32 unk04;
     /* 0x08 */ VECTOR32 input; /* joystick direction, character relative */
     /* 0x18 */ VECTOR32 vel;
-    /* 0x28 */ u8 unk28[0x14];
+    /* 0x28 */ s32 unk28;
+    /* 0x2C */ VECTOR32 unk2C;
     /* 0x3C */ s32 type; /* 5, 8, 9: standing still; 6, 7: moving */
     /* 0x40 */ s32 prevType;
-} CharacterMovement;
+    /* 0x44 */ u8 unk44;
+    /* 0x45 */ u8 unk45[3];
+    /* 0x48 */ VECTOR32 unk48;
+    /* 0x58 */ VECTOR32 unk58;
+    /* 0x68 */ VECTOR32 unk68;
+    /* 0x78 */ s32 unk78;
+    /* 0x7C */ VECTOR32 unk7C;
+    /* 0x8C */ VECTOR32 unk8C;
+    /* 0x9C */ VECTOR32 unk9C;
+    /* 0xAC */ VECTOR32 unkAC;
+    /* 0xBC */ VECTOR32 unkBC;
+    /* 0xCC */ s32 unkCC;
+    /* 0xD0 */ VECTOR32 unkD0;
+    /* 0xE0 */ VECTOR32 unkE0;
+    /* 0xF0 */ VECTOR32 unkF0;
+    /* 0x100 */ s32 unk100;
+    /* 0x104 */ u8 unk104;
+    /* 0x105 */ u8 unk105[0x23];
+} CharacterMovement; /* size 0x128 */
 
 /* MovementGobjReset request. */
 typedef struct MovementResetInfo {
@@ -109,9 +129,9 @@ void EGSFrameSetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *dir, s32 roll);
 void EGSGeometryFIX_VectorGetAngleFromXZPlane(VECTOR32 *v, VECTOR32 *out);
 s32 ratan2(s32 y, s32 x);
 void MovementGobjReset(Gobj *gobj, MovementResetInfo *info);
-void MovementGobjInitCAS(Gobj *gobj, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6);
+s32 MovementGobjInitCAS(Gobj *gobj, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6);
 void CollisionGobjBasicInit(Gobj *gobj, s32 a, s32 b, s32 c, s32 d, s32 e);
-void func_8004966C(Gobj *gobj);
+s32 func_8004966C(Gobj *gobj);
 void FriendlyGobjUpdateAfterCollision(Gobj *gobj);
 s32 MovementCharacterRelative(s16 id, s32 arg1);
 s32 MovementWorldRelative(s16 id, s32 arg1);
@@ -132,7 +152,7 @@ void EGSGeometry_GetBoxPoints(VECTOR32 *box, MovementSVector *points, GOBJ_MATRI
 
 #define MOVE_TYPE_STILL(t) ((t) == 5 || (t) == 8 || (t) == 9)
 #define MOVE_TYPE_MOVING(t) ((t) == 6 || (t) == 7)
-void func_8004B058(Gobj *gobj);
+s32 func_8004B058(Gobj *gobj);
 void FriendlyGobjUpdateBeforeCollision(Gobj *gobj);
 void EGSFrameUpdateHierarchy(void *frame);
 void iMovementUpdate7(void);
@@ -494,11 +514,15 @@ void SYSMovementInit(void) {
     D_8010F93C = NULL;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: gobj is copied to a1 and the old head lands in a0 */
+/* Push onto the head of the movement list. */
+#define MOVEMENT_LIST_PUSH(gobj)                \
+    do {                                        \
+        MOVE(gobj)->next = D_8010F93C;          \
+        D_8010F93C = (gobj);                    \
+    } while (0)
+
 s32 MovementAddGobj(Gobj *gobj) {
     Gobj *it;
-    Gobj *head;
 
     if (gobj == NULL || gobj->move == NULL) {
         return 0;
@@ -512,14 +536,9 @@ s32 MovementAddGobj(Gobj *gobj) {
             return 0;
         }
     }
-    head = D_8010F93C;
-    D_8010F93C = gobj;
-    MOVE(gobj)->next = head;
+    MOVEMENT_LIST_PUSH(gobj);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/movement", MovementAddGobj);
-#endif
 
 s32 MovementRemoveGobj(Gobj *gobj) {
     Gobj *it;
@@ -542,7 +561,48 @@ s32 MovementRemoveGobj(Gobj *gobj) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", func_8004966C);
+/* Bounding heights of a character from its bone frames (lowest / unk11C). */
+s32 func_8004966C(Gobj *gobj) {
+    VECTOR32 p;
+    EGSFrame *f;
+    s32 min;
+    s32 max;
+    s32 i;
+
+    if ((gobj->npcState == 1 || gobj->npcState == 2) &&
+        (gobj->anim->model->flags & GOBJ_MODEL_FLAG_400000) && !(gobj->anim->unk00[8] & 0x10) &&
+        gobj->move != NULL) {
+        f = gobj->anim->frames[0];
+        p.vx = f->pos.vx;
+        p.vy = f->pos.vy;
+        p.vz = f->pos.vz;
+        p.vy = -p.vy;
+        min = max = p.vy;
+        for (i = 1; i < 15; i++) {
+            f = gobj->anim->frames[i];
+            p.vx = f->pos.vx;
+            p.vy = f->pos.vy;
+            p.vz = f->pos.vz;
+            p.vy = -p.vy;
+            if (p.vy < min) {
+                min = p.vy;
+            } else if (max < p.vy && i != 8 && i != 2 && i != 9 && i != 3 && i != 7 && i != 1) {
+                max = p.vy;
+            }
+        }
+        MOVE(gobj)->lowest.vx = MOVE(gobj)->translation.cur.pos.vx;
+        MOVE(gobj)->lowest.vy = min;
+        MOVE(gobj)->lowest.vz = MOVE(gobj)->translation.cur.pos.vz;
+        MOVE(gobj)->unk11C.vx = MOVE(gobj)->translation.cur.pos.vx;
+        MOVE(gobj)->unk11C.vy = max;
+        MOVE(gobj)->unk11C.vz = MOVE(gobj)->translation.cur.pos.vz;
+    } else {
+        p = MOVE(gobj)->translation.cur.pos;
+        MOVE(gobj)->lowest = p;
+        MOVE(gobj)->unk11C = p;
+    }
+    return 1;
+}
 
 #ifdef NON_MATCHING
 /* lowest-point loop: the original addresses points[] through two induction pointers */
@@ -606,9 +666,104 @@ inline void func_800498A4(Gobj *gobj) {
 INCLUDE_ASM("asm/main/nonmatchings/movement", func_800498A4);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", MovementGobjUpdatePosition);
+extern VECTOR32 D_80011FD0; /* zero vector */
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", MovementGobjUpdateVelocity);
+#define FIX_TO_INT(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+#define FIX_TO_INT3(x) ((x) >= 0 ? (x) >> 3 : -(-(x) >> 3))
+#define WRAP_ANGLE(a)              \
+    if ((a) > 0x800) {             \
+        (a) -= 0x1000;             \
+    } else if ((a) < -0x800) {     \
+        (a) += 0x1000;             \
+    }
+
+s32 MovementGobjUpdatePosition(Gobj *gobj, u8 translation, u8 rotation) {
+    MovementInfo *move = MOVE(gobj);
+    VECTOR32 delta;
+    VECTOR32 pos;
+    VECTOR32 zero = D_80011FD0;
+
+    if (translation) {
+        pos = move->translation.next.pos;
+        delta = move->translation.next.delta;
+        move->translation.cur.delta = delta;
+        if (delta.vx != 0 || delta.vy != 0 || delta.vz != 0) {
+            delta.vx = FIX_TO_INT(delta.vx);
+            delta.vy = FIX_TO_INT(delta.vy);
+            delta.vz = FIX_TO_INT(delta.vz);
+            pos.vx += delta.vx;
+            pos.vy += delta.vy;
+            pos.vz += delta.vz;
+            move->translation.next.pos = pos;
+        }
+        if (pos.vx != move->translation.cur.pos.vx || pos.vy != move->translation.cur.pos.vy ||
+            pos.vz != move->translation.cur.pos.vz) {
+            EGSFrameSetPosition(gobj->anim->frame, 0, &pos);
+            move->translation.cur.pos = pos;
+        }
+        move->translation.next.delta = zero;
+    }
+    if (rotation) {
+        pos = move->rotation.next.pos;
+        delta = move->rotation.next.delta;
+        move->rotation.cur.delta = delta;
+        if (delta.vx != 0 || delta.vy != 0 || delta.vz != 0) {
+            delta.vx = FIX_TO_INT(delta.vx);
+            delta.vy = FIX_TO_INT(delta.vy);
+            delta.vz = FIX_TO_INT(delta.vz);
+            pos.vx += delta.vx;
+            WRAP_ANGLE(pos.vx);
+            pos.vy += delta.vy;
+            WRAP_ANGLE(pos.vy);
+            pos.vz += delta.vz;
+            WRAP_ANGLE(pos.vz);
+            move->rotation.next.pos = pos;
+        }
+        pos = move->rotation.next.pos;
+        if (pos.vx != move->rotation.cur.pos.vx || pos.vy != move->rotation.cur.pos.vy ||
+            pos.vz != move->rotation.cur.pos.vz) {
+            EGSFrameSetRotationYXZ(gobj->anim->frame, 0, &pos);
+            move->rotation.cur.pos = pos;
+        }
+        move->rotation.next.delta = zero;
+    }
+    return 1;
+}
+
+s32 MovementGobjUpdateVelocity(Gobj *gobj, u8 translation, u8 rotation) {
+    MovementInfo *move = MOVE(gobj);
+    VECTOR32 vel;
+    VECTOR32 accel;
+    VECTOR32 zero = D_80011FD0;
+
+    if (translation) {
+        vel = move->translation.next.vel;
+        accel = move->translation.next.accel;
+        if (accel.vx != 0 || accel.vy != 0 || accel.vz != 0) {
+            vel.vx += accel.vx;
+            vel.vy += accel.vy;
+            vel.vz += accel.vz;
+            move->translation.next.vel = vel;
+        }
+        move->translation.cur.vel = vel;
+        move->translation.cur.accel = accel;
+        move->translation.next.accel = zero;
+    }
+    if (rotation) {
+        vel = move->rotation.next.vel;
+        accel = move->rotation.next.accel;
+        if (accel.vx != 0 || accel.vy != 0 || accel.vz != 0) {
+            vel.vx += accel.vx;
+            vel.vy += accel.vy;
+            vel.vz += accel.vz;
+            move->rotation.next.vel = vel;
+        }
+        move->rotation.cur.vel = vel;
+        move->rotation.cur.accel = accel;
+        move->rotation.next.accel = zero;
+    }
+    return 1;
+}
 
 s32 MovementGobjUpdateMovement(Gobj *gobj, u8 translation, u8 rotation) {
     MovementInfo *move = MOVE(gobj);
@@ -866,9 +1021,175 @@ s32 MovementGobjRegisterCharacterMovement(Gobj *gobj, VECTOR32 *vel, s32 type) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", MovementGobjInitCAS);
+s32 MovementGobjInitCAS(Gobj *gobj, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6) {
+    MovementInfo *move;
+    CharacterMovement **cm;
 
+    if (gobj == NULL) {
+        return 0;
+    }
+    move = MOVE(gobj);
+    if (move == NULL) {
+        return 0;
+    }
+    cm = &move->charMove;
+    if (move->charMove == NULL) {
+        *cm = EGSMemMalloc(sizeof(CharacterMovement));
+        if (*cm == NULL) {
+            return 0;
+        }
+    }
+    (*cm)->unk00 = a4;
+    (*cm)->unk04 = a5;
+    (*cm)->input.vx = 0;
+    (*cm)->input.vy = 0;
+    (*cm)->input.vz = 0;
+    (*cm)->vel.vx = 0;
+    (*cm)->vel.vy = 0;
+    (*cm)->vel.vz = 0;
+    (*cm)->unk28 = 0;
+    (*cm)->unk2C.vx = 0;
+    (*cm)->unk2C.vy = 0;
+    (*cm)->unk2C.vz = 0;
+    (*cm)->type = 5;
+    (*cm)->prevType = 5;
+    (*cm)->unk44 = 1;
+    (*cm)->unk48.vx = 0;
+    (*cm)->unk48.vy = 0;
+    (*cm)->unk48.vz = 0;
+    (*cm)->unk58.vx = 0;
+    (*cm)->unk58.vy = 0;
+    (*cm)->unk58.vz = 0;
+    (*cm)->unk68.vx = 0;
+    (*cm)->unk68.vy = 0;
+    (*cm)->unk68.vz = 0;
+    (*cm)->unk68.pad = 0;
+    (*cm)->unk7C.vx = 0;
+    (*cm)->unk7C.vy = 0;
+    (*cm)->unk7C.vz = 0;
+    (*cm)->unk8C.vx = 0;
+    (*cm)->unk8C.vy = 0;
+    (*cm)->unk8C.vz = 0;
+    (*cm)->unk9C.vx = 0;
+    (*cm)->unk9C.vy = 0;
+    (*cm)->unk9C.vz = 0;
+    (*cm)->unkAC.vx = 0;
+    (*cm)->unkAC.vy = 0;
+    (*cm)->unkAC.vz = 0;
+    (*cm)->unkAC.pad = 0;
+    (*cm)->unkBC.vx = 0;
+    (*cm)->unkBC.vy = 0;
+    (*cm)->unkBC.vz = 0;
+    (*cm)->unkBC.pad = 0;
+    (*cm)->unkD0.vx = 0;
+    (*cm)->unkD0.vy = 0;
+    (*cm)->unkD0.vz = 0;
+    (*cm)->unkE0.vx = 0;
+    (*cm)->unkE0.vy = 0;
+    (*cm)->unkE0.vz = 0;
+    (*cm)->unkF0.vx = 0;
+    (*cm)->unkF0.vy = 0;
+    (*cm)->unkF0.vz = 0;
+    (*cm)->unk100 = 0x80000001;
+    (*cm)->unk104 = 0;
+    return 1;
+}
+
+void EGSGeometry_AngleInterpolate(s32 from, s32 to, s32 step, u8 mode, s32 *out, s32 *remain);
+
+static inline void MovementValueArctan(s32 y, s32 x, s32 *out) {
+    *out = ratan2(y, x);
+}
+
+void ShadowRequestDraw(Gobj *gobj);
+void func_8004B8E8(Gobj *gobj);
+/* Character movement: edge/fall reactions, banking, joystick facing. */
+/* Turn the yaw towards a direction (snappier while in active state 8). */
+static inline void MovementTurnTowards(Gobj *gobj, VECTOR32 *v, u8 mode) {
+    VECTOR32 dir = *v;
+    s32 speed;
+    s32 target;
+    s32 step;
+    s32 remain;
+
+    if (dir.vx != 0 || dir.vy != 0 || dir.vz != 0) {
+        speed = 0x71;
+        if (gobj->cas->active == 8) {
+            speed = 0x11C;
+        }
+        MovementValueArctan(dir.vx, dir.vz, &target);
+        EGSGeometry_AngleInterpolate(MOVE(gobj)->rotation.cur.pos.vy, target, speed, mode, &step, &remain);
+        MOVE(gobj)->rotation.next.delta.vy = step << 12;
+    }
+}
+
+#ifdef NON_MATCHING
+/* regalloc: original keeps the AngleInterpolate mode (0) in s1 across ratan2, shifting s-regs */
+s32 func_8004B058(Gobj *gobj) {
+    MovementInfo *move = MOVE(gobj);
+    u32 flags = move->edgeFlags;
+    CharacterMovement *cm = move->charMove;
+    s32 isFirstPerson;
+
+    if (flags & 0x400) {
+        CASRequestAction(gobj->id, 0x14);
+        MOVE(gobj)->edgeFlags &= ~0x400;
+    } else if (flags & 0x200) {
+        CASRequestAction(gobj->id, 0x13);
+    } else if ((flags & 0xC000) == 0xC000 &&
+               ((flags & 0x100) || (gobj->cas->flags & 0x800000) ||
+                ((gobj->cas->flags & 0x1000) && move->translation.cur.vel.vy >= 0)) &&
+               (!(gobj->cas->flags & 0x10000) || MOVE(gobj)->translation.cur.vel.vy <= -0x1D709) &&
+               gobj->cas->active != 8 && FriendlyGobjGetFoundEdge(gobj, 6)) {
+        CASRequestAction(gobj->id, 0x1C);
+    } else if ((MOVE(gobj)->edgeFlags & 0x3000) == 0x3000 && (gobj->cas->flags & 0x1000) &&
+               MOVE(gobj)->translation.cur.vel.vy >= 0 && FriendlyGobjGetFoundEdge(gobj, 5)) {
+        CASRequestAction(gobj->id, 0x19);
+    } else {
+        if (MOVE(gobj)->translation.cur.vel.vy <= 0 &&
+            ((MOVE(gobj)->edgeFlags & 0x100) || (gobj->cas->flags & 0x800000) ||
+             (MOVE(gobj)->edgeFlags & 0x80000)) &&
+            !(gobj->cas->flags & 0x1000) && gobj->cas->active != 8) {
+            CASRequestAction(gobj->id, 0x33);
+        }
+        if ((gobj->cas->flags & 0x8000) && gobj->cas->active != 0xC) {
+            if (MOVE(gobj)->edgeFlags & 0x800) {
+                CASRequestAction(gobj->id, 0x21);
+            } else if (MOVE(gobj)->edgeFlags & 0x100000) {
+                CASRequestAction(gobj->id, 0x3E);
+            }
+        }
+    }
+    if (gobj->id == gCASJoystickGobjID) {
+        if (gobj->cas->active == 2 && (gobj->cas->flags & 0xC) && (MOVE(gobj)->edgeFlags & 8) &&
+            FriendlyGobjGetFoundEdge(gobj, 3)) {
+            CASRequestAction(gobj->id, 0x5D);
+        }
+        if (gobj->id == gCASJoystickGobjID && gobj->cas->active == 8 && (MOVE(gobj)->edgeFlags & 0x40)) {
+            FriendlyGobjGetFoundEdge(gobj, 6);
+        }
+    }
+    func_8004B8E8(gobj);
+    if (gobj->id == gCASJoystickGobjID &&
+        ((isFirstPerson = gobj->cas->flags & 0x1000) ||
+         (gobj != NULL && gobj->move != NULL && MOVE(gobj)->friendly != 0 &&
+          *(s32 *)MOVE(gobj)->friendly == 1)) &&
+        gobj != NULL && gobj->move != NULL && MOVE(gobj)->charMove != NULL) {
+        if (isFirstPerson) {
+            cm->unk2C.vx = -cm->unk9C.vx;
+            cm->unk2C.vz = -cm->unk9C.vz;
+            cm->unk2C.vy = -cm->unk9C.vy;
+        }
+        MovementTurnTowards(gobj, &cm->unk2C, 0);
+    }
+    if (cm->unk104) {
+        ShadowRequestDraw(gobj);
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/movement", func_8004B058);
+#endif
 
 void MovementGobjTeleport(Gobj *gobj, VECTOR32 *pos, VECTOR32 *dir, s32 arg3) {
     MovementResetInfo info;
@@ -947,9 +1268,113 @@ s32 MovementCharacterRelative(s16 id, s32 arg1) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", func_8004B8E8);
+s32 EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
 
-INCLUDE_ASM("asm/main/nonmatchings/movement", func_8004BC70);
+static inline void MovementClampAbs(s32 *v, s32 max) {
+    s32 x = *v;
+
+    if (max < x) {
+        *v = max;
+    } else if (x < -max) {
+        *v = -max;
+    } else {
+        *v = x;
+    }
+}
+
+/* Bank (roll) a moving object into its turns, or level it out. */
+void func_8004B8E8(Gobj *gobj) {
+    VECTOR32 angle;
+    VECTOR32 add = D_80011FD0;
+    VECTOR32 d;
+    s32 speed;
+
+    d.vx = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vx);
+    d.vy = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vy);
+    d.vz = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vz);
+    angle.vx = MOVE(gobj)->rotation.next.pos.vx + d.vx;
+    WRAP_ANGLE(angle.vx);
+    angle.vy = MOVE(gobj)->rotation.next.pos.vy + d.vy;
+    WRAP_ANGLE(angle.vy);
+    angle.vz = MOVE(gobj)->rotation.next.pos.vz + d.vz;
+    WRAP_ANGLE(angle.vz);
+    angle.vz <<= 12;
+    if ((gobj->cas->flags & 8) && gobj->cas->active == 1 && !(MOVE(gobj)->edgeFlags & 0x100)) {
+        d = MOVE(gobj)->translation.cur.vel;
+        d.vy = 0;
+        EGSMath_VectorModulus(&d, &speed);
+        if (angle.vz > 0x4FA4F ? speed >= 0x3321 : speed > 0xB320) {
+            VECTOR32 rv;
+            s32 bank;
+
+            rv = MOVE(gobj)->rotation.cur.vel;
+            bank = -rv.vy * 4;
+            MovementClampAbs(&bank, 0xC16C1);
+            add.vz = bank - angle.vz;
+            add.vz = FIX_TO_INT3(add.vz);
+        } else {
+            add.vz = angle.vz >= 0 ? -(angle.vz >> 1) : -angle.vz >> 1;
+        }
+    } else {
+        add.vz = angle.vz >= 0 ? -(angle.vz >> 1) : -angle.vz >> 1;
+    }
+    MOVE(gobj)->rotation.next.delta.vx += add.vx;
+    MOVE(gobj)->rotation.next.delta.vy += add.vy;
+    MOVE(gobj)->rotation.next.delta.vz += add.vz;
+}
+
+void JoystickGobjTurn(VECTOR32 *out);
+
+/* Turn a character towards its movement direction. */
+void func_8004BC70(Gobj *gobj, VECTOR32 *out) {
+    MovementInfo *move = MOVE(gobj);
+    CharacterMovement *cm = move->charMove;
+    VECTOR32 angle;
+    VECTOR32 d;
+    s32 target;
+    s32 step;
+    s32 remain;
+    s32 yaw;
+    s32 speed;
+
+    if ((move->edgeFlags & 0x104) != 4) {
+        return;
+    }
+    if (gobj == gameObjectsInfo[gCASJoystickGobjID].runtime) {
+        JoystickGobjTurn(out);
+        return;
+    }
+    *out = cm->vel;
+    if (out->vx == 0 && out->vy == 0 && out->vz == 0) {
+        return;
+    }
+    d.vx = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vx);
+    d.vy = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vy);
+    d.vz = FIX_TO_INT(MOVE(gobj)->rotation.next.delta.vz);
+    angle.vx = MOVE(gobj)->rotation.next.pos.vx + d.vx;
+    WRAP_ANGLE(angle.vx);
+    angle.vy = MOVE(gobj)->rotation.next.pos.vy + d.vy;
+    WRAP_ANGLE(angle.vy);
+    angle.vz = MOVE(gobj)->rotation.next.pos.vz + d.vz;
+    WRAP_ANGLE(angle.vz);
+    yaw = angle.vy;
+    MovementValueArctan(out->vx, out->vz, &target);
+    if ((gobj->cas->flags & 0x4000000) ||
+        (MOVE_TYPE_STILL(cm->type) && !MOVE_TYPE_STILL(cm->prevType)) || gobj->cas->active == 9) {
+        speed = 0;
+    } else if (MOVE_TYPE_STILL(cm->type) && MOVE_TYPE_STILL(cm->prevType)) {
+        speed = cm->unk00;
+    } else {
+        speed = cm->unk04;
+    }
+    EGSGeometry_AngleInterpolate(yaw, target, speed, 1, &step, &remain);
+    step <<= 12;
+    if (speed == 0x1000) {
+        MOVE(gobj)->rotation.next.delta.vy += step;
+    } else {
+        MOVE(gobj)->rotation.next.vel.vy += step;
+    }
+}
 
 s32 MovementWorldRelative(s16 id, s32 arg1) {
     Gobj *gobj = gameObjectsInfo[id].runtime;

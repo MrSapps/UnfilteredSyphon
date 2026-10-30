@@ -53,15 +53,27 @@ typedef struct JoyInput {
     /* 0x30 */ s32 state; /* 0: up, 1: first pressed, 2: second pressed */
 } JoyInput;
 
+/* Aiming input (JoyController.aim). */
+typedef struct JoyAim {
+    /* 0x00 */ u8 unk00[0x10];
+    /* 0x10 */ VECTOR32 stick;
+    /* 0x20 */ u8 unk20[0x14];
+    /* 0x34 */ s32 counter;
+} JoyAim; /* size 0x38 */
+
 /* Per-object joystick controller state. */
 typedef struct JoyController {
     /* 0x000 */ u8 unk000[0x30];
     /* 0x030 */ s32 unk030;
     /* 0x034 */ u8 unk034[4];
     /* 0x038 */ JoyDirInfo *dirs;
-    /* 0x03C */ u8 unk03C[0xF0];
+    /* 0x03C */ u8 unk03C[0xB4];
+    /* 0x0F0 */ struct JoyAim aim;
+    /* 0x128 */ u8 unk128[4];
     /* 0x12C */ struct JoyDirDefault *dirDefaults; /* 4 per set, indexed by JoyDirInfo.type */
-    /* 0x130 */ u8 unk130[0xC];
+    /* 0x130 */ s32 prevAimState;
+    /* 0x134 */ u32 aimState; /* 0..5 */
+    /* 0x138 */ s32 unk138;
     /* 0x13C */ s32 unk13C;
     /* 0x140 */ u8 dirActive;
 } JoyController;
@@ -236,28 +248,134 @@ void func_80035724(void) {
     }
 }
 
+/* Start of the joystick globals (D_801056C8); the later fields also have their own symbols. */
+typedef struct JoyGlobals {
+    /* 0x00 */ u8 initialized;
+    /* 0x01 */ u8 pad01[3];
+    /* 0x04 */ s32 mode;
+    /* 0x08 */ u8 unk08[0xC];
+    /* 0x14 */ s32 btnIndex2; /* mapped index of the button with gJoyMap value 2 */
+    /* 0x18 */ u8 unk18[4];
+    /* 0x1C */ s32 btnIndex0;
+    /* 0x20 */ u8 unk20[4];
+    /* 0x24 */ s32 btnIndex4;
+    /* 0x28 */ s32 btnIndex3;
+} JoyGlobals;
+
+/* D_801056E0 onwards: walk key flag, ..., per-port stick state at 0x50. */
+typedef struct JoyStick {
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ s32 unk08;
+    /* 0x0C */ u8 unk0C[0x30];
+} JoyStick;
+
+typedef struct JoyGlobals2 {
+    /* 0x00 */ u8 walkKey;
+    /* 0x01 */ u8 unk01[0x4F];
+    /* 0x50 */ JoyStick sticks[4];
+} JoyGlobals2;
+
+extern JoyGlobals D_801056C8;
+#define D_801056E0_s (*(JoyGlobals2 *)&D_801056E0)
+extern u8 D_801056E8;
+extern u8 D_801056F4;
+extern u8 D_801056F5;
+extern s32 D_801056FC;
+extern JoyDirInfo D_80105B10[];
+extern u8 D_80105B80[];
+extern u8 *D_801057F4;
+extern s32 D_801057F8;
+extern s32 D_80105800;
+extern s32 D_8010580C;
+extern s32 D_80105810;
+extern s32 D_80105814;
+void func_80035480(void);
+void func_8003551C(void);
+void func_80035584(void);
+void func_800355EC(void);
+void func_80035688(void);
+void func_80035724(void);
+s32 GameSysJoystickSetMode(s32 mode);
+
+#ifdef NON_MATCHING
+/* the original addresses walkKey through the sticks base register */
+void GameSysJoystickInit(void) {
+    JoyGlobals2 *g2;
+    s32 i;
+
+    if (D_801056C8.initialized == 0) {
+        D_80105818 = 1;
+    }
+    D_801056C8.initialized = 1;
+    func_80035480();
+    func_8003551C();
+    func_80035584();
+    func_800355EC();
+    func_80035688();
+    func_80035724();
+    GameSysJoystickSetMode(0);
+    D_801056D4 = mJoyBtnInfo[0];
+    for (i = 0; i < JOY_MAPPED_BUTTONS; i++) {
+        switch (gJoyMap[i]) {
+        case 2:
+            D_801056C8.btnIndex2 = i;
+            break;
+        case 4:
+            D_801056C8.btnIndex4 = i;
+            break;
+        case 3:
+            D_801056C8.btnIndex3 = i;
+            break;
+        case 0:
+            D_801056C8.btnIndex0 = i;
+            break;
+        }
+    }
+    g2 = &D_801056E0_s;
+    g2->walkKey = 0;
+    D_801056FC = 0xFD7;
+    D_801056E8 = 0;
+    D_801056F4 = 0;
+    D_801056F5 = 0;
+    D_801056F8 = 0;
+    D_80105700 = D_80105B10;
+    for (i = 0; i < 4; i++) {
+        g2->sticks[i].unk00 = 0;
+        g2->sticks[i].unk04 = 0;
+        g2->sticks[i].unk08 = 0;
+    }
+    D_801057F4 = D_80105B80;
+    D_801057F8 = 0;
+    D_801057FC = 0;
+    D_80105800 = 0;
+    D_80105804 = 0;
+    D_80105808 = 0;
+    D_801056D8 = 0;
+    D_801056D9 = 0;
+    D_8010580C = 0;
+    D_80105810 = 0;
+    D_80105814 = 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystickInit);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystick);
 
-#ifdef NON_MATCHING
-/* mode load/store: the original keeps &D_801056CC in a register and stores mode before computing mJoyBtnInfo[mode] */
 s32 GameSysJoystickSetMode(s32 mode) {
     s32 i;
     s32 old;
 
     i = 0;
-    old = D_801056CC;
-    D_801056CC = mode;
+    old = D_801056C8.mode;
+    D_801056C8.mode = mode;
     D_801056D4 = mJoyBtnInfo[mode];
     for (; i < JOY_BUTTONS; i++) {
         *(s32 *)((u8 *)D_801056D4 + i * sizeof(JoyBtnInfo) + 0x14) = mJoyBtnInfo[old][i].unk14;
     }
     return old;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystickSetMode);
-#endif
 
 s32 GameSysJoystickGetMode(void) {
     return D_801056CC;
@@ -396,7 +514,44 @@ void func_8003642C(JoyInput *input, u32 *pad) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80036520);
+s32 EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
+
+#define JOY_SIGN(x, mag) ((x) > 0 ? (mag) : (x) < 0 ? -(mag) : 0)
+
+/* Stick vector to an XZ direction: analog with a dead zone, or 8-way digital. */
+void func_80036520(VECTOR32 *in, u8 analog, VECTOR32 *out) {
+    s32 len;
+
+    if (analog) {
+        *out = *in;
+        out->vy = 0;
+        EGSMath_VectorModulus(out, &len);
+        if (len < 0x38) {
+            out->vx = 0;
+            out->vy = 0;
+            out->vz = 0;
+        } else if (len >= 0x7F) {
+            GTEMath_VectorNormal(out, out);
+        } else {
+            out->vx = (out->vx << 12) * (len - 0x37);
+            out->vy = (out->vy << 12) * (len - 0x37);
+            out->vz = (out->vz << 12) * (len - 0x37);
+            out->vx = out->vx / (len * 0x48);
+            out->vy = out->vy / (len * 0x48);
+            out->vz = out->vz / (len * 0x48);
+        }
+        return;
+    }
+    out->vy = 0;
+    if (in->vx != 0 && in->vz != 0) {
+        out->vx = JOY_SIGN(in->vx, 0xB50);
+        out->vz = JOY_SIGN(in->vz, 0xB50);
+    } else {
+        out->vx = JOY_SIGN(in->vx, 0x1000);
+        out->vz = JOY_SIGN(in->vz, 0x1000);
+    }
+}
 
 void func_80036768(JoyController *joy) {
     JoyDirInfo *dirs = joy->dirs;
@@ -475,13 +630,169 @@ void func_800369A4(u8 *arg0) {
     *(s32 *)(arg0 + 0x138) = 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800369AC);
+/* What joystick.c needs of camera.c's Camera: display->frame. */
+typedef struct JoyCameraDisplay {
+    /* 0x00 */ EGSFrame *frame;
+} JoyCameraDisplay;
+
+typedef struct JoyCamera {
+    /* 0x00 */ JoyCameraDisplay *display;
+} JoyCamera;
+
+extern JoyCamera *gCamera;
+s32 EGSMathFIXMul(s32 a, s32 b);
+
+#define JOY_ABS(x) ((x) >= 0 ? (x) : -(x))
+
+/* Convert between camera-relative stick input and world XZ (toWorld: 1). */
+void func_800369AC(VECTOR32 *local, VECTOR32 *world, u8 toWorld) {
+    VECTOR32 x;
+    VECTOR32 y;
+    VECTOR32 z;
+    GOBJ_MATRIX m;
+    s32 *px;
+    s32 *pz;
+
+    if (toWorld == 1 && local->vx == 0 && local->vz == 0) {
+        world->vx = 0;
+        world->vy = 0;
+        world->vz = 0;
+        return;
+    }
+    if (toWorld == 0 && world->vx == 0 && world->vz == 0) {
+        local->vx = 0;
+        local->vy = 0;
+        local->vz = 0;
+        return;
+    }
+    m.m[0][0] = gCamera->display->frame->m[0][0];
+    m.m[0][1] = -gCamera->display->frame->m[0][1];
+    m.m[0][2] = gCamera->display->frame->m[0][2];
+    m.m[1][0] = -gCamera->display->frame->m[1][0];
+    m.m[1][1] = gCamera->display->frame->m[1][1];
+    m.m[1][2] = -gCamera->display->frame->m[1][2];
+    m.m[2][0] = gCamera->display->frame->m[2][0];
+    m.m[2][1] = -gCamera->display->frame->m[2][1];
+    m.m[2][2] = gCamera->display->frame->m[2][2];
+    x.vx = m.m[0][0];
+    x.vy = m.m[1][0];
+    x.vz = m.m[2][0];
+    y.vx = m.m[0][1];
+    y.vy = m.m[1][1];
+    y.vz = m.m[2][1];
+    z.vx = m.m[0][2];
+    z.vy = m.m[1][2];
+    z.vz = m.m[2][2];
+    if (JOY_ABS(x.vy) >= 0xB50) {
+        x.vx = z.vz;
+        z.vy = 0;
+        x.vy = 0;
+        x.vz = -z.vx;
+    } else {
+        x.vy = 0;
+        z.vx = -x.vz;
+        z.vy = 0;
+        z.vz = x.vx;
+    }
+    if (toWorld == 1) {
+        px = &x.vx;
+        px[0] = EGSMathFIXMul(x.vx, local->vx);
+        px[1] = EGSMathFIXMul(x.vy, local->vx);
+        px[2] = EGSMathFIXMul(x.vz, local->vx);
+        pz = &z.vx;
+        pz[0] = EGSMathFIXMul(z.vx, local->vz);
+        pz[1] = EGSMathFIXMul(z.vy, local->vz);
+        pz[2] = EGSMathFIXMul(z.vz, local->vz);
+        world->vx = x.vx + z.vx;
+        world->vy = x.vy + z.vy;
+        world->vz = x.vz + z.vz;
+    } else {
+        local->vx = EGSMathFIXMul(world->vx, x.vx) + EGSMathFIXMul(world->vy, x.vy) +
+                    EGSMathFIXMul(world->vz, x.vz);
+        local->vy = 0;
+        local->vz = EGSMathFIXMul(world->vx, z.vx) + EGSMathFIXMul(world->vy, z.vy) +
+                    EGSMathFIXMul(world->vz, z.vz);
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80036D24);
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800374E8);
 
+u8 GameCameraCheckMode(s32 mode);
+
+/* Joystick-side view of MovementInfo.charMove (movement.c's CharacterMovement). */
+typedef struct JoyCharMove {
+    /* 0x00 */ u8 unk00[0x3C];
+    /* 0x3C */ s32 type; /* 5, 8, 9: standing still */
+} JoyCharMove;
+
+#ifdef NON_MATCHING
+/* branch layout of the aim-height test and the still flag copy differ */
+/* Update the aim state machine from the aiming stick. */
+void func_80038720(JoyController *joy) {
+    u8 still = 0;
+    u32 state = joy->aimState;
+    Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    VECTOR32 v = joy->aim.stick;
+    s32 type = (*(JoyCharMove **)((u8 *)gobj->move + 0x1A8))->type;
+    JoyAim *aim = &joy->aim;
+    s32 lowY;
+    s32 highY;
+    u32 next;
+
+    if ((gobj->cas->flags & 2) || type == 5 || (u32)(type - 8) < 2) {
+        still = 1;
+    }
+    lowY = -0x578;
+    if (still) {
+        lowY = -0xA49;
+    }
+    highY = 0x578;
+    if (joy->aimState >= 2 && joy->unk138 == 3) {
+        next = 4;
+        if (state == 5) {
+            next = 5;
+        }
+    } else if ((gobj->cas->active != 1 && gobj->cas->active != 2) ||
+               (!GameCameraCheckMode(0) && !GameCameraCheckMode(1) && !GameCameraCheckMode(2) &&
+                !GameCameraCheckMode(3) && !GameCameraCheckMode(8)) ||
+               joy->unk030 != 0) {
+        next = 0;
+    } else if (v.vx != 0 || v.vy != 0 || v.vz != 0) {
+        if (state < 2 ? lowY < v.vz : highY < v.vz) {
+            next = 0;
+        } else if (state == 1) {
+            aim->counter = -1;
+            next = 2;
+        } else if (state == 2) {
+            if ((double)aim->counter > -2.0) {
+                aim->counter = aim->counter - 1;
+                next = 2;
+            } else {
+                next = 4;
+            }
+        } else if (state == 4) {
+            next = 4;
+        } else {
+            next = 5;
+        }
+    } else if (state == 2) {
+        next = 3;
+    } else if (gobj->cas->flags & 2) {
+        next = 1;
+    } else {
+        next = state;
+        if (next == 3) {
+            next = 0;
+        }
+    }
+    joy->prevAimState = state;
+    joy->aimState = next;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80038720);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800389E0);
 
