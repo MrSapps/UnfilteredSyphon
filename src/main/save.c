@@ -272,7 +272,7 @@ typedef struct LevData {
 } LevData;
 
 extern u8 gMissionFailed;
-extern u8 gGabeSector;
+extern s16 gGabeSector;
 extern LevData *gLevData;
 extern s32 gNPCGeneratorCount;
 extern u16 *generatorInfo; /* 0x10-byte records, id first */
@@ -285,6 +285,9 @@ s16 InterfaceCountdownGet(void);
 void WeaponGetSaveInfo(u8 *out);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
 void EGSDebugAssert(int, int, char *file, int line);
+void TerrainZoomAndOrient(s32 *pos, s32 *orient, s32 sector);
+void GameCameraRequestCutToBehind(void);
+void WeaponRestoreSaveInfo(u8 *in);
 
 void func_80090724(void);
 
@@ -370,7 +373,69 @@ void func_80090724(void) {
 }
 
 
+#ifdef NON_MATCHING
+/* logic matches; GCC here anchors the continue-data base at a different field and saves one register less */
+s32 SaveRestoreContinue(void) {
+    s32 saved = 0;
+    s32 dummy = 0;
+    s32 i;
+    GameObjectRuntime *obj;
+    ContinueObject *entry;
+    u32 *words;
+    s32 bit;
+
+    if (!gContinueLevel) {
+        return 0;
+    }
+    SavePlayerRestore();
+    if (D_80121B08.objCount != gLevelGameObjCount) {
+        EGSDebugAssert(1, 0, D_80013354, 0x1D2);
+    }
+    if (D_80121B08.generatorCount != gNPCGeneratorCount) {
+        EGSDebugAssert(1, 0, D_80013354, 0x1D3);
+    }
+    gLevData->sector = D_80121B08.sector;
+    gGabeSector = D_80121B08.sector;
+    TerrainZoomAndOrient(D_80121B08.position, D_80121B08.orient, D_80121B08.sector);
+    GameCameraRequestCutToBehind();
+    WeaponRestoreSaveInfo(D_80121B08.weaponInfo);
+    gExeTick = D_80121B08.exeTick;
+    entry = D_80121B08.objects;
+    for (i = 0; i < gLevelGameObjCount; i++) {
+        obj = gameObjectsInfo[i].runtime;
+        if (obj != NULL) {
+            words = D_80121B08.objAlive;
+            bit = i;
+            if ((u32)words & 3) {
+                bit = i + ((u32)words & 3) * 8;
+                words = (u32 *)((u32)words & ~3);
+            }
+            if (!(words[bit >> 5] & (1 << (bit & 0x1F)))) {
+                obj->healthInfo->health = -1;
+            }
+        }
+        if (entry->id == i) {
+            if (saved >= D_80121B08.savedObjCount) {
+                EGSDebugAssert(1, 0, D_80013354, 0x1F4);
+            }
+            SysPostMessage(0x2A, 5, 0xFFFE, entry->id, (s32)&entry->data1, (s32)&entry->data0, 0, 0);
+            entry++;
+            saved++;
+        } else {
+            SysPostMessage(0x2A, 5, 0xFFFE, i, (s32)&dummy, (s32)&dummy, 0, 0);
+        }
+    }
+    for (i = 0; i < gNPCGeneratorCount; i++) {
+        generatorInfo[i * 8] = D_80121B08.generators[i];
+    }
+    for (i = 0; i <= 0; i++) {
+        gSaveLevelData[i] = D_80121B08.levelData[i];
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/save", SaveRestoreContinue);
+#endif
 
 void SavePrepareMemoryCardSave(void) {
     u32 xorSum = 0;
