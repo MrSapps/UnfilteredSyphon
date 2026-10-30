@@ -10,7 +10,8 @@ typedef struct VECTOR32 {
 
 /* Per-object movement bookkeeping (0x1B8 bytes, EGSMemMalloc'd). */
 typedef struct MoveInfo {
-    /* 0x000 */ u8 unk000[0x174];
+    /* 0x000 */ VECTOR32 pos;
+    /* 0x010 */ u8 unk010[0x164];
     /* 0x174 */ s32 unk174;
     /* 0x178 */ u8 unk178[4];
     /* 0x17C */ s32 unk17C;
@@ -21,7 +22,8 @@ typedef struct MoveInfo {
 } MoveInfo; /* size 0x1B8 */
 
 typedef struct EGSFrame {
-    /* 0x00 */ u8 unk00[0x14];
+    /* 0x00 */ s16 m[3][3]; /* rotation; column 2 is the facing direction */
+    /* 0x12 */ s16 pad;
     /* 0x14 */ VECTOR32 pos; /* y grows downwards */
 } EGSFrame;
 

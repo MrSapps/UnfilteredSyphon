@@ -78,7 +78,12 @@ void DamageKillAllPeople(s32 by, s32 type);
 void ParticleSmoke(s32 arg0, VECTOR32 *pos, void *dir, s32 arg3, s32 arg4);
 void InterfaceDeleteBomb(void);
 
+Gobj *ObjectMatchToRefID(s16 id, s32 type);
+void PlayerUseCAS();
+Gobj *iObjectFindNearbyLight(Gobj *obj, s32 type);
+
 extern char D_8010FCEC[]; /* "" */
+extern s32 gCurrentWeapon;
 extern s32 gExploDir;
 
 void PickupAddUseMsg(s16 objId, s16 msgId);
@@ -86,6 +91,7 @@ void PickupRemoveUseMsg(s16 objId);
 void UseObject(s16 objId);
 void *UseSetComputerCallback(void (*cb)());
 
+#define GOBJ_WORD20(obj) (*(u32 *)&(obj)->unk20)
 #define INFO_WORD24(info) (*(u32 *)&(info)->flags24)
 #define INFO_PICKUP(info) (*(u8 *)&(info)->flags24) /* bit 7: armor, bits 0-5: weapon id */
 
@@ -424,7 +430,18 @@ void *PickupSetKeyCallback(void (*cb)()) {
 }
 
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", UseKey);
+s32 UseKey(void) {
+    s32 i;
+
+    for (i = 0; i < D_801101BC; i++) {
+        if (D_80121978[i].msgId == 4 &&
+            ObjectMatchToRefID(D_80121978[i].objId, 0x63)->id != D_80121978[i].objId) {
+            PlayerUseCAS((s16)gPlayerOffset, 0x22);
+            return 1;
+        }
+    }
+    return 0;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", KeyDroppedByNPC);
 
@@ -442,7 +459,21 @@ void iKeyRestore(Gobj *obj) {
 INCLUDE_ASM("asm/main/nonmatchings/pickup", iKeyRestore);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", UseBeaconUpdate);
+void UseBeaconUpdate(Gobj *obj) {
+    Gobj *light = iObjectFindNearbyLight(obj, 0x6F);
+
+    if (light != NULL) {
+        if (!(GOBJ_WORD20(obj) & 0x0A000000) && (obj->flags0 & 0x20)) {
+            light->flags0 |= 0xA;
+            light->healthInfo->health = light->healthInfo->armor;
+            light->flags23 &= ~2;
+        } else {
+            light->flags0 &= ~0xA;
+            light->healthInfo->health = -1;
+            light->flags23 |= 2;
+        }
+    }
+}
 
 #ifdef NON_MATCHING
 /* addu operand order of the model table lookup */
@@ -528,17 +559,84 @@ s32 IsWideDoor(Gobj *obj) {
     return wide;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C058);
+/* Door: set flags0 bit 1 when the player (or the opening NPC) is behind it. */
+void func_8008C058(Gobj *obj, s32 openerId) {
+    VECTOR32 dir;
+    VECTOR32 pos;
+    VECTOR32 opener;
+    EGSFrame *frame = obj->anim->frame;
+    Gobj *who;
+
+    dir.vx = frame->m[0][2];
+    dir.vy = frame->m[1][2];
+    dir.vz = frame->m[2][2];
+    dir.vy = -dir.vy;
+    pos.vx = frame->pos.vx;
+    pos.vy = frame->pos.vy;
+    pos.vz = frame->pos.vz;
+    pos.vy = -pos.vy;
+    who = gameObjectsInfo[openerId].runtime;
+    if (who->npcState != 1 && who->npcState != 2) {
+        who = gObjPlayer;
+    }
+    opener = who->move->pos;
+    if ((opener.vx - pos.vx) * dir.vx + (opener.vz - pos.vz) * dir.vz > 0) {
+        obj->flags0 &= ~2;
+    } else {
+        obj->flags0 |= 2;
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C194);
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C2FC);
+void func_8008C2FC(Gobj *obj) {
+    s32 type = GOBJ_TYPE(obj->id);
+
+    if (type == 7 || type == 0x3B || (*(u32 *)obj & 0x8040) == 0x40) {
+        SysStopSong(0, 0x15);
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C3A4);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C534);
 
+#ifdef NON_MATCHING
+/* regalloc: the original loads the pickup byte into v0 and copies it to a2 */
+s32 UseLevelSpecificObject(void) {
+    s32 data;
+    s32 i;
+    s32 type;
+
+    if (gObjPlayer->id != gPlayerOffset) {
+        GameObjectInfo *info = &gameObjectsInfo[gObjPlayer->id];
+
+        data = INFO_PICKUP(info);
+        if (data == 0) {
+            s32 kind = INFO_WORD24(info) & 0x3000;
+            if (kind != 0x1000) {
+                data = (kind == 0x2000) ? 0x14 : 0;
+            } else {
+                data = 0x13;
+            }
+        }
+    } else {
+        data = gCurrentWeapon;
+    }
+    for (i = 0; i < D_801101BC; i++) {
+        if (D_80121978[i].msgId == 3) {
+            type = GOBJ_TYPE(D_80121978[i].objId);
+            if ((data == 0x19 && type == 0x5C) || (data == 0x18 && type == 0x58)) {
+                PlayerUseCAS((s16)gPlayerOffset, 0x22, data);
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", UseLevelSpecificObject);
+#endif
 
 void *UseSetLevSpecObjCallback(void (*cb)()) {
     void *old = gObjectInteractionCallback;
@@ -554,7 +652,13 @@ void *UseSetSwitchCallback(void (*cb)()) {
 
 
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", iSwitchReactivate);
+void iSwitchReactivate(Gobj *obj) {
+    if (obj != NULL && (obj->flags0 & 0x40)) {
+        obj->flags0 &= ~0x20;
+        PickupAddUseMsg(obj->id, 4);
+        SysPostMessage(0x14, 3, obj->id, gPlayerOffset, 0, 0, 0, 0);
+    }
+}
 
 INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 
