@@ -98,9 +98,104 @@ void CopyMsgToSysQueue(SysMsg *msg) {
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysExecute);
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysPostMessage);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3) {
+    SysMsg *msg;
+    SysMsg local;
+    SysMsgHandler fn;
+    SysMsgHandler *dispatch;
+    SysMsgHandler *table;
+    int i;
 
-INCLUDE_ASM("asm/main/nonmatchings/system", func_800153BC);
+    if (id == 0 || mSysMsgQueue.count >= SYS_MSG_QUEUE_MAX) {
+        return;
+    }
+    msg = &mSysMsgQueue.msgs[mSysMsgQueue.count];
+
+    if (from == SYS_MSG_GLOBAL) {
+        if (gSysMsgTable[id].onPost != NULL) {
+            gSysMsgTable[id].onPost(msg, d0, d1, d2, d3);
+        }
+    } else if (from == SYS_MSG_LEVEL) {
+        if (gSysInfo.levelMsgTable[id].onPost != NULL) {
+            gSysInfo.levelMsgTable[id].onPost(msg, d0, d1, d2, d3);
+        }
+    }
+
+    if (priority == SYS_MSG_IMMEDIATE) {
+        if (to == SYS_MSG_GLOBAL) {
+            msg->data[0] = d0;
+            gSysMsgTable[id].handle(msg);
+        } else if (to == SYS_MSG_LEVEL) {
+            gSysInfo.levelMsgTable[id].handle(msg);
+        } else if (to == SYS_MSG_LEVEL_RAW) {
+            local.id = id;
+            local.priority = priority;
+            local.from = from;
+            local.to = to;
+            gSysInfo.levelMsgTable[id].handle(&local);
+        } else {
+            table = gDispatchFunctions;
+            if (to != SYS_MSG_OBJ_666) {
+                dispatch = &table[gameObjectsModelInfo[gameObjectsInfo[to].modelIndex].type];
+            } else {
+                dispatch = &table[SYS_MSG_OBJ_666];
+            }
+            fn = *dispatch;
+            local.id = id;
+            local.priority = priority;
+            local.from = from;
+            local.to = to;
+            local.data[0] = d0;
+            local.data[1] = d1;
+            local.data[2] = d2;
+            local.data[3] = d3;
+            if (fn != NULL) {
+                fn(&local);
+            }
+        }
+        return;
+    }
+
+    for (i = 0; i < mSysMsgQueue.count; i++) {
+        if (mSysMsgQueue.msgs[i].id == id && mSysMsgQueue.msgs[i].from == from &&
+            mSysMsgQueue.msgs[i].to == to && to != SYS_MSG_LEVEL) {
+            return;
+        }
+    }
+    msg->id = id;
+    msg->priority = priority;
+    msg->from = from;
+    msg->to = to;
+    mSysMsgQueue.count++;
+}
+
+/* Move queued messages from src to dst, highest priority (0) first. */
+void func_800153BC(SysMsgQueue *src, SysMsgQueue *dst) {
+    int count;
+    int priority;
+    int n;
+    int i;
+    u16 id;
+
+    count = 0;
+    n = src->count;
+    for (priority = 0; priority < SYS_MSG_PRIORITY_COUNT; priority++) {
+        if (n == 0) {
+            break;
+        }
+        for (i = 0; i < n; i++) {
+            if (src->msgs[i].priority == priority) {
+                id = src->msgs[i].id;
+                if (id != 0 && (gInEOLState == 0 || (id != 10 && id != 17))) {
+                    EGSMiscMemcpy(&dst->msgs[count++], &src->msgs[i], sizeof(SysMsg) / 4);
+                    src->msgs[i].id = 0;
+                }
+            }
+        }
+    }
+    src->count = 0;
+    dst->count = count;
+}
 
 void SysFlushMsgQueue(void) {
     int i;

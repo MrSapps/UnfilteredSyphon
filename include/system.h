@@ -18,8 +18,8 @@
 #define SYS_MSG_OBJ_666 0x29A    /* dispatched straight to gDispatchFunctions[0x29A] */
 
 typedef struct SysMsg {
-    /* 0x00 */ s16 id;
-    /* 0x02 */ s16 priority;
+    /* 0x00 */ u16 id;
+    /* 0x02 */ u16 priority;
     /* 0x04 */ s32 from;
     /* 0x08 */ s32 to;
     /* 0x0C */ s32 data[4];
@@ -36,7 +36,7 @@ typedef void (*SysMsgHandler)(SysMsg *msg);
 typedef struct SysMsgDesc {
     /* 0x00 */ s32 unk00;
     /* 0x04 */ SysMsgHandler handle;
-    /* 0x08 */ void (*onPost)(SysMsg *msg, s32 d0, s32 d1, s32 d2);
+    /* 0x08 */ void (*onPost)(SysMsg *msg, s32 d0, s32 d1, s32 d2, s32 d3);
 } SysMsgDesc; /* size 0xC */
 
 extern SysMsgDesc gSysMsgTable[];
