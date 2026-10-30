@@ -48,7 +48,7 @@ void InterfaceStartCountdown(s32 seconds, s32 arg1, void (*done)());
 void SysPlaySong(s32 arg0, s32 song, s32 arg2, s32 arg3);
 
 int ObjectInvisibleMatchToRefID(s16 id, s32 type);
-extern u8 gPlayerFlashlight;
+extern s32 gPlayerFlashlight;
 
 void InterfaceViralRadarInit(void);
 void SaveObjectivesNTimersReinit(void *info, s32 arg1);

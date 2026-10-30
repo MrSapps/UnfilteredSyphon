@@ -30,7 +30,7 @@ static s32 func_801415A0();
 static void func_80141624(void);
 static void func_8014165C(s16 id);
 static s32 func_801417B0(s16 id);
-static s32 func_801418BC();
+static s32 func_801418BC(s16 id);
 static void func_80141AC0(s16 id);
 static s32 func_80141B78(void);
 static s32 func_80141B88(s16 id, s16 kind);
@@ -166,7 +166,42 @@ static s32 func_801417B0(s16 id) {
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801417B0);
 #endif
 
+#ifdef NON_MATCHING
+/* addu operand order of the flags24 lookups differs (as in func_801417B0). */
+static s32 func_801418BC(s16 id) {
+    s32 ref;
+    s32 ret;
+    int type;
+    int found;
+
+    ref = gameObjectsInfo[id].refId;
+    ret = 1;
+    if (ref != -1) {
+        type = GOBJ_TYPE(ref);
+        if (type == 0x5D) {
+            if (gameObjectsInfo[(s16)ref].flags24 & 0x20) {
+                ret = 0;
+            } else if (!gPlayerFlashlight) {
+                ret = 0;
+            }
+        } else if (type == GOBJ_TYPE_BOMB) {
+            if (gameObjectsInfo[ref].runtime->flags1 & 0x80) {
+                ret = 0;
+            }
+        } else if (D_801420B8 || D_801420BC || gameObjectsInfo[ref].runtime->healthInfo->maxHealth == -1) {
+            ret = 0;
+        } else {
+            found = ObjectInvisibleMatchToRefID(ref, 0x5D);
+            if (found != ref && (gameObjectsInfo[(s16)found].flags24 & 0x20)) {
+                ret = 0;
+            }
+        }
+    }
+    return ret;
+}
+#else
 INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801418BC);
+#endif
 
 static void func_80141AC0(s16 id) {
     int i;
