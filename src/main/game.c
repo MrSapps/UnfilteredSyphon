@@ -2,6 +2,7 @@
 #include "system.h"
 #include "gameobj.h"
 #include "gobj.h"
+#include "scratch.h"
 
 /* game.c's small data, still assembled from asm */
 SDATA_LOCAL(gMoveRequestCount)
@@ -92,7 +93,11 @@ s32 GameSysFuzzyMathXZDistance(VECTOR32 *a, VECTOR32 *b) {
     return dist;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/game", func_80016690);
+/* Re-activate terrain for the current level (on the scratchpad stack), then notify the level. */
+void func_80016690(void) {
+    SCRATCH_CALL_DS(TerrainUpdateActivation, "addu $4, $0, $0");
+    SysPostMessage(0x11, 0, SYS_MSG_LEVEL, SYS_MSG_LEVEL, 0, 0, 0, 0);
+}
 
 void GameSysEOL(void) {
     EGSDeviceControllerVibrate(2, 0, 0);
