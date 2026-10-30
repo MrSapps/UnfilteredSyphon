@@ -515,24 +515,17 @@ s32 MoviePause(void) {
 INCLUDE_ASM("asm/movie/nonmatchings/movie", MoviePause);
 #endif
 
-#ifdef NON_MATCHING
-/* return value kept in v1 and copied, the original builds it in v0 */
 s32 MovieUnpause(void) {
-    s32 err = 0x1C;
-
     if (gMovieOpenFlag) {
         if (D_8013BBC5) {
             D_8013BBC7 = 1;
             D_8013BBC5 = 0;
             return 0;
         }
-        err = 0;
+        return 0;
     }
-    return err;
+    return 0x1C;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", MovieUnpause);
-#endif
 
 s32 MovieClose(void) {
     if (gMovieOpenFlag) {
