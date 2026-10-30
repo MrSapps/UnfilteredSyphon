@@ -191,6 +191,8 @@ def main():
                 )
                 if (ROOT / p).exists()
             ]
+            # per-TU absolute symbols (config/syms.d/<module>/<tu>.ld), merge-friendly
+            extra += sorted(str(p.relative_to(ROOT)) for p in (ROOT / "config/syms.d" / mod).glob("*.ld"))
             elf = f"build/{m['target']}.elf"
             n.build(
                 elf,
