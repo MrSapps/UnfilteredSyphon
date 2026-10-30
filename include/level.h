@@ -87,7 +87,7 @@ extern s32 gLevelKeycardsTaken;
 extern u32 gWeaponsAvailable[];
 void npcSetLevelAlert(void);
 void WeaponSetWeaponFiredCallback(void (*cb)());
-void LevelMissionFailed(s32 reason, s32 arg1, s32 arg2);
+void LevelMissionFailed(s32 reason, s32 xa, u8 secondary);
 void StringMissionFailedMsg();
 void LevelObjectivesIncomplete(void *msg);
 void DamageDestroyImmediately(s32 arg0, s16 id);

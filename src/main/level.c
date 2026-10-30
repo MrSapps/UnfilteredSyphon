@@ -82,6 +82,7 @@ void LevelDoRestart(void);
 static void func_80017544(s32 arg0);
 static void func_80017348(void);
 void SavePlayerPreserve(void);
+void PlayerFailMission(void);
 void StringMissionCompletedMsg(char *buf);
 void JoystickDeactivateMenu(s32);
 void GameCameraRequestCutToBehind(void);
@@ -331,7 +332,57 @@ void LevelGameOver(s32 arg0) {
     }
 }
 
+#ifdef NON_MATCHING
+/* logic matches; argument registers are allocated differently (one extra move) */
+void LevelMissionFailed(s32 reason, s32 xa, u8 secondary) {
+    char buf[32];
+
+    if (gObjPlayer->healthInfo->maxHealth <= 0) {
+        return;
+    }
+    if (!secondary) {
+        if (gObjectives != NULL) {
+            if (gObjectives->unk20 & (1 << reason)) {
+                return;
+            }
+            gObjectives->unk20 |= 1 << reason;
+        }
+    } else if (gObjectives != NULL) {
+        if (gObjectives->unk14 & (1 << reason)) {
+            return;
+        }
+        gObjectives->unk14 |= 1 << reason;
+    }
+    if (!gMissionFailed) {
+        gMissionFailed = 1;
+    }
+    if (!mMissionFailedMsgFlag) {
+        mMissionFailedMsgFlag = 1;
+    }
+    if (xa == -2) {
+        switch ((u16)gSysInfo.level) {
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+            PlayerFailMission();
+            break;
+        default:
+            SysPlayXA(0x16C, 0, 1);
+            break;
+        }
+    } else if (xa != -1) {
+        SysPlayXA(xa, 0, 1);
+    }
+    StringObjectiveMsg(buf, reason, secondary, 0);
+    if (mNextTickAllowMsgMissionFailed < (u32)gExeTick) {
+        mNextTickAllowMsgMissionFailed = gExeTick + LevelMissionCtrMsg(buf, 0) + 16;
+        SetNextTickAllowMsgLongText(mNextTickAllowMsgMissionFailed);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/level", LevelMissionFailed);
+#endif
 
 void LevelObjectiveComplete(s16 objective) {
     char buf[32];
