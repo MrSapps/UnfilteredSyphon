@@ -53,7 +53,6 @@ s16 InterfaceCountdownGet(void);
 void InterfaceStartCountdownAfterGameCam(s16 seconds, s32 arg1, void (*done)());
 void EGSDisplayRegisterFogScrim(void *scrim);
 void ParticleStartRain(void);
-void UseSetComputerCallback(void (*cb)());
 GameObjectRuntime *ObjectMatchToRefIDByCatID(s16 id, s32 cat);
 void SysSoundPlayPeriodicSong(s32 arg0, s32 song);
 

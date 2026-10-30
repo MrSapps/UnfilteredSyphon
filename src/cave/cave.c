@@ -121,7 +121,6 @@ s32 SysExeTickGetTimerTicks(void (*cb)(s32));
 void SndSysCheckXADoneCallback(s32 arg);
 void SaveInternalTimer(s32 ticks);
 void StringContactMeiXingMsg(void);
-void UseSetComputerCallback(void (*cb)());
 void JoystickDeactivate(void);
 void DamageGOBJ(s32 arg0, s16 id, s16 by, s16 amount, s32 kind);
 void GSActivateGameObject(GameObjectRuntime *rt, void *camera, s32 arg2);

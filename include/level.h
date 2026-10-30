@@ -8,13 +8,14 @@
 void DamageSetDamagedCallback(void (*cb)(s16 id, s16 by));
 void DamageSetDestroyedCallback(void (*cb)(s16 id, s16 by));
 s32 (*LevelSetEOLCallback(s32 (*cb)()))(); /* cb returns nonzero to allow the end of level */
-void UseSetBombCallback(void (*cb)());
-void UseSetLevSpecObjCallback(void (*cb)());
-void UseSetSwitchCallback(void (*cb)());
+void *UseSetBombCallback(void (*cb)()); /* returns the previous callback */
+void *UseSetLevSpecObjCallback(void (*cb)()); /* returns the previous callback */
+void *UseSetSwitchCallback(void (*cb)()); /* returns the previous callback */
+void *UseSetComputerCallback(void (*cb)()); /* returns the previous callback */
 void ObjectSetQuipObjectCallback(void (*cb)());
 void ObjectSetSpecialObjectCallback(void (*cb)());
-void SetLockedStringCallback(void (*cb)());
-void SetUseStringCallback(void (*cb)());
+void *SetLockedStringCallback(void (*cb)()); /* returns the previous callback */
+void *SetUseStringCallback(void (*cb)()); /* returns the previous callback */
 
 void NPCCopDamagedCallback(s16 id, s16 by);
 void ObjectBombDamagedCallback(s16 id, s16 by);
@@ -105,7 +106,7 @@ void StringObjectiveObjectsRemaining2(void *buf, void *fmt, void *remaining, voi
 void StringInteractObjectsRemaining(void *fmt, s32 left);
 void ObjectRefMultiSYSPOSTMSG0(s16 id, s32 msg, s32 arg2);
 void SaveCreateContinue(void);
-void PickupSetKeyCallback(void (*cb)());
+void *PickupSetKeyCallback(void (*cb)()); /* returns the previous callback */
 
 extern s32 gPlayerOffset; /* object id of the player */
 extern u8 gDeviceDetonated;
