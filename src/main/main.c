@@ -1,6 +1,16 @@
 #include "common.h"
 
-INCLUDE_ASM("asm/main/nonmatchings/main", main);
+void ResetCallback(void);
+void EGSDeviceSetVideoType(s32 type);
+void MainLoop(void);
+
+/* cc1 inserts the __main() constructor call itself */
+int main(void) {
+    ResetCallback();
+    EGSDeviceSetVideoType(0);
+    MainLoop();
+    return 0;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/main", MainLoop);
 
