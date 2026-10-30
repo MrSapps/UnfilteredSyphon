@@ -467,7 +467,57 @@ void func_80015DFC(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysStopMovie);
+void SysStopMovie(void) {
+    s32 volume;
+    int i;
+    u8 page;
+    void *camera;
+
+    volume = SysSoundGetMasterVolume(2);
+    SysSoundSetMasterVolume(2, 0);
+    camera = *gCamera;
+    gLevelReady = 1;
+    EGSDisplayDeleteMovie(camera);
+    EGSDeviceGraphicsSetResolution(384, 240);
+    EGSDeviceGraphicsSetColorMode(0);
+    EGSDisplayMovieMalloc(NULL, 0);
+    MovieClose();
+    UnpauseTerrainStream();
+    UnpauseTerrainStream();
+
+    if (gMovieInfo.playing) {
+        EGSDisplayFlush();
+        if (gSystemState != SYS_STATE_TITLE && gMovieInfo.doneMsgId != SYS_MSG_END_OF_LEVEL) {
+            /* the decoder used these pages; stream their textures back in */
+            for (i = 0; i < SYS_MOVIE_VRAM_PAGES; i++) {
+                page = D_800FCB28[i];
+                if (gTexturePageMap[page]) {
+                    StreamVramPage(page, 0);
+                }
+            }
+            StreamSynchronous();
+        }
+    }
+    if (gSystemState != SYS_STATE_TITLE) {
+        GameSysSetLetterBoxMode(2);
+        EGSDisplayFade(-1, 7, func_80015DFC);
+    }
+
+    gMovieInfo.playing = 0;
+    if (gMovieInfo.doneMsgId == SYS_MSG_END_OF_LEVEL) {
+        EGSDisplayQueueInterrupt(GameSysEOL, 2, 0);
+    } else if (gMovieInfo.doneMsgId != 0) {
+        SysPostMessage(gMovieInfo.doneMsgId, 3, gMovieInfo.doneMsgFrom, gMovieInfo.doneMsgTo, 0, 0, 0, 0);
+    }
+    if (gSystemState == SYS_STATE_MOVIE) {
+        SysStatePop();
+    }
+    SysSoundSetMasterVolume(2, volume);
+    if (gSysMovieDoneCallback != NULL) {
+        gSysMovieDoneCallback();
+        gSysMovieDoneCallback = NULL;
+    }
+}
 
 void SysPlayMovieCB(void) {
     EGSDisplayMovieMalloc(D_80145BF0, gMovieInfo.bufferSize + 0x11000);

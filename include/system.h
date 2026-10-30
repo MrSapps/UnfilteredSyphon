@@ -193,6 +193,16 @@ void MovieSetStreamBufferNumSectors(s32 sectors);
 void MovieSetDoubleDecodeBuffers(s32);
 s32 MovieOpen(char *path, s32 arg1, s32 arg2, s32 arg3, void (*done)(void), void *buf, s32 bufSize);
 void MovieClose(void);
+void EGSDisplayDeleteMovie(void *camera);
+void EGSDisplayQueueInterrupt(void (*fn)(void), s32 arg1, s32 arg2);
+void StreamVramPage(s32 page, s32 arg1);
+void GameSysEOL(void);
+void func_80015DFC(void);
+
+#define SYS_MOVIE_VRAM_PAGES 12
+#define SYS_MSG_END_OF_LEVEL 0x21
+extern u8 D_800FCB28[SYS_MOVIE_VRAM_PAGES]; /* texture pages the movie decoder overwrites */
+extern u8 gTexturePageMap[];
 extern void **gCamera;
 void func_801470B0(void);
 
