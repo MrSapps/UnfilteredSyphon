@@ -10,3 +10,4 @@ MovieSetDoubleDecodeBuffers = 0x801383F8;
 MovieSetStreamBufferNumSectors = 0x8013841C;
 MovieOpen = 0x8013842C;
 MovieClose = 0x80138A94;
+gMovieOpenFlag = 0x8013BBC0; /* movie.ovl */
