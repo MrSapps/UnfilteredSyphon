@@ -42,4 +42,12 @@ __asm__(".macro scratch_jal_ds op, fn, ds:vararg\n\t.set push\n\t.set noreorder\
                      :                                                                 \
                      : SCRATCH_CLOBBERS)
 
+/*
+ * Statement form, as the original source seems to have used it: switch to the
+ * scratchpad stack, make ordinary C calls, switch back.
+ */
+#define SPAD_ENTER() \
+    __asm__ volatile(".set noat\n\tlui $1, 0x1F80\n\tsw $29, 0($1)\n\t.set at\n\tlui $29, 0x1F80\n\tori $29, $29, 0x3E0")
+#define SPAD_LEAVE() __asm__ volatile("lui $29, 0x1F80\n\tlw $29, 0($29)")
+
 #endif /* SCRATCH_H */

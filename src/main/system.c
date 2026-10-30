@@ -1,6 +1,7 @@
 #include "common.h"
 #include "system.h"
 #include "gameobj.h"
+#include "scratch.h"
 
 /* system.c's small data, still assembled from asm/main/data/sdata.sdata.s */
 SDATA_LOCAL(mSystemStateDepth)
@@ -13,6 +14,50 @@ SDATA_LOCAL(gStallFaded)
 SDATA_LOCAL(exeTickTimerList)
 SDATA_LOCAL(gStallCallback)
 SDATA_LOCAL(gUsePCFiles)
+SDATA_LOCAL(gSystemStopDebugDisplay)
+SDATA_LOCAL(D_8010F624)
+SDATA_LOCAL(D_8010FF68)
+SDATA_LOCAL(D_8010FF6A)
+SDATA_LOCAL(D_8010FF6C)
+SDATA_LOCAL(D_8010FF70)
+
+/* debug overlay (top-right status window) */
+extern u8 gSystemStopDebugDisplay;
+extern s32 D_8010F624;  /* last shown "no damage" state */
+extern u16 D_8010FF68;  /* text ids */
+extern u16 D_8010FF6A;
+extern u16 D_8010FF6C;
+extern u16 D_8010FF70;
+extern char D_8010F628[]; /* short .sdata strings */
+extern char D_8010F62C[];
+extern char D_8010F630[];
+extern u8 D_80111B48[];   /* text sprite buffer */
+extern char cdError[];
+extern s16 gGabeSector;
+extern char **gSectorMap; /* 0x10 bytes per sector, name first */
+s32 NPCDebugGetNoDamageFlag(void);
+u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
+void TextSetWindowJustification(u8 window, s32 just);
+void TextSpriteInitialize(void *buf, s32 count);
+u16 TextAddString(u8 window, char *str, s32 ticks, void *sprites);
+void TextAddStringMulti(u8 window, s32 n, char **strs, s32 ticks, void *sprites, u16 *ids);
+void TextSetStringIntensity(u16 str, s32 r, s32 g, s32 b);
+u16 TextReplaceString(u16 str, char *text);
+void TextRemoveWindow(u8 window);
+void EGSDisplayGetLoad(s16 *a, s16 *b, s32 *c, char **text);
+void FriendlyPreparePlayerAndCameraFaceListsBeforeUse(s32);
+void FriendlyRevertPlayerAndCameraFaceListsAfterUse(void);
+void GameCameraUpdateLeadAndWatchOffsets(void);
+void CameraUpdateAfterDisplay(void);
+void CameraUpdateBeforeDisplay(void);
+void MovementUpdateAfterDisplay(void);
+void MovementUpdateBeforeDisplay(void);
+void GameSysProcessMoveRequests(void);
+void GameSysClearMoveRequests(void);
+void CASProcess(void);
+void ShadowProcess(void);
+void func_800164D0(void);
+static void func_800153BC(SysMsgQueue *src, SysMsgQueue *dst);
 
 /* Functions missing from siphon.map were static in system.c. */
 static void SysEnterState(u32 state, int push);
@@ -101,7 +146,113 @@ void CopyMsgToSysQueue(SysMsg *msg) {
     mSysMsgQueue.count++;
 }
 
+#ifdef NON_MATCHING
+/*
+ * Structure and the scratchpad-stack sequence match (SPAD_ENTER/LEAVE around plain calls
+ * reproduce the original exactly); remaining differences are register allocation in the
+ * dispatch loop (original: s0 = queue then msg, s3 = table, s4 = msgs) and which delay
+ * slot the loop counter's zeroing lands in.
+ */
+void SysExecute(void) {
+    char *noDmgText[2];
+    s16 loadA;
+    s16 loadB;
+    s32 loadC;
+    char *loadText;
+    SysMsg *msg;
+    SysMsgHandler fn;
+    SysMsgHandler *dispatch;
+    SysMsgHandler *table;
+    SysMsgQueue *queue;
+    int i;
+    int n;
+    s32 noDamage;
+
+    gExeTick++;
+    FriendlyPreparePlayerAndCameraFaceListsBeforeUse(1);
+    SPAD_ENTER();
+    GameCameraUpdateLeadAndWatchOffsets();
+    SPAD_LEAVE();
+    CameraUpdateAfterDisplay();
+    SPAD_ENTER();
+    SysPostMessage(4, SYS_MSG_IMMEDIATE, SYS_MSG_LEVEL, SYS_MSG_LEVEL, 0, 0, 0, 0);
+    SPAD_LEAVE();
+    MovementUpdateAfterDisplay();
+    SPAD_ENTER();
+    GameSysProcessMoveRequests();
+    SPAD_LEAVE();
+    GameSysClearMoveRequests();
+    FriendlyRevertPlayerAndCameraFaceListsAfterUse();
+    CASProcess();
+    func_800164D0();
+
+    queue = &mSysMsgQueueNext;
+    func_800153BC(&mSysMsgQueue, queue);
+    n = queue->count;
+    table = gDispatchFunctions;
+    for (i = 0, msg = queue->msgs; i < n; i++, msg++) {
+        if (queue->count == 0) {
+            break;
+        }
+        if (msg->to == SYS_MSG_GLOBAL) {
+            fn = gSysMsgTable[msg->id].handle;
+        } else if (msg->to == SYS_MSG_LEVEL || msg->to == SYS_MSG_LEVEL_RAW) {
+            fn = gSysInfo.levelMsgTable[msg->id].handle;
+        } else {
+            if (msg->to != SYS_MSG_OBJ_666) {
+                dispatch = &table[gameObjectsModelInfo[gameObjectsInfo[msg->to].modelIndex].type];
+            } else {
+                dispatch = &table[SYS_MSG_OBJ_666];
+            }
+            fn = *dispatch;
+        }
+        if (fn != NULL) {
+            fn(msg);
+        }
+    }
+
+    if (!gSystemStopDebugDisplay) {
+        if (!(gSystemTick & 3)) {
+            noDamage = NPCDebugGetNoDamageFlag();
+            if (D_8010F622 == 0xFF) {
+                noDmgText[0] = D_8010F628;
+                noDmgText[1] = D_8010F62C;
+                D_8010F624 = 1;
+                D_8010F622 = TextAddWindow(70, -85, 92, 75);
+                TextSetWindowJustification(D_8010F622, 1);
+                TextSpriteInitialize(D_80111B48, 20);
+                D_8010FF6C = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48);
+                TextAddStringMulti(D_8010F622, 2, noDmgText, -1, D_80111B48 + 0x2C0, &D_8010FF68);
+                TextSetStringIntensity(D_8010FF6C, 0xA0, 0x60, 0xA0);
+                TextSetStringIntensity(D_8010FF6A, 0x30, 0x60, 0xA0);
+                D_8010FF70 = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48 + 0x39C);
+                D_8010FF68 = TextReplaceString(D_8010FF68, D_8010F608);
+                TextSetStringIntensity(D_8010FF70, 0xA0, 0x50, 0x30);
+            }
+            D_8010FF6C = TextReplaceString(D_8010FF6C, cdError[0] ? cdError : gSectorMap[gGabeSector * 4]);
+            EGSDisplayGetLoad(&loadA, &loadB, &loadC, &loadText);
+            D_8010FF70 = TextReplaceString(D_8010FF70, loadText);
+            if (noDamage != D_8010F624) {
+                D_8010FF6A = TextReplaceString(D_8010FF6A, noDamage ? D_8010F62C : D_8010F608);
+                D_8010F624 = noDamage;
+            }
+        }
+    } else if (D_8010F622 != 0xFF) {
+        TextRemoveWindow(D_8010F622);
+        D_8010F622 = 0xFF;
+    }
+
+    MovementUpdateBeforeDisplay();
+    SPAD_ENTER();
+    ShadowProcess();
+    SPAD_LEAVE();
+    SPAD_ENTER();
+    CameraUpdateBeforeDisplay();
+    SPAD_LEAVE();
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/system", SysExecute);
+#endif
 
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3) {
     SysMsg *msg;

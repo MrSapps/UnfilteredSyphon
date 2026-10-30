@@ -116,6 +116,7 @@ extern int mSystemStateDepth;
 extern int mSystemStateStack[];
 extern u8 gSysHaltState;
 extern s32 gSystemTick;
+extern s32 gExeTick; /* game ticks while the game is running */
 /* In .sdata, but referenced with absolute addressing, so not declared as a scalar here. */
 extern u8 gContinueLevel[];
 extern u8 gLevelReady;
