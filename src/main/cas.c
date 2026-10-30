@@ -31,6 +31,8 @@ void EGSDisplayHAStartUnique(void *anim, s32 anim1, s32 arg2);
 void EGSDisplayHASetCurrentFrame(void *anim, s32 anim1, s32 frame);
 void EGSDisplayAnimateHMD(void *anim);
 void EGSFrameUpdateHierarchy(void *frame);
+void EGSDisplayHAStop(void *anim, s16 anim1);
+void EGSDisplayHAStart3(void *anim, s16 anim1, s32 frame, s32 layer, s32 blend);
 struct CASHipMotion *EGSDisplayHAGetHipMotionArray(void *ha);
 int rcos(int a);
 static void func_8002AC1C();
@@ -43,8 +45,8 @@ typedef struct CASSequence {
     /* 0x06 */ u8 actions[3]; /* applied when the sequence starts, 0xFF: none */
     /* 0x09 */ s8 unk09[3]; /* -1: ... (by HAnim.unk28 0x8000/0x4000/other) */
     /* 0x0C */ u8 prio; /* lower wins */
-    /* 0x0D */ u8 unk0D;
-    /* 0x0E */ u8 unk0E;
+    /* 0x0D */ u8 unk0D; /* new CASState.active when nonzero */
+    /* 0x0E */ u8 unk0E; /* new CASState.mode */
     /* 0x0F */ u8 nextAction; /* requested when the sequence ends */
     /* 0x10 */ void (*onStart)(s16 id, s32 arg);
     /* 0x14 */ u8 startMsg;
@@ -70,8 +72,7 @@ typedef struct CASAnimSet {
 } CASAnimSet; /* size 0x2C */
 
 #define CAS_NUM_ANIM_SETS 99
-/* CASState+0x10: the gobj's CASAnimSet table */
-#define CAS_ANIM_SETS(cas) (*(CASAnimSet **)(cas)->unk10)
+
 
 typedef struct CASRule {
     /* 0x00 */ u32 stateMask; /* 0: any; else bit per request state */
@@ -87,9 +88,10 @@ typedef struct HAnim {
     /* 0x0C */ u8 *data;
     /* 0x10 */ u8 unk10[4];
     /* 0x14 */ s32 frame;
-    /* 0x18 */ u8 unk18[8];
-    /* 0x20 */ u32 eventMask; /* pending animation events */
-    /* 0x24 */ u8 unk24[4];
+    /* 0x18 */ u8 unk18[4];
+    /* 0x1C */ void (*handler)(); /* animation event handler */
+    /* 0x20 */ u32 eventMask;    /* pending animation events */
+    /* 0x24 */ void *handlerArg;
     /* 0x28 */ s32 unk28;
     /* 0x2C */ s32 unk2C;
 } HAnim;
@@ -120,46 +122,21 @@ typedef struct CASAction {
     /* 0x1C */ CASEvent *events;
 } CASAction; /* size 0x20 */
 
-/* Animation event passed to func_80029298 */
-typedef struct CASAnimEvent {
-    /* 0x00 */ s32 id;
-    /* 0x04 */ s32 action;
-    /* 0x08 */ u8 req0;
-    /* 0x09 */ u8 mode;
-    /* 0x0A */ u8 pad0A[2];
-    /* 0x0C */ s32 sub;
-    /* 0x10 */ struct CASAnimSet *set;
-} CASAnimEvent;
+
 static void func_8002AD98();
-static void func_80029B78(GameObjectRuntime *rt, s32 from, s32 to, s32 event);
+static void func_80029B78();
 static u8 func_80029794();
 static u8 func_80029838();
 static void func_8002A4A0();
+static void func_80029298();
+extern void **gCamera;
 
-/* Full view of CASQueue.slots (queue+0x08); gobj.h only declares the first fields. */
-typedef struct CASSlotTable {
-    /* 0x00 */ s32 current;
-    /* 0x04 */ s32 action[3]; /* CASSlots.prio: action index, 0xFF when free */
-    /* 0x10 */ s32 state[3];
-    /* 0x1C */ s32 set[3];    /* anim set index */
-    /* 0x28 */ u8 req[3][2];
-    /* 0x2E */ u8 pad2E[2];
-    /* 0x30 */ s32 unk30[3];
-    /* 0x3C */ u8 unk3C[0x28];
-    /* 0x64 */ s16 numDeferred; /* CASQueue.unk6C */
-    /* 0x66 */ u8 unk66[2];
-    /* 0x68 */ struct CASDeferred {
-        /* 0x00 */ s32 id;
-        /* 0x04 */ u8 unk04[4];
-        /* 0x08 */ u8 req0;
-        /* 0x09 */ u8 mode;
-        /* 0x0A */ u8 unk0A[2];
-        /* 0x0C */ s32 sub;
-        /* 0x10 */ CASAnimSet *set;
-    } deferred[3]; /* sequence start callbacks to run after the request pass */
-} CASSlotTable;
+/* View of a camera handle */
+typedef struct CASCamera {
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ s32 index; /* slot in each gobj's per-camera display table */
+} CASCamera;
 
-#define CAS_SLOTS(rt) ((CASSlotTable *)&(rt)->cas->queue->slots)
 
 
 void SYSCasInit(void) {
@@ -177,13 +154,13 @@ void SYSCasInit(void) {
 static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
     GameObjectRuntime *rt;
     HAnim *ha;
-    CASSlotTable *t;
+    struct CASSlots *t;
     CASAction *action;
     CASDone *done;
     CASEvent *events;
     CASEvent *ev;
     CASSequence *seq;
-    struct CASDeferred *e;
+    CASAnimEvent *e;
     s32 slot;
     s32 i;
     s32 hit;
@@ -195,7 +172,7 @@ static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
     ha = EGSDisplayGetHA(rt->anim, info->action);
     ha->eventMask &= ~event;
     slot = -1;
-    t = CAS_SLOTS(rt);
+    t = &rt->cas->queue->slots;
     if (rt->cas->actionTable == NULL) {
         return;
     }
@@ -253,7 +230,7 @@ static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
         t->set[slot] = info->set->unk04;
         t->req[slot][0] = info->req0;
         t->req[slot][1] = info->mode;
-        t->unk30[slot] = info->sub;
+        t->sub[slot] = info->sub;
         CASRequestAction(rt->id, 0x5A);
     }
     if (event == 0x80000000) {
@@ -321,10 +298,9 @@ static u8 func_80029794(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029794);
 #endif
 
-#ifdef NON_MATCHING
-/* final test folds to sltiu; original branches to set 0/1 */
 /* May a request in state *req run under this rule? */
 static u8 func_80029838(GameObjectRuntime *rt, CASRule *rule, u8 *req) {
+    s32 no;
     struct CASSlots *slots;
     u32 flags;
     u32 have;
@@ -339,22 +315,20 @@ static u8 func_80029838(GameObjectRuntime *rt, CASRule *rule, u8 *req) {
     if (rule->forbid == -1 && rt->cas->flags != 0) {
         return 0;
     }
+    no = 0;
     flags = rt->cas->flags;
     have = flags & rule->require;
     if (have != rule->require) {
-        return 0;
+        return no;
     }
     if (rule->forbid == -1 && flags != have) {
-        return 0;
+        return no;
     }
     if (rt->cas->flags & rule->forbid) {
-        return 0;
+        return no;
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029838);
-#endif
 
 /* Enter anim set `set`: apply its sequence's actions (or the set's own flags), model data. */
 static void func_80029920(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
@@ -400,7 +374,13 @@ static void func_80029920(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
 }
 
 /* Leave action `from` and enter action `to`, updating the CAS flag words. */
-static void func_80029B78(GameObjectRuntime *rt, s32 from, s32 to, s32 event) {
+/* old-style definition: func_8002A4A0 calls it with three arguments */
+static void func_80029B78(rt, from, to, event)
+    GameObjectRuntime *rt;
+    s32 from;
+    s32 to;
+    s32 event;
+{
     CASState *cas;
     CASAction *table;
 
@@ -441,27 +421,31 @@ static s32 func_80029C04(GameObjectRuntime *rt, CASAnimSet *set, u8 *req) {
 }
 
 #ifdef NON_MATCHING
-/* loop strength-reduces set+0x2A into a new pointer; original keeps set and offsets 0x18/0x2A */
+/* prologue only: the sets copy is scheduled after the other argument copies */
 void CASInit(s32 id, CASAnimSet *sets, CASAction *actions, s32 maxRequests) {
+    CASAnimSet *base = sets;
     GameObjectRuntime *rt;
     CASState *cas;
     CASQueue *queue;
-    CASAnimSet *set;
     CASSequence *seq;
     s16 n;
     int i;
 
     rt = gameObjectsInfo[id].runtime;
-    set = sets;
-    for (i = 0; i < CAS_NUM_ANIM_SETS; i++, set++) {
-        n = 0;
-        seq = set->sequences;
-    count:
-        if ((seq++)->action >= 0) {
-            n++;
-            goto count;
-        }
-        set->numSequences = n;
+    i = 0;
+loop:
+    n = 0;
+    seq = sets->sequences;
+count:
+    if ((seq++)->action >= 0) {
+        n++;
+        goto count;
+    }
+    sets->numSequences = n;
+    i++;
+    sets++;
+    if (i < CAS_NUM_ANIM_SETS) {
+        goto loop;
     }
     cas = EGSMemMalloc(sizeof(CASState));
     if (cas == NULL) {
@@ -478,15 +462,15 @@ void CASInit(s32 id, CASAnimSet *sets, CASAction *actions, s32 maxRequests) {
     queue->count = 0;
     queue->max = maxRequests;
     queue->slots.current = -1;
-    queue->unk6C = 0;
+    queue->slots.numDeferred = 0;
     for (i = 0; i < 3; i++) {
-        queue->slots.prio[i] = 0xFF;
+        queue->slots.action[i] = 0xFF;
         queue->slots.state[i] = 0;
     }
     cas->active = 1;
     cas->mode = 1;
     cas->queue = queue;
-    CAS_ANIM_SETS(cas) = sets;
+    cas->animSets = base;
     cas->actionTable = actions;
     rt->cas = cas;
     cas->flags = 0;
@@ -514,9 +498,9 @@ void CASReset(s32 id) {
     cas = rt->cas;
     queue = cas->queue;
     queue->slots.current = -1;
-    queue->unk6C = 0;
+    queue->slots.numDeferred = 0;
     for (i = 0; i < 3; i++) {
-        queue->slots.prio[i] = 0xFF;
+        queue->slots.action[i] = 0xFF;
         queue->slots.state[i] = 0;
     }
     cas->active = 1;
@@ -649,23 +633,202 @@ void CASRequestDelay(s16 id, s32 ticks) {
     D_8010FF90 = gSystemTick;
 }
 
+#ifdef NON_MATCHING
+/* scheduling of spill-slot reloads (keep/started/sub/set) differs */
+/* Start anim set `set`'s sequence on each body layer (full body 0, upper 0x4000, lower
+ * 0x8000), taking the CAS action slots and hooking up the event handler. */
+static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
+    u8 r[2];
+    s16 idx;
+    s16 lower;
+    CASAction *table;
+    u8 keep;
+    u8 started;
+    CASQueue *queue;
+    struct CASSlots *t;
+    CASSequence *seq;
+    HAnim *ha;
+    CASAnimEvent *e;
+    s32 layer;
+    u32 mask;
+    s16 action;
+    s32 frame;
+    s16 upper;
+    s32 i;
+
+    idx = 0;
+    lower = 0xFF;
+    keep = 0;
+    table = rt->cas->actionTable;
+    queue = rt->cas->queue;
+    frame = 0;
+    started = 0;
+    r[0] = req[0];
+    action = 0xFF;
+    r[1] = req[1];
+    upper = 0xFF;
+    seq = CASGetAnimSequence(set, req[1], sub);
+    t = &queue->slots;
+    if (seq->unk0D != 0) {
+        rt->cas->active = seq->unk0D;
+        rt->cas->mode = seq->unk0E;
+    }
+    if (seq->actions[0] == 0xFF && seq->actions[1] == 0xFF && seq->actions[2] == 0xFF) {
+        if (seq->nextAction != 0) {
+            CASRequestAction(rt->id, seq->nextAction);
+        }
+        if (seq->onStart != NULL || seq->startMsg != 0) {
+            i = queue->slots.numDeferred;
+            t->deferred[i].id = rt->id;
+            t->deferred[i].req0 = r[0];
+            t->deferred[i].sub = sub;
+            t->deferred[i].set = set;
+            t->deferred[i].mode = r[1];
+            queue->slots.numDeferred++;
+        }
+    } else if (table != NULL && func_80029794(rt, set, r, sub)
+               && (((void **)rt->anim)[((CASCamera *)*gCamera)->index] != NULL || rt->id == gPlayerOffset)) {
+        layer = 0;
+        do {
+            mask = 0;
+            if (layer == 0) {
+                idx = 0;
+                action = seq->actions[2];
+                frame = seq->unk09[2];
+            } else if (layer == 0x4000) {
+                if (upper != 0xFF && upper != -666) {
+                    action = upper;
+                    keep = 1;
+                } else {
+                    action = seq->actions[1];
+                    frame = seq->unk09[1];
+                }
+                idx = 1;
+            } else if (layer == 0x8000) {
+                if (lower != 0xFF && lower != -666) {
+                    action = lower;
+                    keep = 1;
+                } else {
+                    action = seq->actions[0];
+                    frame = seq->unk09[0];
+                }
+                idx = 0;
+            }
+            if (((layer == 0 || layer == 0x8000) && (rt->cas->flags2 & seq->needFlags2))
+                || (layer == 0x4000 && (rt->cas->flags2 & seq->blockFlags2))) {
+                action = 0xFF;
+            }
+            if (action != 0xFF) {
+                ha = EGSDisplayGetHAWithType(rt->anim, layer);
+                if (ha == NULL || ha->anim != action || frame == -2 || lower != 0xFF || upper != 0xFF
+                    || frame == -3) {
+                    if (frame == -3) {
+                        frame = 0;
+                    }
+                    if (ha != NULL) {
+                        if (keep) {
+                            frame = ha->unk2C;
+                        }
+                        EGSDisplayHAStop(rt->anim, ha->anim);
+                    }
+                    if (frame != -2) {
+                        started = 1;
+                        EGSDisplayHAStart3(rt->anim, action, frame, layer, 20);
+                        if (layer == 0x8000 && lower == 0xFF) {
+                            if (seq->actions[1] == 0xFF) {
+                                ha = EGSDisplayGetHAWithType(rt->anim, 0x4000);
+                                if (ha != NULL) {
+                                    upper = ha->anim;
+                                }
+                            } else {
+                                upper = -666;
+                            }
+                        } else if (layer == 0x4000 && upper == 0xFF) {
+                            if (seq->actions[0] == 0xFF) {
+                                ha = EGSDisplayGetHAWithType(rt->anim, 0x8000);
+                                if (ha != NULL) {
+                                    lower = ha->anim;
+                                }
+                            } else {
+                                lower = -666;
+                            }
+                        }
+                        if (table[action].hasEvents) {
+                            func_80029B78(rt, -1, action);
+                            if (table[action].done.event != 0) {
+                                if (t->current == -1) {
+                                    s32 j;
+
+                                    for (j = 0; j < 3; j++) {
+                                        if (t->state[j] == 0) {
+                                            t->current = j;
+                                            break;
+                                        }
+                                    }
+                                }
+                                t->state[t->current] = 1;
+                                t->action[t->current] = action;
+                                mask |= table[action].done.event;
+                            }
+                            if (table[action].events != NULL) {
+                                mask |= 0x04000000 | (table[action].events->code & 0xFF);
+                            }
+                        }
+                        mask |= 0x80000000;
+                        if (!keep) {
+                            t->events[idx].action = action;
+                            t->events[idx].id = rt->id;
+                            t->events[idx].set = set;
+                            t->events[idx].req0 = r[0];
+                            t->events[idx].sub = sub;
+                            t->events[idx].mode = r[1];
+                        }
+                        ha = EGSDisplayGetHAWithType(rt->anim, layer);
+                        ha->handler = func_80029298;
+                        ha->eventMask = mask;
+                        ha->handlerArg = &t->events[idx];
+                    }
+                }
+            }
+            if (keep || (layer == 0x8000 && lower == -666) || (layer == 0x4000 && upper == -666)) {
+                layer = -1;
+            } else if (layer == 0) {
+                layer = 0x4000;
+            } else if (layer == 0x4000 || lower != 0xFF) {
+                layer = 0x8000;
+            } else if (upper == lower) {
+                layer = -1;
+            } else {
+                layer = 0x4000;
+            }
+        } while (layer != -1);
+        if (started && (rt->anim->unk00[8] & 0x10)) {
+            EGSDisplayAnimateHMD(rt->anim);
+            EGSFrameUpdateHierarchy(rt->anim->frame);
+            rt->anim->unk00[8] |= 4;
+            rt->anim->unk00[8] &= ~0x10;
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cas", func_8002A4A0);
+#endif
 
 /* Finish every slot whose action completed: run its callback/message and free it. */
 static void func_8002AC1C(GameObjectRuntime *rt, CASQueue *queue) {
-    CASSlotTable *t;
+    struct CASSlots *t;
     CASAnimSet *set;
     CASAction *action;
     s32 idx;
     s32 arg;
     s32 i;
 
-    t = CAS_SLOTS(rt);
+    t = &rt->cas->queue->slots;
     for (i = 0; i < 3; i++) {
         if (t->state[i] == 2) {
             idx = t->set[i];
-            arg = t->unk30[i];
-            set = &CAS_ANIM_SETS(rt->cas)[idx];
+            arg = t->sub[i];
+            set = &rt->cas->animSets[idx];
             action = &((CASAction *)rt->cas->actionTable)[t->action[i]];
             t->current = i;
             func_80029920(rt, set, t->req[i], arg);
@@ -680,7 +843,7 @@ static void func_8002AC1C(GameObjectRuntime *rt, CASQueue *queue) {
             t->set[i] = 0;
             t->req[i][0] = 0;
             t->req[i][1] = 0;
-            t->unk30[i] = 0;
+            t->sub[i] = 0;
         }
     }
 }
@@ -692,16 +855,16 @@ static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
     s32 i;
     CASAction *table;
     u8 again;
-    CASSlotTable *t;
+    struct CASSlots *t;
     CASAnimSet *set;
     CASSequence *seq;
-    struct CASDeferred *e;
+    CASAnimEvent *e;
     u8 *req;
     s32 action;
     s32 sub;
     s32 j;
 
-    t = CAS_SLOTS(rt);
+    t = &rt->cas->queue->slots;
     table = rt->cas->actionTable;
     do {
         again = 0;
@@ -714,7 +877,7 @@ static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
             post = 0;
             if (action != 0) {
                 sub = 0;
-                set = &CAS_ANIM_SETS(rt->cas)[action];
+                set = &rt->cas->animSets[action];
                 D_80115670[action] = 0;
                 req = &rt->cas->active;
                 if (set->sequences != NULL) {

@@ -5,6 +5,9 @@
 #include "gobj.h"
 #include "egsmath.h"
 
+/* the original was built with gcc's builtin abs() */
+#define abs(x) __builtin_abs(x)
+
 /* target.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F821)
 SDATA_LOCAL(D_8010F822)
@@ -30,13 +33,18 @@ extern s32 gCurrentWeapon;
 #define INFO_WORD24(info) (*(u32 *)&(info)->flags24)
 
 typedef struct TargetWeapon {
-    /* 0x00 */ u32 flags; /* bits 3-5: kind */
+    /* 0x00 */ u32 unk00_0 : 3;
+    /* 0x00 */ u32 kind : 3;
+    /* 0x00 */ u32 unk00_6 : 26;
     /* 0x04 */ u32 unk04;
-    /* 0x08 */ u8 accuracy; /* low 6 bits */
-    /* 0x09 */ u8 unk09[0x17];
+    /* 0x08 */ u32 accuracy : 6;
+    /* 0x08 */ u32 damageNear : 10; /* within 0x3C0 */
+    /* 0x08 */ u32 damageFar : 10;
+    /* 0x08 */ u32 unk08_26 : 6;
+    /* 0x0C */ u8 unk0C[0x14];
 } TargetWeapon;
 extern TargetWeapon D_80105F58[]; /* per-weapon info */
-#define WEAPON_KIND(w) ((D_80105F58[w].flags >> 3) & 7)
+#define WEAPON_KIND(w) (D_80105F58[w].kind)
 
 /* Weapon a gobj carries: its pickup id, else 19/20 by kind bits, the player's current one */
 #define GOBJ_WEAPON(id)                                                              \
@@ -59,6 +67,30 @@ extern s32 gCASJoystickGobjID;
 void AnimateGobjRequestAim(GameObjectRuntime *rt, VECTOR32 *target, u8 arg2, u8 mode);
 u8 GameCameraCheckMode(s32 mode);
 GameObjectRuntime *GameCameraGetPrimaryGobj();
+
+extern s16 gDefaultLevelDmgFX;
+extern s32 gPlayerNumConsecutiveHits;
+void AnimateGobjRequestShotRecoil(GameObjectRuntime *rt, s32 player);
+void DamageGOBJ(s16 from, s16 by, s16 target, s16 damage, s16 action);
+void DamageTerrain(s32 id, VECTOR32 *pos, VECTOR32 *normal, VECTOR32 *dir, s16 fx);
+s32 BulletTextureGet(s16 fx);
+void EGSDisplayRegisterDamage(VECTOR32 *pos, VECTOR32 *normal, VECTOR32 *dir, s32 tex, s32 arg4);
+s16 WeaponGetDeathAction(s16 weapon);
+s32 NPCDoNoDamage();
+
+/* TargetInfo fields past the shared definition */
+typedef struct TargetShot {
+    /* 0x00 */ u8 unk00[0x5C];
+    /* 0x5C */ s16 victim; /* gobj the last shot actually hit, -1 for none */
+    /* 0x5E */ u8 unk5E[0x16];
+    /* 0x74 */ VECTOR32 hitPos;    /* where the last shot landed */
+    /* 0x84 */ u8 unk84[0x10];
+    /* 0x94 */ VECTOR32 hitNormal;
+    /* 0xA4 */ u8 unkA4[0x20];
+    /* 0xC4 */ s32 prevTick;
+    /* 0xC8 */ s8 hits; /* consecutive shots at the same target, max 100 */
+} TargetShot;
+#define TARGET_SHOT(target) ((TargetShot *)(target))
 
 /* View of a camera handle */
 typedef struct TargetCamera {
@@ -130,7 +162,7 @@ s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fo
 int func_800333F8(GameObjectRuntime *rt);
 void func_800323C4(TargetInfo *target);
 void TextRemoveString(u16 str);
-static s32 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, VECTOR32 *normal);
+static u8 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, VECTOR32 *normal);
 
 /* Recompute the chance (target->unk58) that a gobj hits its target. */
 void TargetCalcProb(s32 id) {
@@ -171,7 +203,7 @@ void TargetCalcProb(s32 id) {
             penalty = -40;
         }
     }
-    target->unk58 = (D_80105F58[GOBJ_WEAPON(rt->id)].accuracy & 0x3F) + penalty;
+    target->unk58 = D_80105F58[GOBJ_WEAPON(rt->id)].accuracy + penalty;
     for (i = 0; i < 15; i++) {
         target->unk58 += target->unk34[i];
     }
@@ -227,8 +259,6 @@ void TargetCameraUpdate(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* the shared return-0 block gets threaded into the epilogue; original keeps it inline (j + delay) */
 /* Can rt see gobj `targetId`? 0: no; else TargetViewConeCheck's result, 3 when only in
  * target mode. `wide` selects the narrow aiming cone instead of all around. */
 u8 func_80032988(GameObjectRuntime *rt, s32 targetId, u8 wide) {
@@ -245,19 +275,22 @@ u8 func_80032988(GameObjectRuntime *rt, s32 targetId, u8 wide) {
 
     t = gameObjectsInfo[targetId].runtime;
     vis = 0;
-    if (t->target->flags & 1) {
-        if (t->flags23 & 2) {
-            return 0;
-        }
-        me = rt->move->pos;
-        tpos = t->move->pos;
-        if (((void **)t->anim)[((TargetCamera *)*gCamera)->index] != NULL) {
-            dist = GameSysFuzzyMathXZDistance(&me, &tpos);
-            if (GOBJ_TYPE(t->id) == 3 || dist <= 0x7D00) {
-                goto visible;
-            }
-        }
+    if (!(t->target->flags & 1)) {
+        goto invisible;
     }
+    if (t->flags23 & 2) {
+        goto invisible;
+    }
+    me = rt->move->pos;
+    tpos = t->move->pos;
+    if (((void **)t->anim)[((TargetCamera *)*gCamera)->index] == NULL) {
+        goto invisible;
+    }
+    dist = GameSysFuzzyMathXZDistance(&me, &tpos);
+    if (GOBJ_TYPE(t->id) == 3 || dist <= 0x7D00) {
+        goto visible;
+    }
+invisible:
     return 0;
 visible:
     if (rt->id == gPlayerOffset) {
@@ -289,34 +322,31 @@ visible:
     }
     dir.vy = 0;
     EGSGeometry_VectorGetXZAngleFromZAxis(&dir, &angle);
-    if (rt->id != gPlayerOffset) {
-        return vis;
-    }
-    if (t->healthInfo->health <= 0) {
-        vis = 0;
-        if (!gTargetModeFlag) {
-            t->target->flags &= ~1;
-            return vis;
+    if (rt->id == gPlayerOffset) {
+        if (t->healthInfo->health <= 0) {
+            vis = 0;
+            if (!gTargetModeFlag) {
+                t->target->flags &= ~1;
+                goto out;
+            }
+        } else if (!gTargetModeFlag) {
+            vis = 0;
+            if (!(t->target->flags & 0x10)) {
+                goto out;
+            }
         }
-    } else if (!gTargetModeFlag) {
-        vis = 0;
-        if (!(t->target->flags & 0x10)) {
-            return vis;
+        fov = gTargetModeFlag ? 0x800 : 0x271;
+        if (!wide) {
+            fov = 0x1000;
+        }
+        vis = TargetViewConeCheck(gPlayerOffset, &me, &dir, 0x7D00, fov, &tpos);
+        if (gTargetModeFlag && !vis) {
+            vis = 3;
         }
     }
-    fov = gTargetModeFlag ? 0x800 : 0x271;
-    if (!wide) {
-        fov = 0x1000;
-    }
-    vis = TargetViewConeCheck(gPlayerOffset, &me, &dir, 0x7D00, fov, &tpos);
-    if (gTargetModeFlag && !vis) {
-        vis = 3;
-    }
+out:
     return vis;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/target", func_80032988);
-#endif
 
 /* npc.c's NPC list iteration (npcList, getNPCIndex) */
 #define FIRST_NPC(id)                       \
@@ -766,11 +796,198 @@ void TargetClear(GameObjectRuntime *rt) {
     target->unkB0 = target->unkAC;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetShoot);
+/* Fire rt's weapon at its target. Returns the hit chance on a hit, 0 on a miss. */
+s32 TargetShoot(GameObjectRuntime *rt, u8 canHit) {
+    VECTOR32 muzzle;
+    VECTOR32 me;
+    VECTOR32 tpos;
+    VECTOR32 dir;
+    VECTOR32 tdir;
+    s32 dist;
+    TargetInfo *target;
+    GameObjectRuntime *t;
+    GameObjectRuntime *r;
+    s32 value;
+    u16 fx;
+    s16 weapon;
+    s32 ref;
+    s32 type;
+    u8 visible;
+
+    t = NULL;
+    visible = 1;
+    target = rt->target;
+    value = target->unk58;
+    if (rt->id == gPlayerOffset) {
+        AnimateGobjRequestShotRecoil(rt, 0);
+    } else {
+        AnimateGobjRequestShotRecoil(rt, 1);
+    }
+    fx = target->unk60;
+    if (target->unk60 == 0) {
+        fx = gDefaultLevelDmgFX;
+    }
+    weapon = GOBJ_WEAPON(rt->id);
+    dir.vx = rt->anim->frame->m[0][2];
+    dir.vy = rt->anim->frame->m[1][2];
+    dir.vz = rt->anim->frame->m[2][2];
+    dir.vy = -dir.vy;
+    me = rt->move->pos;
+    if (rt->target->targetId >= 0) {
+        t = gameObjectsInfo[rt->target->targetId].runtime;
+        tdir.vx = t->anim->frame->m[0][2];
+        tdir.vy = t->anim->frame->m[1][2];
+        tdir.vz = t->anim->frame->m[2][2];
+        tdir.vy = -tdir.vy;
+        tpos = t->move->pos;
+        if (WEAPON_KIND(weapon) == 2) {
+            visible = TargetViewConeCheck(rt->id, &me, &dir, 0x7D00, 0x800, &tpos);
+        }
+    } else {
+        CASRequestAction(rt->id, 0x2B);
+    }
+    target->lastTick = gExeTick;
+    if (target->unk5E >= 0) {
+        DamageGOBJ(rt->id, rt->id, target->unk5E, D_80105F58[weapon].damageFar, 0x892);
+    }
+    ref = gameObjectsInfo[rt->id].refId;
+    if (ref >= 0 && rt->npcState == 2 && ref != target->unk5E && (rt->npc->flags & 0x20000000)) {
+        r = gameObjectsInfo[ref].runtime;
+        type = GOBJ_TYPE(r->id);
+        if ((type == 0x37 || type == 0x2C) && r->healthInfo->health > 0) {
+            DamageGOBJ(rt->id, rt->id, ref, D_80105F58[weapon].damageNear, 0x892);
+        }
+    }
+    if (rt->target->targetId < 0 || !visible) {
+        muzzle.vx = rt->anim->frame->pos.vx;
+        muzzle.vy = rt->anim->frame->pos.vy;
+        muzzle.vz = rt->anim->frame->pos.vz;
+        muzzle.vy = -muzzle.vy;
+        EGSGeometry_GetFuzzyDistancePoint2Point(&muzzle, &TARGET_SHOT(target)->hitPos, &dist);
+        if (dist < 0x3C1) {
+            value = D_80105F58[weapon].damageNear;
+        } else {
+            value = D_80105F58[weapon].damageFar;
+        }
+        if (TARGET_SHOT(target)->victim >= 0) {
+            if (TARGET_SHOT(target)->victim != gPlayerOffset) {
+                DamageGOBJ(rt->id, rt->id, TARGET_SHOT(target)->victim, value, WeaponGetDeathAction(weapon));
+            }
+            goto done;
+        }
+        if ((u16)(weapon - 6) < 2) {
+            DamageRadius(rt->id, &TARGET_SHOT(target)->hitPos, value, 0x60, 0x20, 0x11, 0);
+        }
+        {
+            s16 fx16;
+            s32 id;
+            s32 tex;
+            VECTOR32 *hit;
+            VECTOR32 *normal;
+
+            fx16 = fx;
+            id = rt->id;
+            tex = BulletTextureGet(fx16);
+            hit = &TARGET_SHOT(target)->hitPos;
+            normal = &TARGET_SHOT(target)->hitNormal;
+            if (tex != 0) {
+                EGSDisplayRegisterDamage(hit, normal, &dir, tex, 0);
+            }
+            DamageTerrain(id, hit, normal, &dir, fx16);
+        }
+        if (rt->id == gPlayerOffset) {
+            goto missed;
+        }
+        goto done;
+    }
+    if (target->unkBC != target->targetId) {
+        target->unkBC = target->targetId;
+        target->unkC0 = TARGET_SHOT(target)->prevTick = gExeTick;
+        TARGET_SHOT(target)->hits = 0;
+    } else if (rt->target->flags & 2) {
+        TARGET_SHOT(target)->prevTick = target->unkC0;
+        target->unkC0 = gExeTick;
+        if (++TARGET_SHOT(target)->hits > 100) {
+            TARGET_SHOT(target)->hits = 100;
+        }
+    }
+    if (rt->npcState == 2) {
+        if (t->id == gPlayerOffset && NPCDoNoDamage(rt->id)) {
+            value = 0;
+        }
+        if (value >= 120) {
+            return value;
+        }
+    } else if (value >= 100 || weapon == 16) {
+        return 100;
+    }
+    if (!canHit || value <= 0 || value < rand() % 100) {
+        VECTOR32 v;
+
+        if (rt->npcState == 2) {
+            GameObjectRuntime *vic;
+
+            vic = NULL;
+            if (TARGET_SHOT(rt->target)->victim >= 0) {
+                vic = gameObjectsInfo[TARGET_SHOT(rt->target)->victim].runtime;
+            }
+            if (vic != NULL && !(vic->npcState == 1 || vic->npcState == 2) && vic->healthInfo->health > 0) {
+                s32 saved = target->targetId;
+
+                target->targetId = -1;
+                DamageGOBJ(rt->id, rt->id, TARGET_SHOT(target)->victim, D_80105F58[weapon].damageFar, WeaponGetDeathAction(weapon));
+                target->targetId = saved;
+                goto done;
+            }
+            if ((rt->target->flags & 2) && target->targetId == gPlayerOffset) {
+                if (func_80034D24(t, &me, &me, &v) == 1) {
+                    s16 fx2 = gDefaultLevelDmgFX;
+                    s32 id = rt->id;
+                    s32 tex = BulletTextureGet(fx2);
+
+                    if (tex != 0) {
+                        EGSDisplayRegisterDamage(&me, &v, &v, tex, 0);
+                    }
+                    DamageTerrain(id, &me, &v, &v, fx2);
+                }
+            }
+            return 0;
+        }
+        if (rt->target->flags & 2) {
+            v.vx = me.vx - TARGET_SHOT(target)->hitPos.vx;
+            v.vy = me.vy - TARGET_SHOT(target)->hitPos.vy;
+            v.vz = me.vz - TARGET_SHOT(target)->hitPos.vz;
+            TARGET_SHOT(target)->hitPos.vx += (v.vx >> 4) + (rand() & 0xFF) - 0x7F;
+            TARGET_SHOT(target)->hitPos.vy += (v.vy >> 4) + (rand() & 0xFF) - 0x7F;
+            TARGET_SHOT(target)->hitPos.vz += (v.vz >> 4) + (rand() & 0xFF) - 0x7F;
+            DamageTerrain(rt->id, &TARGET_SHOT(target)->hitPos, &TARGET_SHOT(target)->hitNormal, &v, (s16)fx);
+        } else if (TARGET_SHOT(target)->victim >= 0) {
+            if (TARGET_SHOT(target)->victim != gPlayerOffset) {
+                muzzle.vx = rt->anim->frame->pos.vx;
+                muzzle.vy = rt->anim->frame->pos.vy;
+                muzzle.vz = rt->anim->frame->pos.vz;
+                muzzle.vy = -muzzle.vy;
+                EGSGeometry_GetFuzzyDistancePoint2Point(&muzzle, &TARGET_SHOT(target)->hitPos, &dist);
+                DamageGOBJ(rt->id, rt->id, TARGET_SHOT(target)->victim,
+                           dist < 0x3C1 ? D_80105F58[weapon].damageNear : D_80105F58[weapon].damageFar,
+                           WeaponGetDeathAction(weapon));
+            }
+        } else {
+            DamageTerrain(rt->id, &TARGET_SHOT(target)->hitPos, &TARGET_SHOT(target)->hitNormal,
+                          &TARGET_SHOT(target)->hitNormal, (s16)fx);
+        }
+missed:
+        gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
+    done:
+        return 0;
+    }
+    gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits < 0 ? 1 : gPlayerNumConsecutiveHits + 1;
+    return value;
+}
 
 /* Pick a random polygon of rt's hit model facing `eye` (any if eye is NULL) and a random
  * point on it; returns 1 with the point and the polygon normal (y up), else 0. */
-static s32 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, VECTOR32 *normal) {
+static u8 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, VECTOR32 *normal) {
     VECTOR32 step;
     TargetPolyNode *node;
     TargetPolyNode *pick;
@@ -854,7 +1071,7 @@ static s32 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, 
 }
 
 #ifdef NON_MATCHING
-/* scheduling: original stores the first ratan2 result after diff.vx; abs temps in other regs */
+/* scheduling: the first ratan2 result is stored right after the call; the original stores it after diff.vx */
 /* Is `to` within `range` and the `fov` cone around `dir` seen from `from`?
  * 0: no, 1: inside the cone, 2: player only, close to the cone. */
 s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fov, VECTOR32 *to) {
@@ -897,18 +1114,11 @@ s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fo
             } else if (a.dPitch < -0x800) {
                 a.dPitch += 0x1000;
             }
-            d = a.dPitch;
-            if (d < 0) {
-                d = -d;
-            }
-            if (fov >> 1 < d) {
+            if (abs(a.dPitch) > fov >> 1) {
                 visible = 0;
             }
         }
-        d = a.dYaw;
-        if (d < 0) {
-            d = -d;
-        }
+        d = abs(a.dYaw);
         if (fov >> 1 >= d) {
             result = 1;
         } else if (id == gPlayerOffset && (WEAPON_KIND(gCurrentWeapon) == 1 || dist < 0x281) && d < 0x401) {

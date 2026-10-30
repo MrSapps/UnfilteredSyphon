@@ -2,6 +2,11 @@
 #include "game.h"
 #include "egsframe.h"
 
+/* include_asm.h has no INCLUDE_PART1 stub for m2c/permuter builds */
+#ifndef INCLUDE_PART1
+#define INCLUDE_PART1(FOLDER, NAME)
+#endif
+
 /* small data (still assembled from asm) */
 SDATA_LOCAL(D_8010FE40)
 SDATA_LOCAL(D_8010FE44)
@@ -18,6 +23,7 @@ SDATA_LOCAL(gCurrentDrawBuffer)
 SDATA_LOCAL(gDamagePolyPtr)
 SDATA_LOCAL(gDisplayBuffer)
 SDATA_LOCAL(gDisplayInterruptList)
+SDATA_LOCAL(gErrorString)
 SDATA_LOCAL(gFaceCache)
 SDATA_LOCAL(gFadeCallback)
 SDATA_LOCAL(gFadeRate)
@@ -106,7 +112,9 @@ typedef struct EGSCamera {
     /* 0x94 */ EGSListNode *glines;
     /* 0x98 */ EGSListNode *polys;
     /* 0x9C */ void *refAnim;
-    /* 0xA0 */ u8 unkA0[0x40];
+    /* 0xA0 */ u16 polysSorted;
+    /* 0xA2 */ u16 unkA2;
+    /* 0xA4 */ u8 unkA4[0x3C];
     /* 0xE0 */ u8 ambient[3];
     /* 0xE3 */ u8 unkE3;
     /* 0xE4 */ s16 fogNear;
@@ -135,12 +143,13 @@ typedef struct EGSPointSource {
 typedef struct EGSFlashlight {
     /* 0x00 */ EGSListNode *node;
     /* 0x04 */ s32 headFlag;
-    /* 0x08 */ void *frame;
+    /* 0x08 */ EGSFrame *frame;
     /* 0x0C */ s32 range;
     /* 0x10 */ s32 width;
     /* 0x14 */ s32 shift;
     /* 0x18 */ s32 unk18;
     /* 0x1C */ s32 color;
+    /* 0x20 */ MATRIX ws; /* world-screen matrix seen from the light */
 } EGSFlashlight;
 
 /* Display primitive packets (tag word at 4, then GPU words). */
@@ -168,6 +177,27 @@ typedef struct LightAccum {
     /* 0x18 */ s32 count;
     /* 0x1C */ s32 sum[3];
 } LightAccum;
+
+typedef struct DISPENV {
+    /* 0x00 */ s16 dispX;
+    /* 0x02 */ u8 dispY; /* low byte tested: 0 = upper field */
+    /* 0x03 */ u8 dispYHi;
+    /* 0x04 */ s16 dispW, dispH;
+    /* 0x08 */ s16 screen[4];
+    /* 0x10 */ u8 isinter, isrgb24, pad0, pad1;
+} DISPENV;
+
+typedef struct GsBOXF {
+    /* 0x00 */ u32 attribute;
+    /* 0x04 */ s16 x, y;
+    /* 0x08 */ u16 w, h;
+    /* 0x0C */ u8 r, g, b;
+} GsBOXF;
+
+typedef struct DR_AREA {
+    /* 0x00 */ u32 tag;
+    /* 0x04 */ u32 code[2];
+} DR_AREA;
 
 typedef struct DR_TPAGE {
     /* 0x00 */ u32 tag;
@@ -266,8 +296,8 @@ typedef struct HMDCacheEntry {
     /* 0x00 */ EGSAnim *owner;
     /* 0x04 */ HMDCacheModel *model;
     /* 0x08 */ SVECTOR *rot;
-    /* 0x0C */ s32 unk0C;
-    /* 0x10 */ u8 unk10[0x2C];
+    /* 0x0C */ s32 unk0C; /* number of damage values */
+    /* 0x10 */ u32 values[11]; /* sorted damage ids */
 } HMDCacheEntry; /* size 0x3C */
 
 typedef struct HMDCacheList {
@@ -349,7 +379,10 @@ typedef struct PrimGT4 {
 } PrimGT4;
 
 typedef struct EGSSprite {
-    /* 0x00 */ u8 unk00[0x28];
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ u16 tpage;
+    /* 0x0E */ u8 unk0E[0x16];
+    /* 0x24 */ u32 pri; /* OT depth */
     /* 0x28 */ EGSListNode *node;
 } EGSSprite;
 
@@ -389,6 +422,13 @@ typedef struct HMDBlock {
     /* 0x00 */ s32 size; /* bytes */
     /* 0x04 */ s32 unk04;
     /* 0x08 */ s32 numVerts;
+    /* 0x0C */ s32 unk0C;
+    /* 0x10 */ s16 m[9]; /* column-major rotation */
+    /* 0x22 */ s16 t[3];
+    /* 0x28 */ u8 unk28[0x10];
+    /* 0x38 */ s16 parent;
+    /* 0x3A */ s16 unk3A;
+    /* 0x3C */ struct EGSFrame *frame;
 } HMDBlock;
 
 typedef struct HMDHeader {
@@ -403,10 +443,10 @@ typedef struct HMDHeader {
 
 /* Damage decal (gDamagePolys, 0x38 bytes). */
 typedef struct EGSDamagePoly {
-    /* 0x00 */ u8 unk00[0x20];
+    /* 0x00 */ SVECTOR v[4];
     /* 0x20 */ s32 active;
     /* 0x24 */ void *owner;
-    /* 0x28 */ u8 unk28[0x10];
+    /* 0x28 */ u32 uv[4]; /* uv0+clut, uv1+tpage, uv2, uv3 */
 } EGSDamagePoly; /* size 0x38 */
 
 #define DAMAGE_MAX 60
@@ -427,6 +467,12 @@ typedef struct DisplayInitFlags {
 } DisplayInitFlags;
 
 extern DisplayInitFlags D_8010FE40;
+
+/* deferred re-inits requested by EGSDisplayReinitCameras */
+extern struct DamageInitFlags {
+    /* 0x00 */ u8 initGabe;
+    /* 0x01 */ u8 initDamage;
+} D_8010FE68;
 extern u8 *D_8010FE5C; /* gOutPacket saved by EGSDisplayMovieMalloc */
 extern u8 *D_8010FE60; /* D_80110234 saved */
 extern s32 D_8010FE64; /* gPacketAreaSize saved */
@@ -439,6 +485,55 @@ extern MATRIX gEGSIdentityMatrix;
 extern MATRIX GsIDMATRIX2;
 extern u8 *GsOUT_PACKET_P;
 extern u8 gGabeInCamera;
+typedef struct FLEntry {
+    /* 0x00 */ s32 x, y, z;
+    /* 0x0C */ u32 angle; /* bit 31: wide beam */
+} FLEntry;
+extern FLEntry gFLArray[];
+extern s32 gFLCount;
+extern s16 gCurrentCamera;
+extern VECTOR gPCGouraudLight;
+extern VECTOR gFoo;
+extern s32 D_8010FE44; /* reset the Gabe view */
+extern s32 D_8010FE48; /* last VSync count */
+extern char D_8010FE4C[];
+extern char D_8010FE54[];
+extern MATRIX gCameraWSMatrix;
+extern s32 gFogFlag;
+extern u8 gRunFlag;
+extern s32 lastCounterTick;
+extern s32 lastCounterTickSort;
+extern s32 gImagePtr;
+typedef struct EGSImageLevel {
+    u8 *mark;
+} EGSImageLevel;
+typedef struct EGSImage {
+    /* 0x00 */ u8 unk00[4];
+    /* 0x04 */ u8 *start;
+    /* 0x08 */ u8 *end;
+    /* 0x0C */ u8 unk0C[4];
+    /* 0x10 */ EGSImageLevel levels[6]; /* depths follow at +0x18 each */
+    /* 0x28 */ s32 depths[6];
+    /* 0x40 */ s32 enabled;
+} EGSImage; /* size 0x44 */
+extern EGSImage gImages[5];
+extern u32 D_80107B1C[];
+extern VECTOR D_80013740; /* up vector */
+extern s32 gSubsectorsSorted;
+extern s32 gSubsectorPolysSorted;
+extern s32 gGameTick;
+extern s16 gCurrentDrawBuffer;
+extern s16 gSortBuffer;
+extern u8 *gPacketAreaEnd;
+extern s32 gPacketAreaFull;
+typedef struct Str8 {
+    char s[8];
+} Str8;
+extern char D_8010FE38[]; /* 8-byte error message */
+
+/* Run on the scratchpad stack (old sp saved at 0x1F800000). */
+#define SPAD_STACK_ENTER() __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0")
+#define SPAD_STACK_LEAVE() __asm__ volatile("lw $29, 0x1F800000")
 extern s32 gPointSourceHMD;
 extern struct CameraAnim {
     /* 0x00 */ u8 unk00[0xC];
@@ -475,7 +570,10 @@ extern DamageEntry gGabeCacheEntry;
 extern void *gDLA_npc_gun_flash[];
 extern char D_80013734[];
 extern u8 D_8014BAD8[]; /* initial packet area */
-extern TILE D_801225C8[2]; /* fade tiles, per draw buffer */
+extern TILE D_801225C8[2];
+extern DR_AREA D_80122600[]; /* per OT draw areas */
+extern GsBOXF D_80013724; /* video-mode border box */
+extern u16 POSITION[2]; /* fade tiles, per draw buffer */
 extern DR_MODE D_801225E8[2]; /* "s/egsdisp.c" */
 extern u16 gCameraID;
 extern s32 gTerrainFog;
@@ -547,6 +645,38 @@ void EGSDisplaySetupTransformLocalToScreen(EGSCamera *camera, MATRIX *m);
 void EGSDisplayOnScreen();
 void EGSListFlush(EGSListNode **list);
 void EndFlash(EGSAnim *anim);
+void GsSetFlatLight(s32 id, VECTOR *v);
+void GsSetWorkBase(void *base);
+void GsSetLightMode(s32 mode);
+void GsSetFogParam(void *fog);
+void EGSDisplaySetGTEAmbient(s32 r, s32 g, s32 b);
+void EGSDisplayCheckInterruptQueue(u8 vsync);
+void EGSDisplayRunTextureAnimations(void);
+void DCallback(void);
+void EGSDisplaySortFade(GsOT *ot);
+void EGSDisplaySortFogScrim(GsOT *ot);
+s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick);
+void GsSortFastSprite(EGSSprite *sp, GsOT *ot, u16 pri);
+void GsSortSprite(EGSSprite *sp, GsOT *ot, u16 pri);
+void GsSortGLine(void *line, GsOT *ot, u16 pri);
+void InitPointSources(void *anim);
+void FinalizePointSources(void);
+void SortHMDs(EGSCamera *camera, EGSListNode *anims, s16 sortBuffer);
+void SortEMDs(EGSCamera *camera, EGSListNode *anims, s16 sortBuffer);
+void SortGs(EGSCamera *camera, EGSListNode *anims, u16 sortBuffer);
+s32 GetVideoMode(void);
+s32 func_80138718();
+void GsDrawOt(GsOT *ot);
+void GetDispEnv(DISPENV *env);
+void SetDispMask(s32 mask);
+void SetDrawArea(DR_AREA *p, RECT *r);
+void AddPrim(void *ot, void *p);
+void GsSortBoxFill(GsBOXF *box, GsOT *ot, u16 pri);
+u32 EGSDisplayFindAnimBoneVertexNearAndFacing(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out);
+u32 EGSDisplayFindHMDBoneNormalFacing(EGSSectorInfo *hmd, s32 bone, VECTOR *in, EGSAnim *anim);
+int EGSFrameCreateWithNode(EGSFrame **out, EGSFrame *parent);
+int EGSFrameSetMatrixParent(EGSFrame *frame, MATRIX *m);
+s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent);
 void EGSFastInitFaceList(void);
 void SetDrawMode(DR_MODE *p, s32 dfe, s32 dtd, u16 tpage, RECT *tw);
 void SetDrawTPage(DR_TPAGE *p, s32 dfe, s32 dtd, u16 tpage);
@@ -1025,7 +1155,133 @@ void EGSDisplayRunTextureAnimations(void) {
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", a_prim);
 
+#ifdef NON_MATCHING
+/* register allocation: original spills end/maxDepth/flags to the stack differently */
+INCLUDE_PART1("asm/main/nonmatchings/egsdisp", iEGSDisplaySort)
+
+s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
+    DR_TPAGE tpage;
+    GsBOXF box;
+    EGSListNode *sprites = camera->sprites;
+    EGSListNode *polys = camera->polys;
+    EGSListNode *glines = camera->glines;
+    EGSListNode *anims;
+    u8 skip = 0;
+    u8 transp;
+    u32 maxDepth;
+    u8 *end;
+    u8 *pkt;
+    EGSSprite *sp;
+    EGSPrim *prim;
+    s32 len;
+    s32 code;
+    s32 words;
+    s32 abr;
+    u16 sortBuffer;
+
+    gSubsectorsSorted = 0;
+    gSubsectorPolysSorted = 0;
+    gGameTick = tick;
+    camera->polysSorted = 0;
+    camera->unkA2 = 0;
+    transp = camera->flags & 0x10;
+    end = (&gOutPacket)[gCurrentDrawBuffer] + gPacketAreaSize;
+    gPacketAreaEnd = end;
+    maxDepth = 1 << camera->otShift;
+    anims = camera->anims;
+    if (camera->index == 0) {
+        skip = gCameraArray[3].flags & 1;
+    }
+    for (; sprites != NULL && !skip; sprites = sprites->next) {
+        pkt = GsOUT_PACKET_P;
+        sp = sprites->data;
+        if (end < pkt + 0x40) {
+            gPacketAreaFull = 1;
+            break;
+        }
+        if (sp->pri >= maxDepth) {
+            sp->pri = maxDepth - 1;
+        }
+        if (sp->tpage < 0x20) {
+            if (camera->index == 1) {
+                GsSortFastSprite(sp, &gOtbl[gSortBuffer], sp->pri);
+            } else {
+                pkt[3] = 1;
+                ((u32 *)pkt)[1] = 0xE1000200;
+                a_prim((u32 *)gOtbl[gSortBuffer].org + sp->pri, pkt);
+                GsOUT_PACKET_P = pkt + 8;
+                GsSortSprite(sp, &gOtbl[gSortBuffer], sp->pri);
+            }
+        }
+    }
+    if (!(camera->flags & 2) && anims != NULL) {
+        if (camera->index == 0) {
+            InitPointSources(camera->refAnim);
+        }
+        if (sortHMDs) {
+            SortHMDs(camera, anims, gSortBuffer);
+        }
+        if (camera->index == 0) {
+            FinalizePointSources();
+        }
+        SortEMDs(camera, anims, gSortBuffer);
+        sortBuffer = gSortBuffer;
+        SPAD_STACK_ENTER();
+        SortGs(camera, anims, sortBuffer);
+        SPAD_STACK_LEAVE();
+    }
+    camera->polysSorted += gSubsectorPolysSorted;
+    for (; glines != NULL; glines = glines->next) {
+        if (end < GsOUT_PACKET_P + 0x20) {
+            gPacketAreaFull = 1;
+            break;
+        }
+        GsSortGLine(glines->data, &gOtbl[gSortBuffer], 1);
+    }
+    pkt = GsOUT_PACKET_P;
+    for (; polys != NULL && !skip; polys = polys->next) {
+        prim = polys->data;
+        len = ((u8 *)&prim->len)[3];
+        code = ((s8 *)&prim->code)[3] & 0xFD;
+        words = len + 1;
+        if (end < pkt + 0x28) {
+            gPacketAreaFull = 1;
+            break;
+        }
+        if ((len == 2 && code != 0x68) || (len == 3 && code != 0x40) || (len == 6 && code != 0x30) ||
+            (len == 4 && code != 0x20 && code != 0x50) || code == 0 || len <= 0 || (code & 0x80)) {
+            *(Str8 *)gErrorString = *(Str8 *)D_8010FE38;
+            continue;
+        }
+        EGSMiscMemcpy(pkt, &prim->len, words);
+        if (transp && code == 0x3C) {
+            ((u32 *)pkt)[1] &= 0xFF40FF00;
+            ((u32 *)pkt)[4] &= 0xFF40FF00;
+            ((u32 *)pkt)[7] &= 0xFF40FF00;
+            ((u32 *)pkt)[10] &= 0xFF40FF00;
+        }
+        if (prim->tag >= maxDepth) {
+            prim->tag = maxDepth - 1;
+        }
+        a_prim((u32 *)gOtbl[gSortBuffer].org + prim->tag, pkt);
+        pkt += words * 4;
+        if ((code == 0x28 && (abr = prim->data[4]) != 4) || (code == 0x38 && (abr = prim->data[7]) != 4)) {
+            SetDrawTPage(&tpage, 0, 1, GetTPage(2, abr, 0, 0));
+            EGSMiscMemcpy(pkt, &tpage, 2);
+            a_prim(gOtbl[gSortBuffer].org, pkt);
+            pkt += 0x20;
+        }
+    }
+    GsOUT_PACKET_P = pkt;
+    if (GetVideoMode() != 0) {
+        box = D_80013724;
+        GsSortBoxFill(&box, &gOtbl[gSortBuffer], 0);
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", iEGSDisplaySort);
+#endif
 
 void EGSDisplayQueueInterrupt(void (*func)(), s32 delay, s32 arg) {
     EGSListNode *node = gDisplayInterruptList;
@@ -1254,7 +1510,247 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortFogScrim);
 
 INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
 
+#ifdef NON_MATCHING
+/* first draft: run/movie flags are kept on the stack in the original, many spill/scheduling differences */
+INCLUDE_PART1("asm/main/nonmatchings/egsdisp", EGSDisplaySort)
+
+s32 EGSDisplaySort(u8 run, s32 tick) {
+    VECTOR dir;
+    VECTOR up;
+    VECTOR fd;
+    MATRIX m;
+    VECTOR c1;
+    VECTOR c0;
+    VECTOR c2;
+    EGSAnim *ref = NULL;
+    u8 movie;
+    EGSListNode *node;
+    EGSFlashlight *fl;
+    FLEntry *e;
+    EGSCamera *camera;
+    GsOT *ot;
+    EGSImage *img;
+    EGSImageLevel *lv;
+    u32 *tags;
+    u8 *p;
+    u8 *mark;
+    s32 angle;
+    s32 depth;
+    s32 left;
+    s32 k;
+    s16 i;
+    s16 load;
+    u16 t;
+
+    movie = *(u8 *)&gCameraArray[0].flags & 2;
+    if (run) {
+        ref = gCameraArray[0].refAnim;
+    }
+    gErrorString[0] = 0;
+    gPacketAreaFull = 0;
+    gRunFlag = run;
+    lastCounterTickSort = lastCounterTick;
+    if (ref != NULL) {
+        up = D_80013740;
+        dir.vx = ref->frame->matrix.m[0][2];
+        dir.vy = ref->frame->matrix.m[1][2];
+        dir.vy = 0;
+        dir.vz = ref->frame->matrix.m[2][2];
+        OuterProduct12(&dir, &up, &gPCGouraudLight);
+        GsSetFlatLight(0, &gFoo);
+        GsSetFlatLight(1, &gPCGouraudLight);
+        GsSetFlatLight(2, &gFoo);
+    }
+    if (!movie) {
+        EGSDisplayCheckInterruptQueue(run);
+        movie = *(u8 *)&gCameraArray[0].flags & 2;
+    }
+    GsSetWorkBase((&gOutPacket)[gCurrentDrawBuffer]);
+    if (!movie) {
+        node = gFlashlightList;
+        gFLCount = 0;
+        for (; node != NULL; node = node->next) {
+            fl = node->data;
+            fd.vx = fl->frame->matrix.m[0][2];
+            fd.vy = fl->frame->matrix.m[1][2];
+            fd.vy = -fd.vy;
+            fd.vz = fl->frame->matrix.m[2][2];
+            if (fl->headFlag & 1) {
+                fd.vx = -fd.vx;
+                fd.vy = -fd.vy;
+                fd.vz = -fd.vz;
+            }
+            angle = ratan2(fd.vz, fd.vx);
+            e = &gFLArray[gFLCount++];
+            e->x = fl->frame->matrix.t[0];
+            e->y = fl->frame->matrix.t[1];
+            e->y = -e->y;
+            e->z = fl->frame->matrix.t[2];
+            if (fl->color == 0xFF) {
+                e->angle = (angle & 0xFFFF) | 0x80000000;
+            } else {
+                e->angle = angle & 0xFFFF;
+            }
+        }
+        if (gTextureAnimationList != NULL && run) {
+            EGSDisplayRunTextureAnimations();
+        }
+        if (D_8010FE44) {
+            gGabeView.view = GsIDMATRIX2;
+            D_8010FE44 = 0;
+            GsInitCoordinate2(NULL, &gGabeCoord);
+            gGabeView.super = &gGabeCoord;
+        }
+    }
+    for (i = 0; i < gCameraID; i++) {
+        camera = &gCameraArray[i];
+        if (i != 0) {
+            camera->frame->matrix = gCameraArray[0].frame->matrix;
+        }
+        if (camera->id > 0) {
+            camera->anims = gCameraArray[0].anims;
+            camera->sprites = gCameraArray[0].sprites;
+            camera->polys = gCameraArray[0].polys;
+        }
+        gSortBuffer = gCurrentDrawBuffer + camera->index * 2;
+        if (gOtbl[gSortBuffer].length == 0) {
+            continue;
+        }
+        gCurrentCamera = i;
+        if (!movie) {
+            for (node = gFlashlightList; node != NULL; node = node->next) {
+                fl = node->data;
+                m = fl->frame->matrix;
+                if (fl->headFlag & 1) {
+                    c0.vx = m.m[0][0];
+                    c0.vy = m.m[1][0];
+                    c0.vz = m.m[2][0];
+                    c2.vx = m.m[0][2];
+                    c2.vy = m.m[1][2];
+                    c2.vz = m.m[2][2];
+                    c1.vx = m.m[0][1];
+                    c1.vy = m.m[1][1];
+                    c1.vz = m.m[2][1];
+                    c0.vx = -c0.vx;
+                    c0.vy = -c0.vy;
+                    c0.vz = -c0.vz;
+                    c2.vx = -c2.vx;
+                    c2.vy = -c2.vy;
+                    c2.vz = -c2.vz;
+                    m.m[0][0] = c0.vx;
+                    m.m[1][0] = c0.vy;
+                    m.m[2][0] = c0.vz;
+                    m.m[0][1] = c1.vx;
+                    m.m[1][1] = c1.vy;
+                    m.m[2][1] = c1.vz;
+                    m.m[0][2] = c2.vx;
+                    m.m[1][2] = c2.vy;
+                    m.m[2][2] = c2.vz;
+                }
+                gGabeCoord.flg = 0;
+                gGabeCoord.coord = m;
+                GsSetView2(&gGabeView);
+                fl->ws = GsWSMATRIX;
+            }
+        }
+        if (!movie || (camera == &gCameraArray[1] && (gCameraArray[1].flags & 4))) {
+            GsClearOt(0, 0, &gOtbl[gSortBuffer]);
+            if (camera->id >= 0) {
+                GsSetProjection(camera->projection);
+                camera->coord.flg = 0;
+                camera->coord.coord = camera->frame->matrix;
+                GsSetView2(&camera->view);
+                if (gFlashlightList != NULL || gFlashEffect > 0 || (camera->flags & 0x10)) {
+                    gCameraWSMatrix = GsWSMATRIX;
+                }
+                gFogFlag = gTerrainFog;
+                GsSetLightMode(1);
+                GsSetFogParam(&gCameraArray[0].fogNear);
+            }
+            EGSDisplaySetGTEAmbient(camera->ambient[0] * 16, camera->ambient[1] * 16, camera->ambient[2] * 16);
+            if (camera->flags & 1) {
+                iEGSDisplaySort(camera, run, tick);
+            }
+        }
+    }
+    if ((u32)gGameTick < 60) {
+        load = gMaxPackets;
+        if (load >= 10000) {
+            load = 9999;
+        }
+        gLoadP = load;
+    } else {
+        gLoadP = (GsOUT_PACKET_P - (&gOutPacket)[gCurrentDrawBuffer]) / 40;
+    }
+    if (!movie) {
+        ot = &gammaOT[gCurrentDrawBuffer];
+        left = (&gOutPacket)[gCurrentDrawBuffer] + gPacketAreaSize - GsOUT_PACKET_P;
+        GsClearOt(0, 0, ot);
+        if (left > 100) {
+            EGSDisplaySortFade(ot);
+        }
+        if (gFogScrimFlag && gRunFlag && left > 5200) {
+            EGSDisplaySortFogScrim(ot);
+        }
+    }
+    t = gDisplayBuffer;
+    gDisplayBuffer = gCurrentDrawBuffer;
+    gCurrentDrawBuffer = t;
+    if (!movie) {
+        if (gOtbl[0].length != 0) {
+            VSync(1);
+            DrawSync(0);
+            if (gCameraArray[0].flags & 0x10) {
+                tags = D_80107B1C;
+                for (k = 1; k < 4; k++, tags++) {
+                    img = &gImages[(gImagePtr + k) % 5];
+                    p = img->start;
+                    if (img->enabled && p != NULL && p != img->end) {
+                        lv = img->levels;
+                        mark = lv->mark;
+                        depth = 20;
+                        for (; p < img->end; p += 0x14) {
+                            if (p == mark) {
+                                depth = *(s32 *)(lv + 6);
+                                lv++;
+                                mark = lv->mark;
+                            }
+                            if (depth - k <= 0) {
+                                depth = k + 1;
+                            }
+                            ((u32 *)p)[1] = *tags;
+                            AddPrim((u32 *)gOtbl[(s16)gDisplayBuffer].org + depth - k, p);
+                        }
+                    }
+                }
+            }
+        }
+        if (!gRunFlag) {
+            VSync(2);
+        } else {
+            while (VSync(-1) < D_8010FE48 + (run ? gFrameRate : 2)) {
+            }
+        }
+        D_8010FE48 = VSync(-1);
+        EGSDeviceRender();
+        DrawSyncCallback(DCallback);
+        if (gPacketAreaFull) {
+            *(Str8 *)gErrorString = *(Str8 *)D_8010FE4C;
+        } else if (gFaceCache == NULL) {
+            *(Str8 *)gErrorString = *(Str8 *)D_8010FE54;
+        }
+        dTicks++;
+        return 0;
+    }
+    ((EGSAnim *)gCameraArray[0].refAnim)->unk28 = 0;
+    DrawSync(0);
+    VSync(0);
+    EGSDeviceRender();
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySort);
+#endif
 
 s32 EGSDisplayFlush(void) {
     ResetGraph(1);
@@ -1285,7 +1781,95 @@ s32 EGSDisplayFade(s32 dir, u32 speed, void (*done)()) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayDraw);
+s32 EGSDisplayDraw(void) {
+    u16 res[2];
+    DISPENV env;
+    RECT clear;
+    GsBOXF box;
+    GsOT *gamma = &gammaOT[gDisplayBuffer];
+    u8 cleared;
+    EGSCamera *camera;
+    GsOT *ot;
+    RECT *r;
+    RECT *r2;
+    DR_AREA *area;
+    s32 ret;
+    s32 i;
+    s32 pri;
+    s16 idx;
+    u8 lace;
+
+    ResetGraph(1);
+    GsSwapDispBuff();
+    EGSDeviceGraphicsGetResolution(&res[0], &res[1]);
+    SetDispMask(1);
+    if (gCameraArray[0].flags & 2) {
+        ret = func_80138718();
+        if (ret != 0) {
+            return ret;
+        }
+        if (gCameraArray[1].flags & 4) {
+            GsDrawOt(&gOtbl[(s16)(gDisplayBuffer + 2)]);
+        }
+    } else {
+        cleared = 0;
+        GetDispEnv(&env);
+        lace = env.dispY;
+        for (pri = 0; pri < 5; pri++) {
+            for (i = 0; i < gCameraID; i++) {
+                camera = &gCameraArray[i];
+                idx = gDisplayBuffer + camera->index * 2;
+                ot = &gOtbl[idx];
+                if (ot->length == 0 || camera->priority != pri) {
+                    continue;
+                }
+                r = camera->region;
+                if (r->w == 0 || r->h == 0) {
+                    continue;
+                }
+                if (lace == 0 && r->y < 0xF0) {
+                    r->y += 0xF0;
+                } else if (r->y >= 0xF0) {
+                    ((RECT *)camera->region)->y -= 0xF0;
+                }
+                if (!(camera->flags & 1)) {
+                    continue;
+                }
+                area = &D_80122600[idx];
+                SetDrawArea(area, camera->region);
+                AddPrim((u8 *)ot->org + ((4 << ot->length) - 4), area);
+                if (!cleared) {
+                    clear = *(RECT *)camera->region;
+                    if (clear.h != 0xF0) {
+                        clear.h = 0xF0;
+                        clear.y = (clear.y >= 0xF0) ? 0xF0 : 0;
+                    }
+                    ClearImage(&clear, camera->bgColor[0], camera->bgColor[1], camera->bgColor[2]);
+                    cleared = 1;
+                } else if (camera->flags & 8) {
+                    box.attribute = 0;
+                    box.x = ((RECT *)camera->region)->x - POSITION[0];
+                    r2 = camera->region;
+                    if (r2->y >= 0xF0) {
+                        r2->y -= 0xF0;
+                    }
+                    box.y = ((RECT *)camera->region)->y - POSITION[1];
+                    box.w = ((RECT *)camera->region)->w;
+                    box.h = ((RECT *)camera->region)->h;
+                    box.r = camera->bgColor[0];
+                    box.g = camera->bgColor[1];
+                    box.b = camera->bgColor[2];
+                    GsSortBoxFill(&box, ot, (1 << ot->length) - 2);
+                }
+                GsDrawOt(ot);
+            }
+        }
+    }
+    if (!(gCameraArray[0].flags & 2) && (gFadeRGB != 0 || gFogScrimFlag)) {
+        GsDrawOt(gamma);
+    }
+    return 0;
+}
 
 s32 EGSCameraGetFrame(EGSFrame **out) {
     *out = gCameraArray[0].frame;
@@ -1805,7 +2389,72 @@ void InitGabeDamage(void) {
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", InitGabeDamage);
 #endif
 
+#ifdef NON_MATCHING
+/* found-id copy to s5 is placed before the zero test instead of after */
+s32 EGSDisplayRegisterHMDDamage(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out, u8 byVertex) {
+    EGSSectorInfo *hmd = anim->model->info;
+    HMDCacheList *list = hmd->cache;
+    HMDCacheEntry *e;
+    MATRIX *m;
+    u32 id;
+    s32 i;
+    s32 j;
+    s32 n;
+    s32 k;
+
+    if (D_8010FE68.initGabe) {
+        InitGabeDamage();
+        D_8010FE68.initGabe = 0;
+    }
+    if (anim == gCameraArray[0].refAnim) {
+        list = (HMDCacheList *)&gGabeCache;
+    }
+    GsSetProjection(300);
+    if (list == NULL) {
+        return 0;
+    }
+    for (i = 0; i < list->count; i++) {
+        e = &list->entries[i];
+        if (e->model == anim->unk18) {
+            m = &((EGSFrame **)e->model)[bone]->matrix;
+            id = byVertex ? EGSDisplayFindAnimBoneVertexNearAndFacing(anim, bone, in, out)
+                          : EGSDisplayFindHMDBoneNormalFacing(hmd, bone, in, anim);
+            if (id == 0) {
+                return 0;
+            }
+            j = 0;
+            n = e->unk0C;
+            if (!byVertex) {
+                ApplyMatrixLV(m, in, out);
+                out->vx += m->t[0];
+                out->vy += m->t[1];
+                out->vz += m->t[2];
+                out->vy = -out->vy;
+            }
+            if (n == 10) {
+                return 0;
+            }
+            for (; j < n; j++) {
+                if (id == e->values[j]) {
+                    return 0;
+                }
+                if (id < e->values[j]) {
+                    break;
+                }
+            }
+            for (k = n; j < k; k--) {
+                e->values[k] = e->values[k - 1];
+            }
+            e->values[j] = id;
+            e->unk0C++;
+            return 1;
+        }
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayRegisterHMDDamage);
+#endif
 
 s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent) {
     frame->node->parent = parent;
@@ -1814,7 +2463,94 @@ s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent) {
     return 0;
 }
 
+#ifdef NON_MATCHING
+/* frame has 0x10 extra bytes and spill slots/prologue order differ */
+void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
+    EGSFrame *root = anim->frame;
+    MATRIX m;
+    HMDCacheList *list;
+    HMDCacheEntry *entries;
+    HMDCacheEntry *e;
+    EGSFrame **frames;
+    EGSFrame **fp;
+    HMDBlock *blk;
+    EGSFrame *parent;
+    s32 i;
+    s32 j;
+
+    anim->model->info = (EGSSectorInfo *)hmd;
+    anim->model->flags |= 0x400000;
+    anim->unk18 = NULL;
+    anim->rot = NULL;
+    if (copies == 0 || ((EGSSectorInfo *)hmd)->cache == NULL) {
+        list = EGSMemMalloc(8);
+        entries = EGSMemMalloc(copies * sizeof(HMDCacheEntry));
+        if (copies != 0) {
+            list->count = copies;
+            list->entries = entries;
+            ((EGSSectorInfo *)hmd)->cache = list;
+        }
+        for (i = 0; copies != 0 ? i < copies : i <= 0; i++) {
+            frames = EGSMemMalloc(hmd->numBlocks * 4);
+            if (copies != 0) {
+                e = &entries[i];
+                e->owner = NULL;
+                e->model = (HMDCacheModel *)frames;
+                e->rot = EGSMemMalloc(hmd->numBlocks * 8);
+            } else {
+                anim->unk18 = frames;
+                anim->rot = EGSMemMalloc(hmd->numBlocks * 8);
+            }
+            j = 0;
+            blk = (HMDBlock *)(hmd->primOffset * 4 + (u8 *)hmd + 0x24);
+            if (hmd->numBlocks > 0) {
+                fp = frames;
+                do {
+                    m.m[0][0] = blk->m[0];
+                    m.m[1][0] = blk->m[1];
+                    m.m[2][0] = blk->m[2];
+                    m.m[0][1] = blk->m[3];
+                    m.m[1][1] = blk->m[4];
+                    m.m[2][1] = blk->m[5];
+                    m.m[0][2] = blk->m[6];
+                    m.m[1][2] = blk->m[7];
+                    m.m[2][2] = blk->m[8];
+                    m.t[0] = blk->t[0];
+                    m.t[1] = blk->t[1];
+                    j++;
+                    m.t[2] = blk->t[2];
+                    EGSFrameCreateWithNode(fp, NULL);
+                    blk->frame = *fp;
+                    EGSFrameSetMatrixParent(*fp++, &m);
+                    blk = (HMDBlock *)((u8 *)blk + blk->size);
+                } while (j < hmd->numBlocks);
+                j = 0;
+            }
+            blk = (HMDBlock *)(hmd->primOffset * 4 + (u8 *)hmd + 0x24);
+            if (hmd->numBlocks > 0) {
+                fp = frames;
+                do {
+                    if (blk->parent >= 0) {
+                        parent = frames[blk->parent];
+                    } else {
+                        parent = root;
+                    }
+                    j++;
+                    EGSFrameLinkParent(*fp++, parent);
+                    blk = (HMDBlock *)((u8 *)blk + blk->size);
+                } while (j < hmd->numBlocks);
+            }
+        }
+    } else {
+        anim->unk18 = NULL;
+        anim->rot = NULL;
+    }
+    anim->model->anims = anims;
+    anim->haList = NULL;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSAnimHMDLink);
+#endif
 
 void InitPointSources(void *anim) {
     EGSListNode *node = gPointSourceList;
@@ -2162,7 +2898,75 @@ void InitDamagePolys(void) {
     gDamagePolyPtr = 0;
 }
 
+#ifdef NON_MATCHING
+/* callee-saved register assignment and scheduling of the uv setup differ */
+void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTexture *tex, s32 owner) {
+    VECTOR a;
+    VECTOR b;
+    EGSDamagePoly *d;
+    s32 shift;
+    s32 u;
+    s32 w;
+    u16 py;
+    s16 h;
+    s32 v;
+    s32 t;
+
+    d = &gDamagePolys[gDamagePolyPtr++];
+    shift = 9;
+    u = tex->image.px & 0x3F;
+    w = tex->image.pw * 2 - 1;
+    py = tex->image.py;
+    h = tex->image.ph - 1;
+    if (owner == 666) {
+        shift = 8;
+    }
+    if (D_8010FE68.initDamage) {
+        InitDamagePolys();
+        D_8010FE68.initDamage = 0;
+    }
+    if (gDamagePolyPtr == DAMAGE_MAX) {
+        gDamagePolyPtr = 0;
+    }
+    d->active = 1;
+    u *= 2;
+    d->owner = (void *)owner;
+    v = py & 0xFF;
+    d->uv[0] = (((tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F)) << 16) + (v << 8) + u;
+    t = ((v + h) << 8) + u;
+    d->uv[2] = t;
+    d->uv[3] = t + (s16)w;
+    d->uv[1] = ((((py >> 4) & 0x10) | (((tex->image.px & 0x3FF) >> 6) | 0x80) | ((py & 0x200) * 4)) << 16) + (v << 8) + u +
+               (s16)w;
+    OuterProduct12(dir, normal, &a);
+    if (a.vx == 0 && a.vy == 0 && a.vz == 0) {
+        OuterProduct12(dir, pos, &a);
+    }
+    GTEMath_VectorNormal(&a, &a);
+    OuterProduct12(&a, dir, &b);
+    GTEMath_VectorNormal(&b, &b);
+    a.vx >>= shift;
+    a.vy >>= shift;
+    a.vz >>= shift;
+    b.vx >>= shift;
+    b.vy >>= shift;
+    b.vz >>= shift;
+    d->v[0].vx = pos->vx - a.vx + b.vx;
+    d->v[0].vy = -(pos->vy - a.vy + b.vy);
+    d->v[0].vz = pos->vz - a.vz + b.vz;
+    d->v[1].vx = pos->vx + a.vx + b.vx;
+    d->v[1].vy = -(pos->vy + a.vy + b.vy);
+    d->v[1].vz = pos->vz + a.vz + b.vz;
+    d->v[2].vx = pos->vx + a.vx - b.vx;
+    d->v[2].vy = -(pos->vy + a.vy - b.vy);
+    d->v[2].vz = pos->vz + a.vz - b.vz;
+    d->v[3].vx = pos->vx - a.vx - b.vx;
+    d->v[3].vy = -(pos->vy - a.vy - b.vy);
+    d->v[3].vz = pos->vz - a.vz - b.vz;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayRegisterDamage);
+#endif
 
 void EGSDisplayRegisterFootprint(EGSFrame *frame, s32 kind, void *owner) {
     VECTOR dir;

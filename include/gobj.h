@@ -49,20 +49,37 @@ typedef struct EGSFrame {
 
 typedef struct GameObjectRuntime Gobj;
 
-/* Pending CAS action requests (also used for the global per-frame list). */
+/* An animation event/request record: which gobj, CAS action, request bytes, sub, anim set. */
+typedef struct CASAnimEvent {
+    /* 0x00 */ s32 id;
+    /* 0x04 */ s32 action;
+    /* 0x08 */ u8 req0;
+    /* 0x09 */ u8 mode;
+    /* 0x0A */ u8 pad0A[2];
+    /* 0x0C */ s32 sub;
+    /* 0x10 */ struct CASAnimSet *set;
+} CASAnimEvent; /* size 0x14 */
+
+/* Pending CAS action requests (also used for the global per-frame list); 0xAC bytes. */
 typedef struct CASQueue {
     /* 0x00 */ u8 count;
     /* 0x01 */ u8 max;
     /* 0x02 */ u8 pad02[2];
     /* 0x04 */ s32 *items;
     /* 0x08 */ struct CASSlots {
-        s32 current; /* slot in use, -1 when idle */
-        s32 prio[3];
-        s32 state[3];
+        /* 0x00 */ s32 current;   /* slot in use, -1 when idle */
+        /* 0x04 */ s32 action[3]; /* CAS action per slot, 0xFF when free */
+        /* 0x10 */ s32 state[3];  /* 1: running, 2: finished */
+        /* 0x1C */ s32 set[3];    /* anim set index */
+        /* 0x28 */ u8 req[3][2];
+        /* 0x2E */ u8 pad2E[2];
+        /* 0x30 */ s32 sub[3];
+        /* 0x3C */ CASAnimEvent events[2]; /* per body layer, passed to the anim event handler */
+        /* 0x64 */ s16 numDeferred;
+        /* 0x66 */ u8 pad66[2];
+        /* 0x68 */ CASAnimEvent deferred[3]; /* sequence-start callbacks run after the request pass */
     } slots;
-    /* 0x24 */ u8 unk24[0x48];
-    /* 0x6C */ s16 unk6C;
-} CASQueue;
+} CASQueue; /* size 0xAC */
 
 typedef struct CASState {
     /* 0x00 */ u32 flags;
@@ -71,7 +88,7 @@ typedef struct CASState {
     /* 0x09 */ u8 mode;
     /* 0x0A */ u8 unk0A[2];
     /* 0x0C */ struct CASQueue *queue;
-    /* 0x10 */ u8 unk10[4];
+    /* 0x10 */ struct CASAnimSet *animSets; /* 99 sets, 0x2C bytes each */
     /* 0x14 */ void *actionTable;
 } CASState;
 
