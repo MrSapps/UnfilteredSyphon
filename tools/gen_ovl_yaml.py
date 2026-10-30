@@ -54,7 +54,9 @@ segments:
 
 # Overlays that are a single game TU (menu/movie also link Psy-Q library code).
 C_OVERLAYS = {"levspec", "baseext", "cave", "chopper", "subway", "subway2", "park", "park2",
-              "museum", "whouse", "title", "init"}
+              "museum", "whouse", "title", "init", "menu", "movie"}
+# Where the game TU ends and linked Psy-Q library code (kept as asm) begins.
+LIB_START = {"movie": 0x80138B70}  # DecDCTReset (libpress), then libcard/libmcrd
 
 
 def main():
@@ -90,6 +92,8 @@ def main():
                 elif k == "text":
                     if name in C_OVERLAYS:
                         subs.append(f"      - [0x{rom(s.start):X}, c, {name}]")
+                        if name in LIB_START:
+                            subs.append(f"      - [0x{rom(LIB_START[name]):X}, asm, lib]")
                     else:
                         subs.append(f"      - [0x{rom(s.start):X}, asm, text]")
                 elif k == "data":
