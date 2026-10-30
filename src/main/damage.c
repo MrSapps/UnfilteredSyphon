@@ -1,12 +1,180 @@
 #include "common.h"
+#include "system.h"
+#include "gameobj.h"
+#include "gobj.h"
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamagePacketUpdate);
+/* damage.c's small data, still assembled from asm */
+SDATA_LOCAL(D_8010F980)
+SDATA_LOCAL(D_8010F984)
+SDATA_LOCAL(D_8010F988)
+SDATA_LOCAL(D_80110170)
+SDATA_LOCAL(D_80110174)
+SDATA_LOCAL(D_80110178)
+SDATA_LOCAL(D_8011017C)
+SDATA_LOCAL(D_80110180)
+SDATA_LOCAL(D_80110184)
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", func_800669B0);
+typedef void (*DamageCallback)(s16 id, s16 by);
+
+extern DamageCallback D_8010F980; /* damaged callback */
+extern DamageCallback D_8010F984; /* destroyed callback */
+extern u8 D_80110180; /* first pending damage packet, DAMAGE_PACKET_NONE for none */
+extern u8 D_80110184;
+extern void *gBodyArmorHitMsg;
+extern void *D_801077F4; /* flak jacket hit message for level 4 */
+
+/* GameObjectHealth with the fields used here */
+typedef struct GobjHealth {
+    /* 0x00 */ u8 unk00[2];
+    /* 0x02 */ s16 material; /* bullet texture kind */
+    /* 0x04 */ s16 lastAttacker;
+    /* 0x06 */ s16 armor;
+    /* 0x08 */ s16 health;
+    /* 0x0A */ u8 unk0A[2];
+    /* 0x0C */ s16 unk0C;
+} GobjHealth;
+#define GOBJ_HEALTH(g) ((GobjHealth *)(g)->healthInfo)
+
+/* A thrown grenade (passed to its fuse timer callback). */
+typedef struct Grenade {
+    /* 0x00 */ VECTOR32 pos;
+    /* 0x10 */ s32 owner; /* gameObjectsInfo index of the thrower */
+    /* 0x14 */ s32 fuse;
+    /* 0x18 */ u8 active;
+} Grenade;
+
+extern u8 D_80106A28[];
+extern s32 gPlayerOffset;
+extern s32 gSniperMode;
+extern u8 npcGrenadeLandedCheck;
+extern u32 D_801061E0; /* gWeaponInfo[0x14] (grenade) word 0x14: bits 6..15 = blast damage */
+
+s32 BulletTextureGet(s16 material);
+void EGSDisplayRegisterDamage(void *arg0, void *arg1, void *arg2, s32 tex, Gobj *gobj);
+void SniperSetMode(s32 mode);
+void NPCDropPickupStuff(s16 id);
+void EGSAnimShowDetailDef(GameObjectAnim *anim);
+s32 DamageRadius(s16 id, void *pos, s32 damage, s32 radius, s32 radius2, s32 kind, s32 arg6); /* returns objects hit */
+void SysExeTickQueueTimer(void (*cb)(), s32 ticks, void *arg);
+void DamageGOBJ(s32 arg0, s16 from, s16 to, s16 amount, s32 type);
+void func_80069C70(Grenade *g);
+/* NPC state (GameObjectRuntime.npc) fields used here */
+typedef struct DamageNPC {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ s32 flags;
+    /* 0x24 */ u8 unk24[0x28];
+    /* 0x4C */ s8 unk4C; /* -1: dies without a death animation */
+} DamageNPC;
+
+extern u8 NPCEndActivationFlag;
+extern VECTOR32 D_80012164; /* gas cloud particle direction (rodata) */
+extern Grenade D_8011EAE8;  /* the gas cloud's damage ticker */
+
+void DamageDestroyImmediately(s32 by, s32 id);
+void NPCPutFireOnNPCShow(s16 id);
+void SysPlaySong(s32 arg0, s32 song, s32 arg2, void *arg3);
+void ParticleExplosion(s16 id, VECTOR32 *pos, void *dir, s32 size, s32 arg4);
+void ParticleFire(s16 id, VECTOR32 *pos, s32 arg2, s32 color, s32 arg4, s32 arg5, s32 arg6);
+/* Delayed bullet impact (D_8011E8E8[], 0x20 bytes each) */
+typedef struct DamagePacket {
+    /* 0x00 */ s32 x;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ s16 y;
+    /* 0x0A */ s16 nx;
+    /* 0x0C */ s16 ny;
+    /* 0x0E */ s16 nz;
+    /* 0x10 */ s16 target; /* -1: terrain */
+    /* 0x12 */ s16 unk12;
+    /* 0x14 */ s16 from;
+    /* 0x16 */ s16 unk16;
+    /* 0x18 */ s32 kind;
+    /* 0x1C */ u8 delay;
+    /* 0x1D */ u8 next;
+    /* 0x1E */ u8 unk1E;
+    /* 0x1F */ u8 pad1F;
+} DamagePacket;
+
+extern s32 gCurrentWeapon;
+
+/* GameObjectInfo.flags24 low byte: NPC weapon */
+#define GOBJINFO_WEAPON(info) (*(u8 *)&(info)->flags24)
+#define GOBJ_WEAPON_IS(g, w)                                                                         \
+    ((g)->id != gPlayerOffset ? (GOBJINFO_WEAPON(&gameObjectsInfo[(g)->id]) != 0 &&                   \
+                                 GOBJINFO_WEAPON(&gameObjectsInfo[(g)->id]) == (w))                   \
+                              : gCurrentWeapon == (w))
+
+#define DAMAGE_PACKET_NONE 0x10
+
+extern DamagePacket D_8011E8E8[DAMAGE_PACKET_NONE];
+
+void DamageGobjCAS2(s16 target, s16 from, s16 arg2, s16 arg3, s32 kind, s32 arg5, VECTOR32 *pos, VECTOR32 *normal);
+void func_800667C4(DamagePacket *packet, s32 prev); /* frees a packet */
+void ParticleGrenadeLauncher(s16 id, VECTOR32 *pos);
+void ParticleTracer(Gobj *gobj, VECTOR32 *pos, s32 arg2);
+DamagePacket *func_80066714(void); /* allocates a damage packet */
+s32 ParticleDamageDelay(s32 id, VECTOR32 *pos);
+void iDamageShowParticle(s32 id, s32 arg1, s32 kind, VECTOR32 *pos, VECTOR32 *normal);
+extern VECTOR32 D_80012174; /* explosion camera shake vector (rodata) */
+extern u32 D_801061C0;      /* gWeaponInfo[0x13] word 0x14: bits 6..15 = blast damage */
+
+void WeaponDoFiredCallback(s32 id, s32 weapon);
+void GameCameraShakeStart(void *state, s32 ticks, s32 arg2, void *vec, s32 arg4, void *pos);
+void TextAddMarker(u16 id, void *msg, s32 arg2, s32 arg3);
+void NPCSoundGobj(s32 arg0, void *arg1, void *arg2, s32 arg3);
+void ParticleHitWall(void *arg0, void *arg1, void *arg2, s32 color);
+
+void DamagePacketUpdate(void) {
+    VECTOR32 pos;
+    VECTOR32 normal;
+    DamagePacket *packet;
+    Gobj *gobj;
+    s32 i;
+    s32 prev = DAMAGE_PACKET_NONE;
+
+    for (i = D_80110180; i != DAMAGE_PACKET_NONE; i = packet->next) {
+        packet = &D_8011E8E8[i];
+        if (--packet->delay == 0) {
+            pos.vx = packet->x;
+            pos.vy = packet->y;
+            pos.vz = packet->z;
+            normal.vx = packet->nx;
+            normal.vy = packet->ny;
+            normal.vz = packet->nz;
+            if (packet->target < 0) {
+                iDamageShowParticle(packet->from, 0, packet->kind, &pos, &normal);
+            } else {
+                gobj = gameObjectsInfo[packet->target].runtime;
+                if ((*(s32 *)gobj->anim != 0 || packet->target == gPlayerOffset) &&
+                    (gobj->npcState != 2 || (((DamageNPC *)gobj->npc)->flags & 0x200))) {
+                    DamageGobjCAS2(packet->target, packet->from, packet->unk16, packet->unk12, packet->kind,
+                                   packet->unk1E, &pos, &normal);
+                }
+            }
+            func_800667C4(packet, prev);
+        } else {
+            prev = i;
+        }
+    }
+}
+
+void func_800669B0(VECTOR32 *from, Gobj *gobj, VECTOR32 *out) {
+    VECTOR32 pos;
+
+    pos.vx = gobj->anim->frame->pos.vx;
+    pos.vy = gobj->anim->frame->pos.vy;
+    pos.vz = gobj->anim->frame->pos.vz;
+    pos.vy = -pos.vy;
+    out->vx = from->vx - pos.vx;
+    out->vy = from->vy - pos.vy;
+    out->vz = from->vz - pos.vz;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", WhichBoneIsHit);
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", iDamageShowParticleGlassSpark);
+void iDamageShowParticleGlassSpark(void *arg0, void *arg1, void *arg2) {
+    NPCSoundGobj(1, arg0, arg1, 0x1E0);
+    ParticleHitWall(arg0, arg1, arg2, 0xC0FFFF);
+}
 
 INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012144);
 
@@ -18,38 +186,223 @@ INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012174);
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", iDamageShowParticle);
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageSetDamagedCallback);
+DamageCallback DamageSetDamagedCallback(DamageCallback cb) {
+    DamageCallback old = D_8010F980;
+    D_8010F980 = cb;
+    return old;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageSetDestroyedCallback);
+DamageCallback DamageSetDestroyedCallback(DamageCallback cb) {
+    DamageCallback old = D_8010F984;
+    D_8010F984 = cb;
+    return old;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageInit);
+void DamageInit(void) {
+    D_8010F980 = NULL;
+    D_8010F984 = NULL;
+    D_80110184 = 0;
+    D_80110180 = 0x10;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageShowFlakJacketMsg);
+void DamageShowFlakJacketMsg(u16 id) {
+    TextAddMarker(id, gSysInfo.level != 4 ? D_801077F4 : gBodyArmorHitMsg, 0x28, 0);
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS2);
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS);
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageDeathCAS);
+void DamageDeathCAS(s16 id) {
+    Gobj *gobj = gameObjectsInfo[id].runtime;
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageTerrain);
+    gobj->healthInfo->health = -1;
+    if (id == gPlayerOffset) {
+        gobj->healthInfo->armor = 0;
+        if (gSniperMode) {
+            SniperSetMode(0);
+        }
+    } else if (gobj->npcState == 2) {
+        NPCDropPickupStuff(id);
+    }
+    if (gobj->anim->unk00[0xA] & 8) {
+        EGSAnimShowDetailDef(gobj->anim);
+    }
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageShowObjectBulletHole);
+void DamageTerrain(s32 id, VECTOR32 *pos, s32 unused, VECTOR32 *normal, s32 kind) {
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    DamagePacket *packet;
+
+    if (GOBJ_WEAPON_IS(gobj, 0x10)) {
+        ParticleGrenadeLauncher(gobj->id, pos);
+        return;
+    }
+    if (kind == 0x19) {
+        ParticleTracer(gobj, pos, 0);
+        return;
+    }
+    packet = func_80066714();
+    if (packet != NULL && id >= 0) {
+        packet->delay = ParticleDamageDelay(id, pos) + 1;
+        packet->kind = kind;
+        packet->unk1E = 0;
+        packet->target = -1;
+        packet->from = id;
+        packet->x = pos->vx;
+        packet->y = pos->vy;
+        packet->z = pos->vz;
+        packet->nx = normal->vx;
+        packet->ny = normal->vy;
+        packet->nz = normal->vz;
+        ParticleTracer(gobj, pos, 0);
+    } else {
+        iDamageShowParticle(id, 0, kind, pos, normal);
+    }
+}
+
+void DamageShowObjectBulletHole(s16 id, void *arg1, void *arg2) {
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    s32 tex;
+
+    if (gobj->unk20[0] & 0x80) {
+        tex = BulletTextureGet(GOBJ_HEALTH(gobj)->material);
+        if (tex != 0 && gobj->npcState != 2) {
+            EGSDisplayRegisterDamage(arg1, arg2, D_80106A28, tex, gobj);
+        }
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGOBJ);
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGOBJHierarchy);
+void DamageGOBJHierarchy(s16 id, s16 by) {
+    GameObjectInfo *info = gameObjectsInfo;
+    Gobj *gobj = info[id].runtime;
+    s16 ref = info[id].refId;
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageDestroyAssociatedObjects);
+    while (ref != -1) {
+        if (info[ref].runtime != NULL) {
+            DamageGOBJ(-1, by, ref, GOBJ_HEALTH(gobj)->unk0C, 0xF);
+        }
+        info = gameObjectsInfo;
+        ref = info[ref].refId;
+    }
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageDestroyImmediately);
+void DamageDestroyAssociatedObjects(s16 refId, s16 by, s16 type) {
+    s32 i;
+    Gobj *gobj;
+    s16 id;
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageKillAllPeople);
+    for (i = 0; i < gLevelGameObjCount; i++) {
+        if (GOBJ_TYPE(i) == type) {
+            gobj = gameObjectsInfo[i].runtime;
+            if (gobj != NULL) {
+                id = gobj->id;
+                if (gameObjectsInfo[id].refId == refId) {
+                    DamageGOBJ(-1, by, id, gobj->healthInfo->health, 0xF);
+                }
+            }
+        }
+    }
+}
+
+void DamageDestroyImmediately(s32 by, s32 id) {
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+
+    gobj->flags23 |= 2;
+    gobj->healthInfo->health = -1;
+    if (D_8010F984 != NULL) {
+        D_8010F984(id, by);
+    }
+}
+
+void DamageKillAllPeople(s32 by, s16 kind) {
+    s32 i;
+    Gobj *gobj;
+
+    for (i = 0; i < gLevelGameObjCount; i++) {
+        gobj = gameObjectsInfo[i].runtime;
+        if (gobj != NULL && (gobj->npcState == 1 || gobj->npcState == 2)) {
+            if (gobj->npcState == 2 && ((DamageNPC *)gobj->npc)->unk4C == -1) {
+                DamageDestroyImmediately(by, gobj->id);
+            } else {
+                DamageGOBJ(-1, by, gobj->id, gobj->healthInfo->health, kind);
+                if (kind == 0x11) {
+                    NPCPutFireOnNPCShow(gobj->id);
+                }
+            }
+        }
+    }
+    NPCEndActivationFlag = 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageRadius);
 
+#ifdef NON_MATCHING
+/* Register allocation: id/pos callee-saved regs swapped, hit count not sharing radius's reg. */
+void DamageExplosion(s32 id, VECTOR32 *pos, u8 grenade) {
+    VECTOR32 dir = D_80012164;
+    VECTOR32 shake = D_80012174;
+    s32 radius = 0x280;
+    s32 radius2 = 0x280;
+    s32 hits;
+    u8 flags;
+
+    if (grenade) {
+        WeaponDoFiredCallback(id, 0x13);
+        if (id != -1 && id != gPlayerOffset) {
+            radius = 0x140;
+            radius2 = 0x140;
+        }
+    }
+    hits = DamageRadius(id, pos, (D_801061C0 >> 6) & 0x3FF, radius, radius2, 0x11, 1);
+    ParticleExplosion((hits > 0 || !grenade) ? 0x29A : -1, pos, &dir, 0x1000, 1);
+    if (hits > 0) {
+        ParticleFire(-1, pos, 0x1000, -1, 0, 0x32, 0x4B);
+    }
+    GameCameraShakeStart(NULL, 5, 1, &shake, 0, pos);
+    if (grenade) {
+        flags = npcGrenadeLandedCheck;
+        npcGrenadeLandedCheck = id == gPlayerOffset ? flags & ~1 : flags & ~2;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageExplosion);
+#endif
 
+#ifdef NON_MATCHING
+/* The else branch should read g from a0, not the callee-saved copy. */
+void func_80069C70(Grenade *g) {
+    s32 radius;
+    u8 flags;
+
+    if (--g->fuse != -1) {
+        radius = 0x180 - (u32)((200 - g->fuse) * 3) / 2;
+        DamageRadius(g->owner, g, (D_801061E0 >> 6) & 0x3FF, radius, radius, 0x12, 1);
+        SysExeTickQueueTimer(func_80069C70, 1, g);
+    } else if (g->active) {
+        flags = npcGrenadeLandedCheck;
+        npcGrenadeLandedCheck = g->owner == gPlayerOffset ? flags & ~1 : flags & ~2;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/damage", func_80069C70);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGasCloud);
+void DamageGasCloud(s32 id, VECTOR32 *pos, s8 active) {
+    VECTOR32 dir = D_80012164;
+
+    DamageRadius(id, pos, (D_801061E0 >> 6) & 0x3FF, 0x180, 0x180, 0x12, 1);
+    SysPlaySong(0, 0x1D, 0, pos);
+    NPCSoundGobj(1, (void *)id, pos, 0x3C0);
+    ParticleExplosion(-1, pos, &dir, 0x400, 0);
+    ParticleFire(-1, pos, 0x1400, 0x203C5A14, 100, 0, 100);
+    D_8011EAE8.pos.vx = pos->vx;
+    D_8011EAE8.pos.vy = pos->vy;
+    D_8011EAE8.pos.vz = pos->vz;
+    D_8011EAE8.owner = id;
+    D_8011EAE8.fuse = 200;
+    D_8011EAE8.active = active;
+    SysExeTickQueueTimer(func_80069C70, 1, &D_8011EAE8);
+}
