@@ -58,6 +58,10 @@ typedef struct FakeFaceBlock {
 } FakeFaceBlock;
 extern FakeFaceBlock D_8012CEC4; /* == mCollisionFakeFacePool.faces */
 extern u8 D_8012D7AC[30];        /* == mCollisionFakeFacePool.flags */
+#define COLLISION_BOX_MAX 15
+extern FakeVertex mCollisionBoxVertices[COLLISION_BOX_MAX][8];
+extern FakeFace mCollisionBoxFaces[COLLISION_BOX_MAX][6];
+extern u8 mCollisionBoxFaceFlags[COLLISION_BOX_MAX][6];
 extern s32 D_8010FAB4;              /* number of vertices in D_801212D8 */
 extern FakeVertex *D_801212D8[400]; /* vertices whose y is currently negated */
 
@@ -211,7 +215,64 @@ typedef struct FriendlyAnim {
 /* The camera's anim block, wrapped in a temporary gobj to reuse the face-list code. */
 extern FriendlyAnim gCameraAnim;
 
+#ifdef NON_MATCHING
+/* loop strength reduction/regalloc differs (original keeps per-side face offsets in t0/t1/t2) */
+/* Build the six faces (two per axis) of every collision box. */
+void FriendlyInit(void) {
+    FakeVertex *quad[4];
+    s32 box;
+    s32 axis;
+    s32 side;
+
+    for (box = 0; box < COLLISION_BOX_MAX; box++) {
+        for (axis = 0; axis < 3; axis++) {
+            for (side = 0; side < 2; side++) {
+                switch (axis) {
+                    case 0:
+                        quad[0] = &mCollisionBoxVertices[box][side * 4];
+                        quad[1] = &mCollisionBoxVertices[box][side * 4 + 1];
+                        quad[2] = &mCollisionBoxVertices[box][side * 4 + 3];
+                        quad[3] = &mCollisionBoxVertices[box][side * 4 + 2];
+                        break;
+                    case 1:
+                        quad[0] = &mCollisionBoxVertices[box][side * 2];
+                        quad[1] = &mCollisionBoxVertices[box][side * 2 + 4];
+                        quad[2] = &mCollisionBoxVertices[box][side * 2 + 5];
+                        quad[3] = &mCollisionBoxVertices[box][side * 2 + 1];
+                        break;
+                    case 2:
+                        quad[0] = &mCollisionBoxVertices[box][side];
+                        quad[1] = &mCollisionBoxVertices[box][side + 2];
+                        quad[2] = &mCollisionBoxVertices[box][side + 6];
+                        quad[3] = &mCollisionBoxVertices[box][side + 4];
+                        break;
+                }
+                mCollisionBoxFaces[box][axis * 2 + side].face.count = 4;
+                switch (side) {
+                    case 0:
+                        mCollisionBoxFaces[box][axis * 2].face.verts[0] = quad[0];
+                        mCollisionBoxFaces[box][axis * 2].face.verts[1] = quad[1];
+                        mCollisionBoxFaces[box][axis * 2].face.verts[2] = quad[2];
+                        mCollisionBoxFaces[box][axis * 2].face.verts[3] = quad[3];
+                        break;
+                    case 1:
+                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[0] = quad[0];
+                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[1] = quad[3];
+                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[2] = quad[2];
+                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[3] = quad[1];
+                        break;
+                }
+                mCollisionBoxFaces[box][axis * 2 + side].face.flags = &mCollisionBoxFaceFlags[box][axis * 2 + side];
+                mCollisionBoxFaces[box][axis * 2 + side].face.normalPtr =
+                    mCollisionBoxFaces[box][axis * 2 + side].face.normal;
+            }
+        }
+    }
+    func_80086B24();
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyInit);
+#endif
 
 #ifdef NON_MATCHING
 /* original keeps i*32 and a verts base in registers (two vertex address forms); ours strength-reduces */
