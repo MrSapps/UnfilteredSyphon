@@ -107,9 +107,26 @@ void SysStatePop(void);
 void SysStopSound(void);
 void SysStopAllSongs(void);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
-void SysLoadOverlay(char *name, void *addr, s32 arg2);
-void SysLoadTextureCacheOverlay(char *name, s32 arg1);
+void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer);
+void SysLoadTextureCacheOverlay(char *name, u8 arg1);
 void func_80015A64(int state, int push);
+
+/* EGS file API; open/read return 0 on success. */
+s32 EGSFileOpen(char *path, s32 *file);
+void EGSFileGetBufferSize(s32 file, u32 *size);
+s32 EGSFileRead(s32 file, void *buf, u32 size, s32 *nread);
+void EGSFileClose(s32 *file);
+void *EGSMemMalloc(u32 size);
+void EGSMemRegisterVariableOverlayEnd(void *end);
+void EGSListAdd(EGSListNode **list, void *data);
+int sprintf(char *, const char *, ...);
+int DrawSync(int);
+int SysIsPaused(void);
+
+extern char *gLevelNames[];
+extern u8 D_80140FE0[]; /* load address of level overlays */
+
+#define ABS(x) ((x) < 0 ? -(x) : (x))
 
 void SysSoundSetMasterVolume(s32 channel, s32 vol);
 s32 SysSoundGetMasterVolume(s32 channel);

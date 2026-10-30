@@ -113,9 +113,90 @@ void SysFlushMsgQueue(void) {
     mSysMsgQueueNext.count = 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadData);
+s32 SysLoadData(char *name, void **buf, s32 size) {
+    char path[56];
+    s32 file;
+    u32 len;
+    s32 nread;
+    s32 err;
 
+    strcpy(path, name);
+    if (EGSFileOpen(path, &file) != 0) {
+        sprintf(path, "\\COMMON\\%s;1", name);
+        if (EGSFileOpen(path, &file) != 0) {
+            sprintf(path, "\\%s\\%s;1", gLevelNames[gSysInfo.level], name);
+            if (EGSFileOpen(path, &file) != 0) {
+                SysIsPaused();
+                return 0;
+            }
+        }
+    }
+
+    if (size < 0) {
+        EGSFileGetBufferSize(file, &len);
+        if (len < ABS(size)) {
+            len = ABS(size);
+        }
+        *buf = EGSMemMalloc(len);
+    } else if (size != 0) {
+        len = size;
+    } else {
+        EGSFileGetBufferSize(file, &len);
+        *buf = EGSMemMalloc(len);
+    }
+
+    if (*buf == NULL) {
+        EGSFileClose(&file);
+        return 0;
+    }
+    err = EGSFileRead(file, *buf, len, &nread);
+    EGSFileClose(&file);
+    if (err != 0) {
+        *buf = NULL;
+        return 0;
+    }
+    return len;
+}
+
+INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
+
+#ifdef NON_MATCHING
+/* Register allocation differs around the size clamp (limit lands in $a3 directly). */
+void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
+    char path[56];
+    s32 file;
+    u32 len;
+    s32 nread;
+    u8 *dst;
+    u32 max;
+
+    DrawSync(0);
+    sprintf(path, "\\BIN\\%s;1", name);
+#line 1135
+    ASSERT(EGSFileOpen(path, &file) == 0);
+    EGSFileGetBufferSize(file, &len);
+    dst = D_801377E0;
+    if (!viaBuffer) {
+        dst = addr;
+    }
+#line 1139
+    ASSERT(EGSFileRead(file, dst, len, &nread) == 0);
+    if (viaBuffer) {
+        max = D_80145BF0 - D_80140FE0;
+        len = (len + 3) & ~3;
+        if (len < max) {
+            max = len;
+        }
+        len = max;
+        EGSMiscMemcpy(addr, D_801377E0, max >> 2);
+        EGSMemRegisterVariableOverlayEnd(D_80140FE0 + len);
+        tcOverlay[0] = 0;
+    }
+    EGSFileClose(&file);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadOverlay);
+#endif
 
 void SysLoadTextureCacheOverlay(char *name, u8 arg1) {
     if (name == NULL) {
@@ -147,8 +228,6 @@ void StallFadeCallback(void) {
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStall);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", SysStallCheck);
-
-INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
 
 INCLUDE_ASM("asm/main/nonmatchings/system", func_80015A64);
 
@@ -230,7 +309,38 @@ void SysExeTickQueueInit(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/system", SysExeTickQueueTimer);
+void SysExeTickQueueTimer(void (*callback)(s32), s32 ticks, s32 arg) {
+    EGSListNode *node;
+    ExeTickTimer *timer;
+    int i;
+
+    for (node = exeTickTimerList; node != NULL; node = node->next) {
+        timer = node->data;
+        if (timer->callback == callback && timer->arg == arg) {
+            if (ticks == 0) {
+                EGSListRemove(&exeTickTimerList, node);
+                timer->callback = NULL;
+            } else {
+                timer->ticks = ticks;
+            }
+            return;
+        }
+    }
+    if (ticks != 0) {
+        for (i = 0; i < SYS_EXE_TICK_TIMER_MAX; i++) {
+            timer = &mExeTickTimers[i];
+            if (timer->callback == NULL) {
+                break;
+            }
+        }
+#line 1780
+        ASSERT(i < SYS_EXE_TICK_TIMER_MAX);
+        timer->callback = callback;
+        timer->ticks = ticks;
+        timer->arg = arg;
+        EGSListAdd(&exeTickTimerList, timer);
+    }
+}
 
 s32 SysExeTickGetTimerTicks(void (*callback)(s32)) {
     int i;
