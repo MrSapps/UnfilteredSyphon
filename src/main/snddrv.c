@@ -124,15 +124,27 @@ typedef struct SoundEvent {
     /* 0x18 */ struct SoundEvent *next;
 } SoundEvent;
 
-/* A sound group (0x34 bytes) */
+/* A MIDI channel group (0x34 bytes): channels muted by level (SoundSeqCallback marks) */
 typedef struct SoundGroup {
     /* 0x00 */ u8 num;
-    /* 0x01 */ u8 unk01;
-    /* 0x02 */ u8 a[16];
-    /* 0x12 */ u8 b[16];
-    /* 0x22 */ u8 c[16];
+    /* 0x01 */ u8 reg;      /* level source: 0 = global excite, else MIDI register reg - 1 */
+    /* 0x02 */ u8 chan[16]; /* 1-based MIDI channel */
+    /* 0x12 */ u8 lo[16];   /* audible while lo <= level <= hi */
+    /* 0x22 */ u8 hi[16];
     /* 0x32 */ u8 unk32[2];
 } SoundGroup;
+
+/* A recorded mark macro (0x14 bytes) */
+typedef struct MIDIMacro {
+    /* 0x00 */ s32 count;
+    /* 0x04 */ u8 data[16];
+} MIDIMacro;
+
+/* Queued SEPs started together by the next play mark */
+typedef struct SeqQueueState {
+    u8 count;
+    u8 bank; /* high nibble of the next SEP number */
+} SeqQueueState;
 
 /* An XA play request (0xC bytes) */
 typedef struct XAQueue {
@@ -194,7 +206,16 @@ extern XAQueue *D_801101E8;
 extern XAQueue *D_801101EC;
 extern s16 D_801101D0[3]; /* master volumes */
 extern u8 D_801101E0[];   /* MIDI registers */
-extern s32 D_80107890[16]; /* MIDI mute status */
+extern s32 D_80107890[32]; /* per-SEQ MIDI channel mute masks */
+extern u8 D_80107910[32];  /* per-SEQ mark state: skipping (1 = if-false, 2 = else) */
+extern u8 D_80107930[32];  /* per-SEQ mark state: argument bytes still expected */
+extern u8 D_80107950[32];  /* per-SEQ mark state: pending opcode */
+extern u8 D_80107970[32];  /* per-SEQ mark state: operand */
+extern MIDIMacro gMIDIMacro[4];
+extern s16 D_8010FD80;              /* a mark macro is running */
+extern SeqQueueState D_8010FD82;
+extern u8 D_801101D8[8];            /* queued SEP numbers */
+void SsChannelMute(s16 acc, s16 seq, s32 channels);
 
 extern s32 D_8010FD78; /* global excite */
 extern s16 D_8010FD7C; /* MIDI vol */
@@ -263,7 +284,7 @@ void UnprepareXA(void);
 void StopXA(void);
 void ClearMIDIMuteStatus(void);
 void SetStereoMode(s16 mode);
-void SoundSeqCallback(s32 a, s32 b, s32 c);
+s32 SoundSeqCallback(s16 acc, s16 seq, s16 data);
 static void func_800C1380(void);
 static void func_800C1590(s32 com, s32 pos);
 CdlLOC *CDLongToPos(u32 pos, CdlLOC *loc);
@@ -2293,7 +2314,474 @@ void KillAllEventsForSound(SoundBlock *block, s16 snd) {
     }
 }
 
+#ifdef NON_MATCHING
+/* structure follows the target; tail merging (shared skip/count-- tails) and register choice still differ */
+/*
+ * SEP mark callback: the marks embedded in the MIDI underscores form a small
+ * per-sequence script (conditions on the excite level / registers, channel
+ * groups muted by level, macros, queued SEPs). seq == -1 resets everything.
+ */
+s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
+    s16 left, right;
+    s32 i;
+    s32 j;
+    s32 val;
+    u8 k;
+    u8 *p;
+
+    if (acc == -1) {
+        for (i = 7, p = &D_801101D8[7]; i >= 0; i--) {
+            *p-- = 0;
+        }
+        for (i = 0; i < 32; i++) {
+            D_80107910[i] = 0;
+            D_80107930[i] = 0;
+            D_80107950[i] = 0;
+            D_80107970[i] = 0;
+            D_80107890[i] = 0;
+        }
+        for (i = 0; i < 16; i++) {
+            D_801221E8[i].num = 0;
+            D_801221E8[i].reg = 0;
+            for (j = 0; j < 16; j++) {
+                D_801221E8[i].chan[j] = 0;
+                D_801221E8[i].lo[j] = 0;
+                D_801221E8[i].hi[j] = 0;
+            }
+            D_801221E8[i].unk32[0] = 0;
+            D_801221E8[i].unk32[1] = 0;
+        }
+        D_8010FD82.count = 0;
+        return 0;
+    }
+    if (D_80107930[seq] != 0) {
+        switch (D_80107950[seq]) {
+        case 3:
+            if (D_80107910[seq] == 0) {
+                D_801221E8[D_80107970[seq]].num = data;
+            } else {
+                D_80107970[seq] = data;
+            }
+            D_80107930[seq] = 1;
+            D_80107950[seq] = 11;
+            return 0;
+        case 11:
+            if (D_80107910[seq] == 0) {
+                D_801221E8[D_80107970[seq]].reg = data;
+                D_80107930[seq] = D_801221E8[D_80107970[seq]].num * 3;
+            } else {
+                D_80107930[seq] = D_80107970[seq] * 3;
+            }
+            D_80107950[seq] = 4;
+            return 0;
+        case 4:
+            if (D_80107910[seq] == 0) {
+                i = (D_80107930[seq] - 1) / 3;
+                k = D_80107930[seq] % 3;
+                if (k == 0) {
+                    D_801221E8[D_80107970[seq]].chan[i] = data;
+                } else if (k == 2) {
+                    D_801221E8[D_80107970[seq]].lo[i] = data;
+                } else if (k == 1) {
+                    D_801221E8[D_80107970[seq]].hi[i] = data;
+                }
+            }
+            if (--D_80107930[seq] != 0) {
+                return 0;
+            }
+            if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            return 0;
+        case 1:
+            if (D_80107910[seq] == 0) {
+                D_801101E0[D_80107970[seq]] = data;
+            } else if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 2:
+            if (D_80107910[seq] == 0) {
+                if (D_801101E0[D_80107970[seq]] != data) {
+                    D_80107910[seq] = 1;
+                }
+            } else if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 8:
+            if (D_80107910[seq] == 0) {
+                if (D_8010FD78 < data + 1) {
+                    D_80107910[seq] = 1;
+                }
+            } else if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 9:
+            if (D_80107910[seq] == 0) {
+                if (D_8010FD78 != data) {
+                    D_80107910[seq] = 1;
+                }
+            } else if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 10:
+            if (D_80107910[seq] == 0) {
+                if (data - 1 < D_8010FD78) {
+                    D_80107910[seq] = 1;
+                }
+            } else if (D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 12:
+            if (D_80107910[seq] == 0) {
+                if (D_80107930[seq] != 2) {
+                    if (data - 1 < D_801101E0[D_80107970[seq]]) {
+                        D_80107910[seq] = 1;
+                    }
+                } else {
+                    D_80107970[seq] = data - 1;
+                }
+            } else if (D_80107930[seq] == 1 && D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 13:
+            if (D_80107910[seq] == 0) {
+                if (D_80107930[seq] == 2) {
+                    D_80107970[seq] = data - 1;
+                } else if (D_801101E0[D_80107970[seq]] < data + 1) {
+                    D_80107910[seq] = 1;
+                }
+            } else if (D_80107930[seq] == 1 && D_80107910[seq] == 1) {
+                D_80107910[seq] = 0;
+            }
+            D_80107930[seq]--;
+            return 0;
+        case 14:
+            D_80107970[seq] = data - 1;
+            D_80107930[seq] = 1;
+            D_80107950[seq] = 15;
+            return 0;
+        case 15:
+            D_80107930[seq] = 1;
+            D_80107950[seq] = 16;
+            gMIDIMacro[D_80107970[seq]].count = data;
+            return 0;
+        case 16:
+            gMIDIMacro[D_80107970[seq]].data[D_80107930[seq] - 1] = data;
+            if (gMIDIMacro[D_80107970[seq]].count < ++D_80107930[seq]) {
+                D_80107930[seq] = 0;
+            }
+            return 0;
+        }
+        return 0;
+    }
+    switch (data) {
+    case 0:
+    case 1:
+    case 2:
+        D_80107930[seq] = 1;
+        D_80107970[seq] = 0;
+        D_80107950[seq] = data + 8;
+        return 0;
+    case 3:
+        if (D_80107910[seq] == 0) {
+            SsSepStop(acc, seq);
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 4:
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 2;
+        }
+        return 0;
+    case 5:
+        if (D_80107910[seq] == 2) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 6:
+        D_80107930[seq] = 2;
+        D_80107950[seq] = 12;
+        return 0;
+    case 7:
+        D_80107930[seq] = 2;
+        D_80107950[seq] = 13;
+        return 0;
+    case 8:
+        if (D_80107910[seq] == 0) {
+            D_8010FD82.bank = 1;
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 11:
+        D_80107930[seq] = 1;
+        D_80107950[seq] = 14;
+        return 0;
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+        if (D_80107910[seq] == 0) {
+            D_8010FD80 = 1;
+            for (i = 0; i < gMIDIMacro[data - 12].count; i++) {
+                if (D_8010FD80 == 0) {
+                    break;
+                }
+                SoundSeqCallback(acc, seq, gMIDIMacro[data - 12].data[i]);
+            }
+            D_8010FD80 = 0;
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+        if (D_80107910[seq] == 0) {
+            D_8010FD80 = 0;
+            SsSepStop(acc, seq);
+            GetVolumesFromPan(D_8010FD7C, D_8010FD7E, &left, &right, 1);
+            SsSepSetVol(acc, D_801101E0[data - 16] - 1, left, right);
+            SsSepPlay(acc, D_801101E0[data - 16] - 1, 1, 0);
+            if (D_8010FD82.count != 0) {
+                for (i = 0; i < D_8010FD82.count; i++) {
+                    SsSepSetVol(acc, D_801101D8[i], left, right);
+                    SsSepPlay(acc, D_801101D8[i], 1, 0);
+                }
+                D_8010FD82.count = 0;
+            }
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 24:
+    case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+    case 31:
+        if (D_80107910[seq] == 0) {
+            D_801101D8[D_8010FD82.count] = D_801101E0[data - 24] - 1;
+            D_8010FD82.count++;
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 32:
+    case 33:
+    case 34:
+    case 35:
+    case 36:
+    case 37:
+    case 38:
+    case 39:
+    case 40:
+    case 41:
+    case 42:
+    case 43:
+    case 44:
+    case 45:
+    case 46:
+    case 47:
+        D_80107930[seq] = 1;
+        D_80107970[seq] = data - 32;
+        D_80107950[seq] = 3;
+        return 0;
+    case 48:
+    case 49:
+    case 50:
+    case 51:
+    case 52:
+    case 53:
+    case 54:
+    case 55:
+    case 56:
+    case 57:
+    case 58:
+    case 59:
+    case 60:
+    case 61:
+    case 62:
+    case 63:
+        if (D_80107910[seq] == 0) {
+            D_80107970[seq] = data - 48;
+            if (D_801221E8[D_80107970[seq]].reg == 0) {
+                val = D_8010FD78;
+            } else {
+                val = D_801101E0[D_801221E8[D_80107970[seq]].reg - 1];
+            }
+            for (i = 0; i < D_801221E8[D_80107970[seq]].num; i++) {
+                if (D_801221E8[D_80107970[seq]].lo[i] - 1 < val && val < D_801221E8[D_80107970[seq]].hi[i] + 1) {
+                    D_80107890[seq] &= ~(1 << (D_801221E8[D_80107970[seq]].chan[i] - 1));
+                } else {
+                    D_80107890[seq] |= 1 << (D_801221E8[D_80107970[seq]].chan[i] - 1);
+                }
+            }
+            SsChannelMute(acc, seq, D_80107890[seq]);
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 64:
+    case 65:
+    case 66:
+    case 67:
+    case 68:
+    case 69:
+    case 70:
+    case 71:
+    case 72:
+    case 73:
+    case 74:
+    case 75:
+    case 76:
+    case 77:
+    case 78:
+    case 79:
+        if (D_80107910[seq] == 0) {
+            D_8010FD80 = 0;
+            SsSepStop(acc, seq);
+            GetVolumesFromPan(D_8010FD7C, D_8010FD7E, &left, &right, 1);
+            SsSepSetVol(acc, data + (D_8010FD82.bank * 16 - 64), left, right);
+            SsSepPlay(acc, data + (D_8010FD82.bank * 16 - 64), 1, 0);
+            D_8010FD82.bank = 0;
+            if (D_8010FD82.count != 0) {
+                for (i = 0; i < D_8010FD82.count; i++) {
+                    SsSepSetVol(acc, D_801101D8[i], left, right);
+                    SsSepPlay(acc, D_801101D8[i], 1, 0);
+                }
+                D_8010FD82.count = 0;
+            }
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 80:
+    case 81:
+    case 82:
+    case 83:
+    case 84:
+    case 85:
+    case 86:
+    case 87:
+    case 88:
+    case 89:
+    case 90:
+    case 91:
+    case 92:
+    case 93:
+    case 94:
+    case 95:
+        if (D_80107910[seq] == 0) {
+            D_801101D8[D_8010FD82.count] = data - 80 + D_8010FD82.bank * 16;
+            D_8010FD82.bank = 0;
+            D_8010FD82.count++;
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 96:
+    case 97:
+    case 98:
+    case 99:
+    case 100:
+    case 101:
+    case 102:
+    case 103:
+        D_80107930[seq] = 1;
+        D_80107970[seq] = data - 96;
+        D_80107950[seq] = 1;
+        return 0;
+    case 104:
+    case 105:
+    case 106:
+    case 107:
+    case 108:
+    case 109:
+    case 110:
+    case 111:
+        if (D_80107910[seq] == 0) {
+            if (D_801101E0[data - 104] < 0x7E) {
+                D_801101E0[data - 104]++;
+            }
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 112:
+    case 113:
+    case 114:
+    case 115:
+    case 116:
+    case 117:
+    case 118:
+    case 119:
+        if (D_80107910[seq] == 0) {
+            if (D_801101E0[data - 112] != 0) {
+                D_801101E0[data - 112]--;
+            }
+            return 0;
+        }
+        if (D_80107910[seq] == 1) {
+            D_80107910[seq] = 0;
+        }
+        return 0;
+    case 120:
+    case 121:
+    case 122:
+    case 123:
+    case 124:
+    case 125:
+    case 126:
+    case 127:
+        D_80107930[seq] = 1;
+        D_80107970[seq] = data - 120;
+        D_80107950[seq] = 2;
+        return 0;
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/snddrv", SoundSeqCallback);
+#endif
 
 void SetMIDIRegister(s32 reg, s16 value) {
     if (value >= 0x80) {
@@ -2338,15 +2826,15 @@ void ResetMIDICallback(void) {
 }
 
 void GetGroupMember(s32 group, s32 i, s32 *a, s32 *b, s32 *c) {
-    *a = D_801221E8[group].a[i];
-    *b = D_801221E8[group].b[i];
-    *c = D_801221E8[group].c[i];
+    *a = D_801221E8[group].chan[i];
+    *b = D_801221E8[group].lo[i];
+    *c = D_801221E8[group].hi[i];
 }
 
 void SetGroupMember(s32 group, s32 i, u8 a, u8 b, s32 c) {
-    D_801221E8[group].a[i] = a;
-    D_801221E8[group].b[i] = b;
-    D_801221E8[group].c[i] = c;
+    D_801221E8[group].chan[i] = a;
+    D_801221E8[group].lo[i] = b;
+    D_801221E8[group].hi[i] = c;
 }
 
 u8 GetNumGroupMembers(s32 group) {
