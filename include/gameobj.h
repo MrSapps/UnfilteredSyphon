@@ -51,7 +51,8 @@ typedef struct GameObjectRuntime {
     /* 0x08 */ GameObjectAnim *anim;
     /* 0x0C */ u8 unk0C[0xC];
     /* 0x18 */ GameObjectHealth *healthInfo;
-    /* 0x1C */ u8 unk1C[7];
+    /* 0x1C */ struct NPCInfo *npc;
+    /* 0x20 */ u8 unk20[3];
     /* 0x23 */ u8 flags23;
 } GameObjectRuntime;
 

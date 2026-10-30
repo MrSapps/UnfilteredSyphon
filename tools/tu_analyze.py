@@ -28,15 +28,19 @@ def functions(elf="build/scus_942.40.elf"):
     shentsize, shnum = st.unpack_from("<HH", data, 0x2E)
     shdrs = [st.unpack_from("<IIIIIIIIII", data, shoff + i * shentsize) for i in range(shnum)]
     funcs = {}
+    SHF_EXECINSTR = 4
     for sh in shdrs:
         if sh[1] != 2:
             continue
         strtab = shdrs[sh[6]][4]
         for off in range(sh[4], sh[4] + sh[5], 16):
-            nm, value, _, info, _, _ = st.unpack_from("<IIIBBH", data, off)
-            if info & 0xF == 2 and nm:  # STT_FUNC
+            nm, value, _, info, _, shndx = st.unpack_from("<IIIBBH", data, off)
+            styp = info & 0xF
+            in_text = 0 < shndx < len(shdrs) and shdrs[shndx][2] & SHF_EXECINSTR
+            # cc1 2.7.2 doesn't mark C functions with .type, so accept untyped text symbols too
+            if nm and (styp == 2 or (styp == 0 and in_text)):
                 name = data[strtab + nm : data.index(b"\0", strtab + nm)].decode()
-                if not name.startswith("__maspsx"):
+                if not name.startswith(("__maspsx", ".", "$", "jtbl_")) and "NON_MATCHING" not in name:
                     funcs.setdefault(value, name)
     return [[n, a] for a, n in sorted(funcs.items())]
 

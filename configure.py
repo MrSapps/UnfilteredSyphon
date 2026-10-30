@@ -59,8 +59,9 @@ ASFLAGS = "-EL -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 -Iinclude"
 # Psy-Q 4.x cc1psx (GCC 2.7.2), verified by exact matches in system.c.
 CC1 = f"{TOOLS}/compilers/gcc-2.7.2-psx/cc1"
 CPPFLAGS = "-P -undef -D__GNUC__=2 -Dmips -D__psx__ -DINCLUDE_ASM_USE_MACRO_INC=1 -Iinclude -Isrc"
-CFLAGS = "-quiet -O2 -G8 -mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -funsigned-char"
-MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G8 --expand-div"
+# -G is per module: the main exe uses $gp small data (-G8), overlays can't reach it (-G0).
+CFLAGS = "-quiet -O2 -G$gsize -mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -funsigned-char"
+MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G$gsize --expand-div"
 
 
 def write_main_ext_syms():
@@ -133,12 +134,14 @@ def main():
         n.rule(
             "cc",
             # __FILE__ must read "s/<name>.c" as on the original dev machine (used by ASSERT)
-            "(printf '#line 1 \"$origname\"\\n'; cat $in)"
+            # pipefail: a failing stage must fail the build, not yield an empty object
+            "bash -o pipefail -c \""
+            "(printf '#line 1 \\\"$origname\\\"\\\\n'; cat $in)"
             f" | cpp {CPPFLAGS} -MMD -MF $out.d -MT $out"
             f" | {CC1} {CFLAGS} -o -"
-            " | sed 's/^\\t\\.rdata$$/\\t.section .rodata/'"
             f" | {sys.executable} {MASPSX}"
-            " | ${cross}as $asflags -o $out -",  # -G0: maspsx decides what is gp-relative
+            " | sed 's/^\\s*\\.rdata\\s*$$/\\t.section .rodata/'"
+            " | ${cross}as $asflags -o $out -\"",  # as -G0: maspsx decides what is gp-relative
             description="CC $in",
             depfile="$out.d",
             deps="gcc",
@@ -174,7 +177,7 @@ def main():
                     # INCLUDE_ASM'd files aren't seen by cpp's depfile
                     incs = re.findall(r'INCLUDE_(?:ASM|RODATA)\("([^"]+)", (\w+)\)', (ROOT / src).read_text())
                     n.build(o, "cc", src, implicit=[f"{d}/{f}.s" for d, f in incs],
-                            variables=dict(origname=f"s/{Path(src).name}"))
+                            variables=dict(origname=f"s/{Path(src).name}", gsize="8" if m["exe"] else "0"))
                 elif src.endswith(".s"):
                     n.build(o, "as", src, implicit=["include/macro.inc"])
                 else:

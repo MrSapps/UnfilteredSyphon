@@ -31,10 +31,11 @@ typedef struct LevelObjectives {
     /* 0x08 */ s32 count;
     /* 0x0C */ u8 unk0C[4];
     /* 0x10 */ u32 completed; /* bit per objective */
-    /* 0x14 */ u8 unk14[4];
-    /* 0x18 */ s32 unk18;
-    /* 0x1C */ u8 unk1C[8];
-    /* 0x24 */ u32 unk24; /* bit per objective */
+    /* 0x14 */ u32 unk14;     /* bit per objective */
+    /* 0x18 */ u32 unk18;     /* bit per objective */
+    /* 0x1C */ u32 unk1C;     /* bit per objective */
+    /* 0x20 */ u32 unk20;     /* bit per objective */
+    /* 0x24 */ u32 unk24;     /* bit per objective */
 } LevelObjectives;
 
 extern LevelObjectives *gObjectives;
@@ -58,6 +59,51 @@ extern u8 gUsingSndBigFire;
 extern s32 gLevelInnocentsKilled;
 extern s16 gDefaultLevelDmgFX;
 extern void (*gSysMovieDoneCallback)(void);
+
+/* NPC state hanging off GameObjectRuntime.npc */
+typedef struct NPCInfo {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ s32 flags;
+    /* 0x24 */ u8 unk24[0x23];
+    /* 0x47 */ u8 nameMsgId;
+    /* 0x48 */ u8 unk48;
+} NPCInfo;
+
+extern s16 gLevelSpecificNpcID;
+extern s16 gLevelSpecificNpcID2;
+extern void *gLevelSpecificNpcName;
+extern void *gLevelSpecificNpc2Name;
+extern u8 gLevelAlerted;
+extern void *gLevelAlertedMsg;
+extern void *gPhaganMsg;
+extern void *gMeiXingMsg;
+extern void *gObjectivesIncompleteMsg;
+extern void *gRemainingMsg;
+extern void *gCheckpointMsg;
+extern void *gElectronicallyLockedMsg;
+extern void *gLockCodeRequiredMsg;
+extern s32 gLevelKeycards;
+extern s32 gLevelKeycardsTaken;
+extern u32 gWeaponsAvailable[];
+void npcSetLevelAlert(void);
+void WeaponSetWeaponFiredCallback(void (*cb)());
+void LevelMissionFailed(s32 reason, s32 arg1, s32 arg2);
+void StringMissionFailedMsg();
+void LevelObjectivesIncomplete(void *msg);
+void DamageDestroyImmediately(s32 arg0, s16 id);
+void ObjectDoMovieEx(char *name, s32 arg1, s16 arg2, s16 arg3);
+void LevelMissionCtrMsg(char *msg, s32 arg1);
+void ObjectTeleportPlayer(s16 id, s32 arg1);
+void GameCameraRequestCutToBehind(void);
+void InterfaceSetAddLevelSpecificNPCCallback(void (*cb)());
+void NPCSetCopDeactivateCallback(void (*cb)());
+void ObjectSetMovieDoneCallback(void (*cb)());
+void CASRequestAction(s32 id, s32 action);
+void StringObjectiveObjectsRemaining2(void *buf, void *fmt, void *remaining, void *arg3, s32 done, s32 total);
+void StringInteractObjectsRemaining(void *fmt, s32 left);
+void ObjectRefMultiSYSPOSTMSG0(s16 id, s32 msg, s32 arg2);
+void SaveCreateContinue(void);
+void PickupSetKeyCallback(void (*cb)());
 
 extern s32 gPlayerOffset; /* object id of the player */
 extern u8 gDeviceDetonated;
