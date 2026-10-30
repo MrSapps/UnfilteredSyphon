@@ -95,6 +95,12 @@ void CobjRemoveBulletCollisionBoxGobj(Gobj *obj);
 void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
+void func_8014819C(Gobj *obj);              /* in an overlay */
+void InterfaceAddBomb(s16 id);
+void NPCEnableGenerator(s16 id);
+void NPCHazmatStop(s32 id);
+void ObjectDetonateBomb(Gobj *obj);
+void UseBeaconUpdate(Gobj *obj);
 void WeaponRemove(s32 weapon);
 void SysExeTickQueueTimer(void (*fn)(), s32 ticks, void *arg);
 void iSwitchReactivate(Gobj *obj);
@@ -844,7 +850,106 @@ INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DF0);
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", AUTOPICKUPObjDispatch);
 
-INCLUDE_ASM("asm/main/nonmatchings/pickup", BOMBObjDispatch);
+void BOMBObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    Gobj *bomb = gameObjectsInfo[msg->to].runtime;
+    u8 byPlayer;
+    u8 usable;
+
+    switch (msg->id) {
+    case 6:
+        CobjAddBulletCollisionBoxGobj(bomb, 1, 0, 0);
+        CobjAddCollisionBoxGobj(bomb, 1, 0, 1, 0);
+        if (!(bomb->flags1 & 0x80) && bomb->healthInfo->health > 0) {
+            InterfaceAddBomb(bomb->id);
+        }
+        break;
+    case 5:
+        CobjRemoveBulletCollisionBoxGobj(bomb);
+        CobjRemoveCollisionBoxGobj(bomb);
+        if (!(bomb->flags1 & 0x80) && bomb->healthInfo->health > 0) {
+            InterfaceDeleteBomb();
+        }
+        break;
+    case 13:
+        if (!(bomb->flags1 & 0x80) && bomb->healthInfo->health <= 0) {
+            ObjectDetonateBomb(bomb);
+        }
+        break;
+    case 18:
+        if (!(bomb->flags0 & 0x20) && bomb->healthInfo->health > 0) {
+            PickupAddUseMsg(bomb->id, 0);
+            SysPostMessage(0x24, 4, bomb->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        break;
+    case 19:
+        if (!(bomb->flags0 & 0x20)) {
+            PickupRemoveUseMsg(bomb->id);
+            SysPostMessage(0x19, 3, bomb->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        break;
+    case 20:
+        if (!(bomb->flags1 & 0x80)) {
+            s16 ref = gameObjectsInfo[bomb->id].refId;
+
+            if (ref != -1) {
+                gameObjectsInfo[ref].runtime->flags23 &= ~1;
+                NPCEnableGenerator(ref);
+            }
+        }
+        break;
+    case 36:
+    case 39:
+        byPlayer = msg->from == gPlayerOffset;
+        if (byPlayer) {
+            usable = !(bomb->flags0 & 0x20);
+        } else {
+            usable = !(bomb->flags1 & 0x80);
+        }
+        if (usable) {
+            if (byPlayer) {
+                bomb->flags0 |= 0x20;
+                UseBeaconUpdate(bomb);
+                UseObject(bomb->id);
+            } else {
+                bomb->flags1 |= 0x80;
+                bomb->flags23 |= 8;
+                UseBeaconUpdate(bomb);
+                NPCHazmatStop(msg->from);
+                InterfaceDeleteBomb();
+                if (bomb->anim->unk00[0xA] & 8) {
+                    EGSAnimShowDetailDef(bomb->anim);
+                }
+            }
+            pos.vx = bomb->anim->frame->pos.vx;
+            pos.vy = bomb->anim->frame->pos.vy;
+            pos.vz = bomb->anim->frame->pos.vz;
+            pos.vy = -pos.vy;
+            SysPlaySong(1, 0x14, 0, (s32)&pos);
+            if (bomb->healthInfo->health > 0 && D_8010FD04 != NULL) {
+                D_8010FD04(bomb->id, (s16)msg->from);
+            }
+        }
+        break;
+    case 41:
+        *(s32 *)msg->data[0] = (bomb->flags23 >> 1) & 1;
+        *(s16 *)msg->data[1] = bomb->flags0 | (bomb->flags1 << 8);
+        break;
+    case 42:
+        bomb->flags0 = ((u8 *)msg->data[1])[0];
+        bomb->flags1 = ((u8 *)msg->data[1])[1];
+        if (bomb->flags1 & 0x80) {
+            bomb->flags23 |= 2;
+            if ((bomb->flags1 & 0x80) && (bomb->anim->unk00[0xA] & 8)) {
+                EGSAnimShowDetailDef(bomb->anim);
+            }
+        }
+        break;
+    case 2:
+        func_8014819C(bomb);
+        break;
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", COMPUTERObjDispatch);
 
