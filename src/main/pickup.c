@@ -96,6 +96,14 @@ void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
 void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
 void func_8014819C(Gobj *obj);              /* in an overlay */
+void func_80148440(Gobj *obj, s32 type);    /* in an overlay */
+void func_8008D548(Gobj *door, s32 type);
+void func_8008C194(Gobj *obj);
+void func_8008C058(Gobj *obj, s32 openerId);
+void ObjectRemoveAndIgnoreBulletHoles(Gobj *obj);
+void MovementAddGobj(Gobj *obj);
+void PathSetPositionToPoint(Gobj *obj, s32 point);
+void EGSFrameSetRotationYXZ(EGSFrame *frame, s32 arg1, VECTOR32 *rot);
 void func_801487D4(Gobj *obj, s32 type);    /* in an overlay */
 u8 PathObjectIsAtClosestPoint(Gobj *obj, Gobj *other, s32 arg2, s32 arg3, s32 arg4);
 void func_80143424(Gobj *obj);              /* in an overlay */
@@ -1175,7 +1183,196 @@ void COMPUTERObjDispatch(SysMsg *msg) {
 
 INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008D548);
 
+#ifdef NON_MATCHING
+/* type switch in case 24 has more cases (0x61/0x54) in the original; early part 4 insns off */
+void DOORObjDispatch(SysMsg *msg) {
+    VECTOR32 rot;
+    Gobj *door = gameObjectsInfo[msg->to].runtime;
+    s32 type = GOBJ_TYPE(door->id);
+    s32 ref;
+    Gobj *linked;
+    s32 state;
+
+    switch (msg->id) {
+    case 10:
+        if (!(door->flags0 & 0x10)) {
+            func_8008D548(door, type);
+        }
+        break;
+    case 6:
+        if (!(door->flags1 & 0x80)) {
+            CobjAddBulletCollisionBoxGobj(door, 1, 0, (door->unk20[0] >> 4) & 1);
+        }
+        CobjAddCollisionBoxGobj(door, 1, 0, 1, 1);
+        break;
+    case 5:
+        if (!(door->flags1 & 0x80)) {
+            CobjRemoveBulletCollisionBoxGobj(door);
+        }
+        CobjRemoveCollisionBoxGobj(door);
+        break;
+    case 26:
+        if ((door->flags1 & 7) != 4) {
+            SysPostMessage(0x1A, 4, door->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        break;
+    case 13:
+        if (door->healthInfo->health <= 0 && (door->unk20[0] & 0x10)) {
+            if (door->anim->unk00[0xA] & 8) {
+                EGSAnimShowDetailDef(door->anim);
+                EGSDisplayRemoveDamage(door);
+            } else {
+                door->flags23 |= 2;
+                ObjectRemoveAndIgnoreBulletHoles(door);
+            }
+        }
+        break;
+    case 18:
+        if (!(door->flags0 & 0x10)) {
+            if (!(door->flags0 & 0x20) && type != 0x61 && type != 0x54) {
+                SysPostMessage(0x18, 3, door->id, gPlayerOffset, 0, 0, 0, 0);
+            }
+        } else {
+            PickupAddUseMsg(door->id, 3);
+        }
+        break;
+    case 19:
+        if (!(door->flags0 & 0x20)) {
+            if (!(door->flags0 & 0x10)) {
+                if (type != 0x61 && type != 0x54) {
+                    SysPostMessage(0x19, 3, door->id, gPlayerOffset, 0, 0, 0, 0);
+                }
+            } else {
+                PickupRemoveUseMsg(door->id);
+            }
+        }
+        break;
+    case 20:
+        if ((door->flags0 & 8) && (type == 7 || type == 0x3B)) {
+            break;
+        }
+        if (type == 0x61 || type == 0x54) {
+            door->flags0 &= ~0x10;
+            door->flags23 |= 2;
+            door->healthInfo->health = -1;
+            break;
+        }
+    case 21:
+        door->flags0 |= 8;
+        if (!(door->flags1 & 0x80)) {
+            ObjectRemoveAndIgnoreBulletHoles(door);
+        }
+        if (type != 0x3E) {
+            func_8008C194(door);
+            func_8008D548(door, type);
+            break;
+        }
+    case 24:
+        if (door->flags0 & 0x10) {
+            break;
+        }
+        func_8008C194(door);
+        switch (type) {
+        case 0x49:
+        case 0x71:
+        case 0x76:
+        case 0x60:
+        case 0xA:
+        case 0x6:
+            func_8008C058(door, msg->from);
+            for (ref = gameObjectsInfo[door->id].refId; ref != -1; ref = gameObjectsInfo[ref].refId) {
+                linked = gameObjectsInfo[ref].runtime;
+                if (linked != NULL && linked->npcState == 9) {
+                    linked->flags0 |= 0x28;
+                    func_8008C058(linked, msg->from);
+                    if (!(linked->flags1 & 0x80)) {
+                        ObjectRemoveAndIgnoreBulletHoles(linked);
+                    }
+                    SysPostMessage(0xA, 5, door->id, linked->id, 0, 0, 0, 0);
+                }
+            }
+            break;
+        case 0x3E:
+            if (door->flags0 & 0x20) {
+                return;
+            }
+            door->flags1 = (door->flags1 & ~7) | 2;
+            MovementAddGobj(door);
+            rot.vx = 0x44444;
+            rot.vy = 0;
+            rot.vz = 0;
+            door->move->unkF0.vx += rot.vx;
+            door->move->unkF0.vy += rot.vy;
+            door->move->unkF0.vz += rot.vz;
+            break;
+        }
+        door->flags0 |= 0x28;
+        if (!(door->flags1 & 0x80)) {
+            ObjectRemoveAndIgnoreBulletHoles(door);
+        }
+        if (msg->id == 0x18) {
+            SysPostMessage(0x19, 3, door->id, gPlayerOffset, 0, 0, 0, 0);
+        }
+        func_8008D548(door, type);
+        break;
+    case 27:
+        if (door->flags0 & 0x10) {
+            door->flags0 &= ~0x10;
+        }
+        break;
+    case 41:
+        state = (door->flags23 >> 1) & 1;
+        if (door->move != NULL) {
+            state |= door->move->unk174 << 16;
+        }
+        *(s32 *)msg->data[0] = state;
+        if ((door->flags0 & 1) && type != 0x3E) {
+            door->flags0 ^= 2;
+        }
+        *(s16 *)msg->data[1] = door->flags0 | (door->flags1 << 8);
+        if ((door->flags0 & 1) && type != 0x3E) {
+            door->flags0 ^= 2;
+        }
+        break;
+    case 42:
+        if (*(s16 *)msg->data[0] != 0) {
+            door->flags23 |= 2;
+        } else if (door->healthInfo->health <= 0 && (door->anim->unk00[0xA] & 8)) {
+            EGSAnimShowDetailDef(door->anim);
+        }
+        door->flags0 = ((u8 *)msg->data[1])[0];
+        door->flags1 = ((u8 *)msg->data[1])[1];
+        if (type != 0x3E) {
+            if (door->move != NULL) {
+                door->move->unk174 = ((s16 *)msg->data[0])[1];
+                door->move->unk17C = door->move->unk174 != 0;
+                PathSetPositionToPoint(door, door->move->unk174);
+                door->flags0 &= ~8;
+            }
+            if ((door->flags0 & 8) ||
+                ((door->flags0 & 1) && (door->move == NULL || type == 7 || type == 0x3B))) {
+                SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
+            }
+        } else if (door->flags0 & 1) {
+            door->flags1 = (door->flags1 & ~7) | 4;
+            rot = door->move->rot;
+            rot.vx += 0x3F4;
+            if (rot.vx > 0x800) {
+                rot.vx -= 0x1000;
+            } else if (rot.vx < -0x800) {
+                rot.vx += 0x1000;
+            }
+            EGSFrameSetRotationYXZ(door->anim->frame, 0, &rot);
+        }
+        break;
+    case 2:
+        func_80148440(door, type);
+        break;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", DOORObjDispatch);
+#endif
 
 /* Door update: run the open/close path and post the open/close messages. */
 void func_8008E418(Gobj *door, s32 type) {

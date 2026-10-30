@@ -11,7 +11,11 @@ typedef struct VECTOR32 {
 /* Per-object movement bookkeeping (0x1B8 bytes, EGSMemMalloc'd). */
 typedef struct MoveInfo {
     /* 0x000 */ VECTOR32 pos;
-    /* 0x010 */ u8 unk010[0xF9];
+    /* 0x010 */ u8 unk010[0x70];
+    /* 0x080 */ VECTOR32 rot; /* rotation angles */
+    /* 0x090 */ u8 unk090[0x60];
+    /* 0x0F0 */ VECTOR32 unkF0; /* angular push, applied by the movement update */
+    /* 0x100 */ u8 unk100[9];
     /* 0x109 */ u8 unk109;
     /* 0x10A */ u8 unk10A[2];
     /* 0x10C */ VECTOR32 unk10C; /* position (y grows downwards) */
