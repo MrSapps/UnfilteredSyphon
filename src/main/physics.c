@@ -1,11 +1,176 @@
 #include "common.h"
+#include "gobj.h"
 
-INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsGobjBasicInit);
+typedef struct PhysVector {
+    s32 vx, vy, vz;
+} PhysVector;
 
-INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsGobjInit);
+/* The physics view of MoveInfo (gobj.h) */
+typedef struct PhysMove {
+    /* 0x000 */ u8 unk000[0x70];
+    /* 0x070 */ PhysVector velocity;
+    /* 0x07C */ u8 unk07C[0x85];
+    /* 0x101 */ u8 enabled;
+    /* 0x102 */ u8 unk102[2];
+    /* 0x104 */ s32 mass; /* 0x1000 = 1.0 */
+    /* 0x108 */ u8 unk108[0xA4];
+    /* 0x1AC */ void *physics;
+} PhysMove;
 
-INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsGobjUpdate);
+typedef struct PhysGobj {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ PhysMove *move;
+} PhysGobj;
 
+extern PhysVector gPhysicsGravityAcceleration;
+
+void *EGSMemMalloc(u32 size);
+s32 EGSMathFIXMul(s32 a, s32 b);
+s32 EGSMathFIXDiv(s32 a, s32 b);
+void EGSMath_VectorModulus(PhysVector *v, s32 *out);
+void EGSMath_VectorNegate(PhysVector *v, PhysVector *out);
+void EGSGeometry_VectorProjectOnPlane(PhysVector *v, PhysVector *normal, PhysVector *out);
+
+#define VECTOR_IS_ZERO(v) ((v)->vx == 0 && (v)->vy == 0 && (v)->vz == 0)
+
+s32 PhysicsGobjBasicInit(PhysGobj *gobj, s32 mass, u8 enabled) {
+    if (gobj == NULL || gobj->move == NULL) {
+        return 0;
+    }
+    gobj->move->mass = mass;
+    gobj->move->enabled = enabled;
+    return 1;
+}
+
+s32 PhysicsGobjInit(PhysGobj *gobj, s32 mass, u8 enabled) {
+    PhysMove *move;
+
+    if (gobj == NULL) {
+        return 0;
+    }
+    move = gobj->move;
+    if (move == NULL) {
+        return 0;
+    }
+    if (move->physics == NULL) {
+        if ((move->physics = EGSMemMalloc(8)) == NULL) {
+            return 0;
+        }
+    }
+    PhysicsGobjBasicInit(gobj, mass, enabled);
+    return 1;
+}
+
+s32 PhysicsGobjUpdate(PhysGobj *gobj) {
+    if (gobj == NULL || gobj->move == NULL) {
+        return 0;
+    }
+    if (gobj->move->physics == NULL) {
+        return 0;
+    }
+    if (gobj->move->enabled == 1) {
+        gobj->move->velocity.vx += gPhysicsGravityAcceleration.vx;
+        gobj->move->velocity.vy += gPhysicsGravityAcceleration.vy;
+        gobj->move->velocity.vz += gPhysicsGravityAcceleration.vz;
+    }
+    return 1;
+}
+
+#ifdef NON_MATCHING
+/* Scheduling: the original stores each quotient one call later (in the
+ * next jal delay slot). */
+s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
+    PhysVector accel;
+    s32 mass;
+
+    if (gobj == NULL || gobj->move == NULL) {
+        return 0;
+    }
+    mass = gobj->move->mass;
+    if (mass > 0 && mass != 0x1000) {
+        accel.vx = EGSMathFIXDiv(force->vx, mass);
+        accel.vy = EGSMathFIXDiv(force->vy, mass);
+        accel.vz = EGSMathFIXDiv(force->vz, mass);
+        gobj->move->velocity.vx += accel.vx;
+        gobj->move->velocity.vy += accel.vy;
+        gobj->move->velocity.vz += accel.vz;
+    } else {
+        gobj->move->velocity.vx += force->vx;
+        gobj->move->velocity.vy += force->vy;
+        gobj->move->velocity.vz += force->vz;
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsGobjRegisterForce);
+#endif
 
+#ifdef NON_MATCHING
+/* Case 2 keeps the deceleration in $a1 with caller-saves (spilled to
+ * 0x14($sp)); this version allocates it to $s0. Case 1 block order differs. */
+s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, PhysVector *normal, PhysVector *out) {
+    s32 speed;
+    s32 decel;
+
+    if (friction <= 0 || (normal != NULL && VECTOR_IS_ZERO(normal) == 1) ||
+        (vel != NULL && VECTOR_IS_ZERO(vel) == 1)) {
+        out->vx = 0;
+        out->vy = 0;
+        out->vz = 0;
+    } else {
+        switch (mode) {
+            case 0:
+                EGSMath_VectorModulus(vel, &speed);
+                if (friction < speed) {
+                    friction = -friction;
+                    out->vx = EGSMathFIXMul(vel->vx, friction);
+                    out->vy = EGSMathFIXMul(vel->vy, friction);
+                    out->vz = EGSMathFIXMul(vel->vz, friction);
+                    out->vx = EGSMathFIXDiv(out->vx, speed);
+                    out->vy = EGSMathFIXDiv(out->vy, speed);
+                    out->vz = EGSMathFIXDiv(out->vz, speed);
+                } else {
+                    EGSMath_VectorNegate(vel, out);
+                }
+                break;
+            case 1:
+                if (friction < 0x1000) {
+                    friction = -friction;
+                    out->vx = EGSMathFIXMul(vel->vx, friction);
+                    out->vy = EGSMathFIXMul(vel->vy, friction);
+                    out->vz = EGSMathFIXMul(vel->vz, friction);
+                } else {
+                    EGSMath_VectorNegate(vel, out);
+                }
+                break;
+            case 2:
+                EGSMath_VectorModulus(vel, &speed);
+                decel = EGSMathFIXMul(friction, speed);
+                if (decel < 0x1000) {
+                    out->vx = EGSMathFIXMul(vel->vx, -decel);
+                    out->vy = EGSMathFIXMul(vel->vy, -decel);
+                    out->vz = EGSMathFIXMul(vel->vz, -decel);
+                } else {
+                    EGSMath_VectorNegate(vel, out);
+                }
+                break;
+    }
+    /* never leave a component exactly zero */
+    if (out->vx == 0) {
+        out->vx = vel->vx > 0 ? -1 : vel->vx < 0;
+    }
+    if (out->vy == 0) {
+        out->vy = vel->vy > 0 ? -1 : vel->vy < 0;
+    }
+    if (out->vz == 0) {
+        out->vz = vel->vz > 0 ? -1 : vel->vz < 0;
+    }
+    if (normal != NULL) {
+        EGSGeometry_VectorProjectOnPlane(out, normal, out);
+    }
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsApplyFrictionToVelocity);
+#endif
