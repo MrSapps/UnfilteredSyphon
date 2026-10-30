@@ -48,7 +48,7 @@ extern char *(*D_8010FCFC)();         /* use string callback */
 extern void (*D_8010FD00)();          /* key callback */
 extern void (*D_8010FD04)();          /* bomb callback */
 extern void (*D_8010FD08)();          /* computer callback */
-extern void (*D_8010FD0C)();          /* switch callback */
+extern s32 (*D_8010FD0C)();           /* switch callback */
 extern void (*gObjectInteractionCallback)(); /* level specific object callback */
 extern s32 D_801101B8;
 extern s32 D_801101BC;                /* UseMsg count */
@@ -94,6 +94,11 @@ void CobjAddCollisionBoxGobj(Gobj *obj, s32 arg1, s32 arg2, s32 arg3, s32 arg4);
 void CobjRemoveBulletCollisionBoxGobj(Gobj *obj);
 void CobjRemoveCollisionBoxGobj(Gobj *obj);
 void func_80149118(Gobj *obj, SysMsg *msg); /* in an overlay */
+void func_8014930C(Gobj *obj, s16 type);    /* in an overlay */
+void WeaponRemove(s32 weapon);
+void SysExeTickQueueTimer(void (*fn)(), s32 ticks, void *arg);
+void iSwitchReactivate(Gobj *obj);
+
 u8 PathHandleEx(Gobj *gobj, s32 scale, s32 orient, u8 pingPong, s16 first, s16 last, u8 *reachedEnd);
 void SysSetSongVolPan(s32 arg0, s32 song, Gobj *obj, s32 vol, s32 pan);
 
@@ -985,4 +990,210 @@ void PICKUPObjDispatch(SysMsg *msg) {
 INCLUDE_ASM("asm/main/nonmatchings/pickup", PICKUPObjDispatch);
 #endif
 
+#ifdef NON_MATCHING
+/* 15 insns: scheduling of result = 1 before SysPlaySong, s1/s2 swap in the case 42 loop */
+void SWITCHObjDispatch(SysMsg *msg) {
+    VECTOR32 pos;
+    Gobj *sw = gameObjectsInfo[msg->to].runtime;
+    s16 type = GOBJ_TYPE(sw->id);
+    s32 ref;
+    Gobj *other;
+    u8 more;
+    u8 linked;
+    s32 result;
+    char *str;
+    s32 ticks;
+    u32 *words;
+    s32 bit;
+    s32 misalign;
+    s32 word;
+    s32 mask;
+    u16 flags;
+
+    switch (msg->id) {
+    case 6:
+        CobjAddBulletCollisionBoxGobj(sw, 1, 0, 1);
+        CobjAddCollisionBoxGobj(sw, 1, 0, 1, 0);
+        break;
+    case 5:
+        CobjRemoveBulletCollisionBoxGobj(sw);
+        CobjRemoveCollisionBoxGobj(sw);
+        break;
+    case 18:
+        sw->flags0 |= 0x40;
+        if (!(sw->flags0 & 0x20)) {
+            SysPostMessage(0x14, 3, sw->id, gPlayerOffset, 0, 0, 0, 0);
+            PickupAddUseMsg(sw->id, 4);
+        }
+        break;
+    case 19:
+        sw->flags0 &= ~0x40;
+        if (!(sw->flags0 & 0x20)) {
+            SysPostMessage(0x19, 3, sw->id, gPlayerOffset, 0, 0, 0, 0);
+            PickupRemoveUseMsg(sw->id);
+        }
+        break;
+    case 21:
+    case 27:
+        if (sw->flags0 & 0x10) {
+            sw->flags0 &= ~0x10;
+        }
+        break;
+    case 13:
+        if (type == 0x1C || type == 0x7A || type == 0x24 || type == 0x7B || type == 0x79 || type == 0x7C ||
+            type == 0x6A) {
+            return;
+        }
+        if (type == 0x3A) {
+            if (msg->from != gPlayerOffset) {
+                return;
+            }
+            more = 1;
+            ref = sw->id;
+            do {
+                ref = gameObjectsInfo[ref].refId;
+                if (ref != -1) {
+                    other = gameObjectsInfo[ref].runtime;
+                    if (other != NULL) {
+                        if (other->npcState == 4) {
+                            more = 0;
+                        } else if (other->npcState == 9 && (other->anim->unk00[0xA] & 8)) {
+                            EGSAnimShowDetailDef(other->anim);
+                        }
+                    }
+                    SysPostMessage(0x14, 3, sw->id, ref, 0, 0, 0, 0);
+                } else {
+                    more = 0;
+                }
+            } while (more);
+            if (!(sw->anim->unk00[0xA] & 8)) {
+                sw->flags23 |= 2;
+            } else {
+                EGSAnimShowDetailDef(sw->anim);
+            }
+            return;
+        }
+        /* other switches treat "use" as a press */
+    case 20:
+    case 39:
+        if (!(sw->flags0 & 0x10)) {
+            if (sw->flags0 & 0x20) {
+                break;
+            }
+            sw->flags0 |= 0x20;
+            switch (type) {
+            case 0x3A:
+                break;
+            case 0x6A:
+                if (msg->from == gPlayerOffset) {
+                    sw->flags0 &= ~0x20;
+                    break;
+                }
+            case 0x1B:
+            case 0x1C:
+            case 0x1D:
+            case 0x24:
+            case 0x41:
+            case 0x79:
+            case 0x7A:
+            case 0x7B:
+            case 0x7C:
+                if (ObjectMatchToRefID(sw->id, 0x63)->id != sw->id) {
+                    words = (u32 *)gWeaponsAvailable;
+                    bit = 0x17;
+                    misalign = (u32)words & 3;
+                    if (misalign) {
+                        bit = misalign * 8 + 0x17;
+                        words = (u32 *)((u32)words & ~3);
+                    }
+                    word = bit >> 5;
+                    mask = 1 << (bit & 0x1F);
+                    if (words[word] & mask) {
+                        WeaponRemove(0x17);
+                    }
+                }
+                pos.vx = sw->anim->frame->pos.vx;
+                pos.vy = sw->anim->frame->pos.vy;
+                pos.vz = sw->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+                result = 1;
+                SysPlaySong(0, 0x14, 0, (s32)&pos);
+                if (type != 0x1D && type != 0x6A) {
+                    result = 3;
+                }
+                if (D_8010FD0C != NULL) {
+                    result = D_8010FD0C(sw->id);
+                }
+                if (sw->flags0 & 0x40) {
+                    UseObject(sw->id);
+                }
+                if (result & 1) {
+                    ObjectRefMultiSYSPOSTMSG0(sw->id, 0x14, 3);
+                }
+                if (result & 2) {
+                    if (sw->flags0 & 0x40) {
+                        SysExeTickQueueTimer(iSwitchReactivate, 0x14, sw);
+                    }
+                    if (msg->id == 0xD) {
+                        sw->healthInfo->health = sw->healthInfo->armor;
+                    }
+                    sw->flags0 &= ~0x20;
+                }
+                if (sw->anim->unk00[0xA] & 8) {
+                    sw->anim->unk00[0xA] ^= 4;
+                }
+                break;
+            }
+        } else if (D_8010FCF8 != NULL && (u32)gExeTick > (u32)D_801101B8) {
+            str = D_8010FCF8(sw->id, type);
+            if (str != NULL) {
+                ticks = strlen(str) * 2 + 0x18;
+                TextStatusMessage(str, ticks);
+                ticks += gExeTick;
+                if ((u32)D_801101B8 < (u32)ticks) {
+                    D_801101B8 = ticks;
+                }
+            }
+        }
+        break;
+    case 41:
+        *(s32 *)msg->data[0] = (sw->flags23 >> 1) & 1;
+        *(u16 *)msg->data[1] = sw->flags0;
+        break;
+    case 42:
+        flags = *(u16 *)msg->data[1];
+        sw->flags0 = flags;
+        if ((flags & 0x20) && (sw->anim->unk00[0xA] & 8)) {
+            EGSAnimShowDetailDef(sw->anim);
+        }
+        if (*(s32 *)msg->data[0] != 0) {
+            sw->flags23 |= 2;
+            if (type == 0x3A) {
+                linked = 1;
+                ref = sw->id;
+                do {
+                    ref = gameObjectsInfo[ref].refId;
+                    if (ref != -1) {
+                        other = gameObjectsInfo[ref].runtime;
+                        if (other != NULL) {
+                            if (other->npcState == 4) {
+                                linked = 0;
+                            } else if (other->npcState == 9 && (other->anim->unk00[0xA] & 8)) {
+                                EGSAnimShowDetailDef(other->anim);
+                            }
+                        }
+                    } else {
+                        linked = 0;
+                    }
+                } while (linked);
+            }
+        }
+        break;
+    case 2:
+        func_8014930C(sw, type);
+        break;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", SWITCHObjDispatch);
+#endif
