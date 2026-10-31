@@ -54,7 +54,8 @@ typedef struct GameCamModeInfo {
 typedef struct GameCamView {
     /* 0x00 */ VECTOR32 lead;
     /* 0x10 */ VECTOR32 watch;
-    /* 0x20 */ u8 unk20[0x20];
+    /* 0x20 */ VECTOR32 offset; /* watch point from lead, rotated by angle */
+    /* 0x30 */ VECTOR32 angle;
     /* 0x40 */ s32 distance;
     /* 0x44 */ s32 pitch;
     /* 0x48 */ u8 unk48[0x54];
@@ -123,12 +124,33 @@ void EGSDisplayDeletePoly(void *display, void *poly);
 void GSAddAnim(void *anim);
 void GSDeleteAnim(void *anim);
 extern void *gLevData;
-extern u8 mPMI[][0x20];
+/* PsyQ RECT */
+typedef struct GameCamRect {
+    s16 x, y, w, h;
+} GameCamRect;
+
+/* Scrim VRAM-scroll primitive: a DR_MOVE with display bookkeeping in front (0x20 bytes). */
+typedef struct GameCamPMI {
+    /* 0x00 */ s32 unk0;
+    /* 0x04 */ s32 unk4;
+    /* 0x08 */ u8 move[0x18]; /* DR_MOVE */
+} GameCamPMI;
+
+extern GameCamPMI mPMI[13];
+extern GameCamRect mPMIRect[13];
+void SetDrawMove(void *p, GameCamRect *rect, int x, int y);
+void LevelGetModel(char *name, void *model);
+void EGSFrameCreate(EGSFrame **frame);
+void EGSAnimSimpleCreate(void *model, EGSFrame *frame, s32 flags, void *anim);
+void FixupEMDGameObject(void *model, void *anim);
 EGSListNode *func_8002227C(s32 mode, VECTOR32 *pos, GameCamSlot *slot);
 void iScrimRemoveVRAMScroll(void);
 u8 func_80022414(s32 mode, VECTOR32 *pos, GameCamSlot *slot);
 u8 func_800224F8(s32 mode, VECTOR32 *pos, GameCamSlot *slot);
 s32 GameCameraSetModeDefault(u8 on, Gobj *primary, u8 arg2);
+void GameCameraModeGetDefaultLeadOffset(s32 mode, VECTOR32 *out);
+void GameCameraModeGetDefaultWatchOffset(s32 mode, VECTOR32 *out);
+s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove);
 
 /* What gCamera points at, as far as this file goes. */
 /* Animated camera parameter: mode 0 means only value.vx is meaningful. */
@@ -143,9 +165,15 @@ typedef struct GameCamParam {
 /* The game camera (what gCamera points at), as far as this file goes. */
 typedef struct GameCamCamera {
     /* 0x000 */ void **display;
-    /* 0x004 */ u8 unk004[0x1B0];
+    /* 0x004 */ u8 unk004[0x108];
+    /* 0x10C */ VECTOR32 leadOffset;
+    /* 0x11C */ u8 unk11C[0x7C];
+    /* 0x198 */ VECTOR32 watchOffset;
+    /* 0x1A8 */ u8 unk1A8[0xC];
     /* 0x1B4 */ GameCamParam pos;
-    /* 0x1FC */ u8 unk1FC[0x240];
+    /* 0x1FC */ u8 unk1FC[0xFC];
+    /* 0x2F8 */ GameCamParam unk2F8;
+    /* 0x340 */ u8 unk340[0xFC];
     /* 0x43C */ GameCamParam watch;
     /* 0x484 */ u8 unk484[0xFC];
     /* 0x580 */ GameCamParam eye;
@@ -157,7 +185,9 @@ typedef struct GameCamCamera {
     /* 0xA90 */ GameCamParam unkA90;
     /* 0xAD8 */ u8 unkAD8[0xFC];
     /* 0xBD4 */ GameCamParam fov;
-    /* 0xC1C */ u8 unkC1C[0x100];
+    /* 0xC1C */ u8 unkC1C[0xF8];
+    /* 0xD14 */ EGSFrame *accessFrame; /* CameraAccessFrameInfo result */
+    /* 0xD18 */ u8 unkD18[4];
     /* 0xD1C */ VECTOR32 unkD1C;
     /* 0xD2C */ s32 unkD2C;
     /* 0xD30 */ VECTOR32 unkD30;
@@ -771,7 +801,88 @@ s32 func_8001D568(void) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraUpdateLeadAndWatchOffsets);
+/* A frame's position, y up. */
+static inline void iFramePos(EGSFrame *frame, VECTOR32 *out) {
+    out->vx = frame->pos.vx;
+    out->vy = frame->pos.vy;
+    out->vz = frame->pos.vz;
+    out->vy = -out->vy;
+}
+
+
+/* Height of a frame above ground. */
+static inline s32 iFrameHeight(EGSFrame *frame, s32 ground, VECTOR32 *pos) {
+    iFramePos(frame, pos);
+    return pos->vy - ground;
+}
+
+/* Re-reads the default lead/watch offsets for the camera's primary and target, lifting them for short objects. */
+void GameCameraUpdateLeadAndWatchOffsets(void) {
+    VECTOR32 pos;
+    VECTOR32 offset;
+    EGSFrame *frames[2];
+    Gobj *gobj;
+    EGSFrame *frame;
+    s32 i;
+    s32 height;
+
+    frames[0] = NULL;
+    frames[1] = NULL;
+    CameraAccessFrameInfo(gCamera, 0, 1, 0);
+    frames[0] = CAM->accessFrame;
+    CameraAccessFrameInfo(gCamera, 0, 2, 0);
+    gobj = NULL;
+    frames[1] = CAM->accessFrame;
+    for (i = 0; i < 2; i++) {
+        switch (i) {
+        case 0:
+            gobj = D_80113B2C.primary;
+            break;
+        case 1:
+            gobj = D_80113B2C.target;
+            break;
+        }
+        if (gobj == NULL) {
+            continue;
+        }
+        frame = gobj->anim->frame;
+        if (frame != frames[0] && frame != frames[1]) {
+            continue;
+        }
+        if (gobj->move == NULL || (u8)(gobj->npcState - 1) >= 2) {
+            continue;
+        }
+        if (frame == frames[0]) {
+            GameCameraModeGetDefaultLeadOffset(D_80113B2C.mode, &offset);
+        } else {
+            GameCameraModeGetDefaultWatchOffset(D_80113B2C.mode, &offset);
+        }
+        if (!GameCameraCheckMode(0xE) && !GameCameraCheckMode(0xF) && !GameCameraCheckMode(0x10) &&
+            !GameCameraCheckMode(0xA) &&
+            !(gobj != NULL && gobj->move != NULL && gobj->move->coll != NULL && *(s32 *)gobj->move->coll == 1) &&
+            gobj->move->unk100[8]) {
+            if (gobj == NULL || gobj->move == NULL || gobj->move->coll == NULL) {
+                height = iFrameHeight(frame, gobj->move->unk12C, &pos);
+                if (height < 0xEA) {
+                    offset.vy = offset.vy - (height - 0x69);
+                }
+            } else {
+                iFramePos(frame, &pos);
+                height = pos.vy - FriendlyGobjGetReferenceY(gobj, 1);
+                if (i == 0 && D_80113B2C.mode == 0x14 && D_80113B2C.unk05C != 9) {
+                    offset.vy -= 0x20;
+                } else if (height < 0xEA) {
+                    offset.vy = offset.vy - (height - 0x69);
+                }
+            }
+        }
+        if (frame == frames[0]) {
+            CAM->leadOffset = offset;
+        } else {
+            CAM->watchOffset = offset;
+        }
+    }
+}
 
 /* Leftover of a removed computation; the frame keeps an outgoing-argument area. */
 void func_8001D89C(VECTOR32 *pos) {
@@ -923,7 +1034,93 @@ s32 func_8001E5D8(VECTOR32 *out) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E76C);
+/* Fetches an animated parameter's target (only .vx when the parameter is scalar). */
+#define GAMECAM_PARAM_TARGET(param, out) \
+    if ((param).mode == 0) {            \
+        (out).vx = (param).target.vx;   \
+    } else {                            \
+        (out) = (param).target;         \
+    }
+
+/* Cut: snaps every camera parameter straight to its target. The scalar fetches copy a
+ * whole vector into one word, as in func_8001F864. */
+void func_8001E76C(void) {
+    VECTOR32 pos;
+    VECTOR32 unk2F8;
+    VECTOR32 angle;
+    VECTOR32 unkA90;
+    VECTOR32 watch;
+    VECTOR32 eye;
+    VECTOR32 ones;
+    s32 dist;
+    s32 fov;
+
+    if (CAM->dist.mode == 0) {
+        dist = CAM->dist.target.vx;
+    } else {
+        *(VECTOR32 *)&dist = CAM->dist.target;
+    }
+    CAM->unkD1C.vx = dist;
+    CameraAccessMoveInfo(gCamera, 1, 5, 0);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    GAMECAM_PARAM_TARGET(CAM->unkA90, unkA90);
+    CAM->unkD1C = unkA90;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 7, 0);
+    func_8001D91C();
+    GAMECAM_PARAM_TARGET(CAM->angle, angle);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    CAM->unkD1C = angle;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 6, 0);
+    func_8001E1DC();
+    GAMECAM_PARAM_TARGET(CAM->unk2F8, unk2F8);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    CAM->unkD1C = unk2F8;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 1, 0);
+    func_8001AF98();
+    func_8001E218(0);
+    GAMECAM_PARAM_TARGET(CAM->pos, pos);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    CAM->unkD1C = pos;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 0, 0);
+    func_8001E5D8(&watch);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    CAM->unkD1C = watch;
+    CAM->unkD30 = ones;
+    CAM->unkD40 = 0;
+    CameraAccessMoveInfo(gCamera, 1, 2, 1);
+    CAM->unkD1C = watch;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 2, 0);
+    SCRATCH_CALL0(func_80021BA4);
+    GAMECAM_PARAM_TARGET(CAM->eye, eye);
+    ones.vx = 1;
+    ones.vy = 1;
+    ones.vz = 1;
+    CAM->unkD1C = eye;
+    CAM->unkD30 = ones;
+    CameraAccessMoveInfo(gCamera, 1, 3, 0);
+    if (CAM->fov.mode == 0) {
+        fov = CAM->fov.target.vx;
+    } else {
+        *(VECTOR32 *)&fov = CAM->fov.target;
+    }
+    CAM->unkD1C.vx = fov;
+    CameraAccessMoveInfo(gCamera, 1, 8, 0);
+}
 
 s32 func_8001ECC8(void) {
     VECTOR32 pos;
@@ -1639,9 +1836,225 @@ u8 func_800224F8(s32 mode, VECTOR32 *pos, GameCamSlot *slot) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80022548);
+/* Level path (LevelGetPathInfo): count points of 8 bytes. */
+typedef struct GameCamPath {
+    /* 0x0 */ s32 count;
+    /* 0x4 */ GameCamSVec *points;
+} GameCamPath;
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_800228D0);
+s32 LevelGetPathInfo(s32 id, s32 *start, GameCamPath **path);
+s32 EGSFrameTransformVector(VECTOR32 *in, EGSFrame *frame, EGSFrame *ref, VECTOR32 *out);
+void ApplyMatrixLV(GOBJ_MATRIX *m, VECTOR32 *in, VECTOR32 *out);
+extern s32 gCASJoystickGobjID;
+s32 PathGetNumPoints(Gobj *obj);
+void PathGetPoint(Gobj *obj, s32 index, VECTOR32 *out);
+void EGSGeometryINT_GetDistancePointToPoint(VECTOR32 *a, VECTOR32 *b, s32 *dist);
+void GameSysRequestMove(Gobj *gobj);
+/* From system.h (not included here, see EGSListAdd above). */
+typedef struct SysMsg {
+    /* 0x00 */ u16 id;
+    /* 0x02 */ u16 priority;
+    /* 0x04 */ s32 from;
+    /* 0x08 */ s32 to;
+    /* 0x0C */ s32 data[4];
+} SysMsg;
+typedef struct GameCamSysInfo {
+    /* 0x00 */ s16 level;
+    /* 0x02 */ u8 unk02[0xE];
+} GameCamSysInfo;
+extern GameCamSysInfo gSysInfo;
+void SysSoundQueueXA(s32 level, s32 track);
+u8 PathHandleOneWay(Gobj *gobj, s32 arg1, s32 orient, u8 *done, u8 *reachedEnd);
+void PathSetupEX(Gobj *gobj, s32 arg1);
+void FriendlyPreparePlayerAndCameraFaceListsBeforeUse(s32 arg0);
+void FriendlyRevertPlayerAndCameraFaceListsAfterUse(void);
+extern void (*gGameCamScriptEndCallback)(void);
+void GameCameraSetModeScripted(u8 on, Gobj *primary, Gobj *target, u8 arg3);
+void GameCameraRequestGetBehind(void);
+void CASRequestAction(s32 id, s32 action);
+void EGSFrameSetMatrix(EGSFrame *frame, s32 arg1, GOBJ_MATRIX *m);
+void *EGSMemMalloc(u32 size);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
+extern GameCamSlot D_80112DD0;
+extern u8 mQuipDeaths[]; /* XA quip table */
+extern u8 gStartedEOLFade;
+extern s32 gPlayerOffset;
+void SysSoundPlayRandXA(void *table);
+void GameSysSetLetterBoxMode(u32 mode);
+void SysStopXA(void);
+u8 SysSoundIsXAPlaying(void);
+int rand(void);
+
+/* Moves the last point of a path to pos. */
+static inline void iSetPathEnd(GameCamPath *path, VECTOR32 *pos) {
+    s32 last;
+
+    if (path != NULL) {
+        last = path->count - 1;
+        if (last >= 0) {
+            path->points[last].vx = pos->vx;
+            path->points[last].vy = pos->vy;
+            path->points[last].vz = pos->vz;
+        }
+    }
+}
+
+#ifdef NON_MATCHING
+/* regalloc: player/view swap s0/s1 */
+/* Points a script camera's path (and its linked watch object's path) at the player's default view. */
+void func_80022548(Gobj *cam) {
+    VECTOR32 eye;
+    VECTOR32 watch;
+    VECTOR32 pos;
+    VECTOR32 lead;
+    VECTOR32 rot;
+    VECTOR32 angle;
+    VECTOR32 offset;
+    VECTOR32 back;
+    VECTOR32 base;
+    GOBJ_MATRIX m;
+    GameCamSVec svec;
+    VECTOR32 d;
+    VECTOR32 dir;
+    s32 start;
+    GameCamPath *path;
+    GameCamView *view;
+    Gobj *player = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    EGSFrame *frame;
+    s32 ref;
+    Gobj *obj;
+
+    if (player != NULL) {
+        frame = player->anim->frame;
+        view = D_80113B2C.views;
+        pos.vx = frame->pos.vx;
+        pos.vy = frame->pos.vy;
+        pos.vz = frame->pos.vz;
+        pos.vy = -pos.vy;
+        EGSFrameTransformVector(&view->lead, frame, NULL, &lead);
+        rot = player->move->rot;
+        angle = view->angle;
+        angle.vy += rot.vy;
+        svec.vx = -angle.vx;
+        svec.vy = angle.vy;
+        svec.vz = -angle.vz;
+        RotMatrixYXZ(&svec, &m);
+        m.m[0][1] = -m.m[0][1];
+        m.m[1][0] = -m.m[1][0];
+        m.m[1][2] = -m.m[1][2];
+        m.m[2][1] = -m.m[2][1];
+        ApplyMatrixLV(&m, &view->offset, &offset);
+        back.vx = 0;
+        back.vy = 0;
+        back.vz = -view->distance;
+        ApplyMatrixLV(&m, &back, &back);
+        base.vx = pos.vx + lead.vx;
+        base.vy = pos.vy + lead.vy;
+        base.vz = pos.vz + lead.vz;
+        watch.vx = base.vx + offset.vx;
+        watch.vy = base.vy + offset.vy;
+        watch.vz = base.vz + offset.vz;
+        eye.vx = watch.vx + back.vx;
+        eye.vy = watch.vy + back.vy;
+        eye.vz = watch.vz + back.vz;
+        d.vx = eye.vx - base.vx;
+        d.vy = eye.vy - base.vy;
+        d.vz = eye.vz - base.vz;
+        dir.vx = watch.vx - eye.vx;
+        dir.vy = watch.vy - eye.vy;
+        dir.vz = watch.vz - eye.vz;
+        GTEMath_VectorNormal(&dir, &dir);
+        func_80021230(&base, &d, &dir, &eye);
+        path = NULL;
+        LevelGetPathInfo(cam->id, &start, &path);
+        iSetPathEnd(path, &eye);
+        ref = gameObjectsInfo[cam->id].refId;
+        if (ref != -1) {
+            obj = gameObjectsInfo[ref].runtime;
+            if (obj != NULL && obj->move != NULL) {
+                LevelGetPathInfo(obj->id, &start, &path);
+                iSetPathEnd(path, &watch);
+            }
+        }
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80022548);
+#endif
+
+/* The path segment a mover is on: prev is the point it left, cur the one it heads for. */
+static inline void iPathSegment(Gobj *obj, s32 *prev, s32 *cur) {
+    MoveInfo *move;
+
+    if (obj != NULL && (move = obj->move) != NULL) {
+        *cur = move->unk174;
+        if (move->unk17C == 0) {
+            *prev = *cur - 1 >= 0 ? *cur - 1 : 0;
+        } else {
+            *prev = *cur + 1 < PathGetNumPoints(obj) - 1 ? *cur + 1 : PathGetNumPoints(obj) - 1;
+        }
+    } else {
+        *cur = 0;
+        *prev = 0;
+    }
+}
+
+/* An object's frame position, y up. */
+static inline void iGobjPos(Gobj *obj, VECTOR32 *out) {
+    out->vx = obj->anim->frame->pos.vx;
+    out->vy = obj->anim->frame->pos.vy;
+    out->vz = obj->anim->frame->pos.vz;
+    out->vy = -out->vy;
+}
+
+/* Moves watch along its path in step with eye along its own (same segment, same fraction). */
+void func_800228D0(Gobj *eye, Gobj *watch) {
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 pos;
+    VECTOR32 delta;
+    VECTOR32 diff;
+    VECTOR32 target;
+    s32 prev;
+    s32 cur;
+    s32 dist;
+    s32 length;
+
+    iPathSegment(eye, &prev, &cur);
+    PathGetPoint(eye, prev, &a);
+    PathGetPoint(eye, cur, &b);
+    iGobjPos(eye, &pos);
+    pos.vx += eye->move->pendingMove.vx;
+    pos.vy += eye->move->pendingMove.vy;
+    pos.vz += eye->move->pendingMove.vz;
+    EGSGeometryINT_GetDistancePointToPoint(&a, &pos, &dist);
+    EGSGeometryINT_GetDistancePointToPoint(&a, &b, &length);
+    PathGetPoint(watch, prev, &a);
+    PathGetPoint(watch, cur, &b);
+    if (length != 0) {
+        diff.vx = b.vx - a.vx;
+        delta.vx = diff.vx * dist;
+        diff.vy = b.vy - a.vy;
+        delta.vy = diff.vy * dist;
+        diff.vz = b.vz - a.vz;
+        delta.vz = diff.vz * dist;
+        delta.vx /= length;
+        delta.vy /= length;
+        delta.vz /= length;
+    } else {
+        delta.vx = 0;
+        delta.vy = 0;
+        delta.vz = 0;
+    }
+    target.vx = a.vx + delta.vx;
+    target.vy = a.vy + delta.vy;
+    target.vz = a.vz + delta.vz;
+    iGobjPos(watch, &pos);
+    watch->move->pendingMove.vx = target.vx - pos.vx;
+    watch->move->pendingMove.vy = target.vy - pos.vy;
+    watch->move->pendingMove.vz = target.vz - pos.vz;
+    GameSysRequestMove(watch);
+}
 
 void GameCamCheckScriptCamDoneCallback(void (*done)()) {
     if (D_8010FF78 != 0 || gInterfaceCurrentMode == 0 || gInterfaceCurrentMode == 9) {
@@ -1653,11 +2066,334 @@ void GameCamCheckScriptCamDoneCallback(void (*done)()) {
     }
 }
 
+#define GAMECAM_PARAM_VALUE(param, out) \
+    if ((param).mode == 0) {           \
+        (out).vx = (param).value.vx;   \
+    } else {                           \
+        (out) = (param).value;         \
+    }
+
+#define GAMECAM_NEAR(a, b) ((a) - (b) >= -3 && (a) - (b) <= 3)
+
+/* PathHandleOneWay results. */
+typedef struct GameCamPathState {
+    u8 done;
+    u8 reachedEnd;
+} GameCamPathState;
+
+#ifdef NON_MATCHING
+/* regalloc: case-10 ref/base in v1/a0 (a0/a1) */
+/* Script camera object: 18 starts a scripted shot, 10 steps it along its path, 19 ends it,
+ * 2 sets the object up. */
+void CAMERAObjDispatch(SysMsg *msg) {
+    GameCamPathState path;
+    Gobj *gobj = gameObjectsInfo[msg->to].runtime;
+    Gobj *target;
+    Gobj *player;
+    GameObjectInfo *info;
+    s32 ref;
+    s32 xa;
+    u8 behind;
+
+    if (gobj == NULL) {
+        return;
+    }
+    switch (msg->id) {
+    case 18:
+        if (GOBJ_TYPE(gobj->id) != 8 || gobj->healthInfo->health <= 0) {
+            break;
+        }
+        D_8010FF78 = 1;
+        GameSysSetLetterBoxMode(2);
+        if (gameObjectsInfo[gobj->id].refId == -1) {
+            target = gobj;
+        } else {
+            xa = -1;
+            target = gameObjectsInfo[gameObjectsInfo[gobj->id].refId].runtime;
+            if (GOBJ_TYPE(gobj->id) == 0x5D) {
+                xa = gameObjectsInfo[gameObjectsInfo[gobj->id].refId].pathStart;
+                target = gobj;
+            } else {
+                ref = gameObjectsInfo[target->id].refId;
+                if (ref != -1 && GOBJ_TYPE(ref) == 0x5D) {
+                    xa = gameObjectsInfo[ref].pathStart;
+                }
+            }
+            if (xa != -1) {
+                SysSoundQueueXA(gSysInfo.level, xa);
+                if (gSysInfo.level == 0 || gSysInfo.level == 7) {
+                    CASRequestAction(gPlayerOffset, 0x5B);
+                } else {
+                    CASRequestAction(gPlayerOffset, 0x61);
+                }
+            }
+        }
+        GameCameraSetModeScripted(1, gobj, target, 1);
+    case 10: {
+        VECTOR32 eye;
+        VECTOR32 eyeTarget;
+        VECTOR32 watch;
+        VECTOR32 watchTarget;
+
+        path.done = 1;
+        path.reachedEnd = 0;
+        FriendlyPreparePlayerAndCameraFaceListsBeforeUse(0);
+        SCRATCH_CALL1(func_80022548, gobj);
+        FriendlyRevertPlayerAndCameraFaceListsAfterUse();
+        if (gobj->healthInfo->health <= 0) {
+            behind = 1;
+        } else {
+            if (gobj != NULL && gobj->move != NULL) {
+                PathHandleOneWay(gobj, 0, 1, &path.done, &path.reachedEnd);
+            }
+            ref = gameObjectsInfo[gobj->id].refId;
+            if (ref != -1) {
+                target = gameObjectsInfo[ref].runtime;
+                if (target != NULL && target->move != NULL) {
+                    func_800228D0(gobj, target);
+                }
+            }
+            behind = 0;
+        }
+        GAMECAM_PARAM_VALUE(CAM->eye, eye);
+        GAMECAM_PARAM_TARGET(CAM->eye, eyeTarget);
+        GAMECAM_PARAM_VALUE(CAM->watch, watch);
+        GAMECAM_PARAM_TARGET(CAM->watch, watchTarget);
+        if (path.done && GAMECAM_NEAR(eye.vx, eyeTarget.vx) && GAMECAM_NEAR(eye.vy, eyeTarget.vy) &&
+            GAMECAM_NEAR(eye.vz, eyeTarget.vz) && GAMECAM_NEAR(watch.vx, watchTarget.vx) &&
+            GAMECAM_NEAR(watch.vy, watchTarget.vy) && GAMECAM_NEAR(watch.vz, watchTarget.vz) &&
+            !SysSoundIsXAPlaying()) {
+            gobj->healthInfo->health = 0;
+        }
+        if (gobj->healthInfo->health > 0) {
+            SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+        } else {
+            player = gameObjectsInfo[gCASJoystickGobjID].runtime;
+            GameCameraSetModeScripted(0, player, player, behind);
+            GameCameraRequestGetBehind();
+            GameSysSetLetterBoxMode(0);
+            D_8010FF78 = 0;
+            if (gGameCamScriptEndCallback != NULL) {
+                gGameCamScriptEndCallback();
+            }
+        }
+        break;
+    }
+    case 19:
+        gobj->healthInfo->health = 0;
+        break;
+    case 2:
+        if (GOBJ_TYPE(gobj->id) == 8 || GOBJ_TYPE(gobj->id) == 9) {
+            gobj->npcState = 0;
+            gobj->healthInfo->health = 10;
+            gobj->flags23 |= 2;
+            gobj->anim = EGSMemMalloc(0x1C);
+            gobj->anim->model = NULL;
+            EGSFrameCreate(&gobj->anim->frame);
+            *(s32 *)&gameObjectsInfo[gobj->id].flags24 = 0;
+            EGSFrameSetMatrix(gobj->anim->frame, 0, &gameObjectsInfo[gobj->id].matrix);
+            PathSetupEX(gobj, 1);
+        }
+        break;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", CAMERAObjDispatch);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCamDeathViewCASAnimCB);
+static inline void iVecSet(VECTOR32 *out, s32 x, s32 y, s32 z) {
+    out->vx = x;
+    out->vy = y;
+    out->vz = z;
+}
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraScrimInit);
+/* An object's facing direction (frame column 2), y up. */
+static inline void iGobjFacing(Gobj *obj, VECTOR32 *out) {
+    out->vx = obj->anim->frame->m[0][2];
+    out->vy = obj->anim->frame->m[1][2];
+    out->vz = obj->anim->frame->m[2][2];
+    out->vy = -out->vy;
+}
+
+/* Player death animation callback: picks a death camera view and plays a quip. */
+void GameCamDeathViewCASAnimCB(s16 id, u32 anim) {
+    VECTOR32 pos;
+    VECTOR32 dir;
+    VECTOR32 eye;
+    VECTOR32 look;
+    VECTOR32 side;
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    s32 view;
+    u8 flag;
+
+    if (id != gPlayerOffset) {
+        return;
+    }
+    GameSysSetLetterBoxMode(1);
+    pos = gobj->move->pos;
+    iGobjFacing(gobj, &dir);
+    if (anim == 0x11 && (rand() & 1)) {
+        dir.vx = -dir.vx;
+        dir.vy = dir.vy;
+        dir.vz = -dir.vz;
+    }
+    iVecSet(&side, dir.vz / 2, 0, -dir.vx / 2);
+    if (rand() & 1) {
+        iVecSet(&dir, dir.vx + side.vx, dir.vy + side.vy, dir.vz + side.vz);
+    } else {
+        iVecSet(&dir, dir.vx - side.vx, dir.vy - side.vy, dir.vz - side.vz);
+    }
+    GTEMath_VectorNormal(&dir, &dir);
+    switch (anim) {
+    case 0xF:
+    case 0x10:
+    case 0x11:
+    case 0x12:
+    case 0x4C:
+    case 0x50:
+    case 0x5F:
+        if ((rand() & 1) || anim == 0x5F) {
+            view = 2;
+            flag = 1;
+            if (anim == 0x5F) {
+                eye.vx = EGSMathFIXMul(dir.vx, 0);
+                eye.vy = EGSMathFIXMul(dir.vy, 0);
+                eye.vz = EGSMathFIXMul(dir.vz, 0);
+            } else {
+                eye.vx = EGSMathFIXMul(dir.vx, 0x140);
+                eye.vy = EGSMathFIXMul(dir.vy, 0x140);
+                eye.vz = EGSMathFIXMul(dir.vz, 0x140);
+            }
+            eye.vx += pos.vx;
+            eye.vy += pos.vy;
+            eye.vz += pos.vz;
+            if (anim == 0x5F) {
+                eye.vy += 0x270;
+            }
+            look.vx = pos.vx - eye.vx;
+            look.vy = pos.vy - eye.vy;
+            look.vz = pos.vz - eye.vz;
+        } else {
+            view = 9;
+            flag = 0;
+        }
+        break;
+    case 0x14:
+        flag = 0;
+        view = D_80113B2C.mode != 0x14 ? 9 : 0;
+        break;
+    case 0x13:
+        view = 9;
+        flag = 0;
+        break;
+    default:
+        view = 0;
+        flag = 0;
+        break;
+    }
+    if (view != 0) {
+        GameCameraSetModeDeath(1, view, (s32)gobj, 0, &eye, &look, &D_80112DD0, flag);
+    }
+    if (anim == 0x5F) {
+        GameCameraSetCollision(0);
+    }
+    if (SysSoundIsXAPlaying() && gStartedEOLFade) {
+        SysStopXA();
+    }
+    SysSoundPlayRandXA(mQuipDeaths);
+}
+
+/* Loads the scrim model and sets up the VRAM moves that scroll its texture. */
+void GameCameraScrimInit(void) {
+    s16 *model;
+    EGSFrame *frame;
+    s16 *scrim;
+    s32 i;
+    GameCamPMI *pmi;
+
+    LevelGetModel("SCRIM.EMD", &model);
+    if ((scrim = model) != NULL) {
+        EGSFrameCreate(&frame);
+        EGSAnimSimpleCreate(model, frame, 0x01100000, &D_80113B2C.scrimAnim);
+        FixupEMDGameObject(model, D_80113B2C.scrimAnim);
+        scrim[1] = 0xF0;
+        GSAddAnim(D_80113B2C.scrimAnim);
+        D_80113B2C.scrimOn = 1;
+    } else {
+        D_80113B2C.scrimOn = -1;
+    }
+    if (*(s16 *)((u8 *)gLevData + 0x54) != 0) {
+        GameCamRect src;
+        GameCamRect dst;
+
+        src.x = *(s16 *)((u8 *)gLevData + 0x54);
+        src.y = *(s16 *)((u8 *)gLevData + 0x56);
+        dst.x = *(s16 *)((u8 *)gLevData + 0x58);
+        dst.y = *(s16 *)((u8 *)gLevData + 0x5A);
+        mPMIRect[0].x = src.x;
+        mPMIRect[0].y = src.y;
+        mPMIRect[0].w = 1;
+        mPMIRect[0].h = 0x40;
+        mPMIRect[1].x = src.x + 0x3F;
+        mPMIRect[1].y = src.y + 0x40;
+        mPMIRect[1].w = 1;
+        mPMIRect[1].h = 0x40;
+        mPMIRect[2].x = src.x;
+        mPMIRect[2].y = src.y + 0x40;
+        mPMIRect[2].w = 1;
+        mPMIRect[2].h = 0x40;
+        mPMIRect[3].x = src.x;
+        mPMIRect[3].y = src.y + 0x80;
+        mPMIRect[3].w = 1;
+        mPMIRect[3].h = 0x40;
+        mPMIRect[4].x = src.x + 0x3F;
+        mPMIRect[4].y = src.y + 0xC0;
+        mPMIRect[4].w = 1;
+        mPMIRect[4].h = 0x40;
+        mPMIRect[5].x = src.x;
+        mPMIRect[5].y = src.y + 0xC0;
+        mPMIRect[5].w = 1;
+        mPMIRect[5].h = 0x40;
+        for (i = 0; i < 6; i++) {
+            SetDrawMove(&mPMI[i].move, &mPMIRect[i], dst.x + i, dst.y);
+            pmi = &mPMI[i];
+            pmi->unk4 = 1;
+            pmi->unk0 = 0;
+        }
+        mPMIRect[6].x = src.x + 1;
+        mPMIRect[6].y = src.y;
+        mPMIRect[6].w = 0x3F;
+        mPMIRect[6].h = 0x100;
+        SetDrawMove(&mPMI[6].move, &mPMIRect[6], src.x, src.y);
+        mPMI[6].unk4 = 1;
+        mPMI[6].unk0 = 0;
+        for (i = 7; i < 13; i++) {
+            mPMIRect[i].x = dst.x - (7 - i);
+            mPMIRect[i].y = dst.y;
+            mPMIRect[i].w = 1;
+            mPMIRect[i].h = 0x40;
+        }
+        SetDrawMove(&mPMI[7].move, &mPMIRect[7], src.x + 0x3F, src.y + 0x40);
+        mPMI[7].unk4 = 1;
+        mPMI[7].unk0 = 0;
+        SetDrawMove(&mPMI[8].move, &mPMIRect[8], src.x + 0x3E, src.y + 0x40);
+        mPMI[8].unk4 = 1;
+        mPMI[8].unk0 = 0;
+        SetDrawMove(&mPMI[9].move, &mPMIRect[9], src.x + 0x3F, src.y);
+        mPMI[9].unk4 = 1;
+        mPMI[9].unk0 = 0;
+        SetDrawMove(&mPMI[10].move, &mPMIRect[10], src.x + 0x3F, src.y + 0xC0);
+        mPMI[10].unk4 = 1;
+        mPMI[10].unk0 = 0;
+        SetDrawMove(&mPMI[11].move, &mPMIRect[11], src.x + 0x3E, src.y + 0xC0);
+        mPMI[11].unk4 = 1;
+        mPMI[11].unk0 = 0;
+        SetDrawMove(&mPMI[12].move, &mPMIRect[12], src.x + 0x3F, src.y + 0x80);
+        mPMI[12].unk4 = 1;
+        mPMI[12].unk0 = 0;
+    }
+    D_80113B2C.scrimRate = 0;
+}
 
 void iScrimRemoveVRAMScroll(void) {
     void *display;
@@ -1725,12 +2461,12 @@ void func_80023D70(void) {
         rate = D_80113B2C.scrimRate;
         if ((u32)gExeTick % (u32)(rate < 0 ? -rate : rate) == 0 && rate < 0) {
             for (i = 0; i < 13; i++) {
-                EGSDisplayAddPoly(display, mPMI[i]);
+                EGSDisplayAddPoly(display, &mPMI[i]);
             }
             D_80113B2C.scrimRate = ABS(D_80113B2C.scrimRate);
         } else if (D_80113B2C.scrimRate > 0) {
             for (i = 0; i < 13; i++) {
-                EGSDisplayDeletePoly(display, mPMI[i]);
+                EGSDisplayDeletePoly(display, &mPMI[i]);
             }
             D_80113B2C.scrimRate = -D_80113B2C.scrimRate;
         }

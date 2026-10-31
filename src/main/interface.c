@@ -286,7 +286,12 @@ extern IfacePoly24 D_80117C70[2];       /* radar */
 extern IfacePoly24 D_80117CB8[2];
 extern IfacePolyG3 D_80117D00;
 extern IfaceLine D_80117D24[5];
-extern IfacePoly24 D_801174A0;
+extern IfacePoly24 D_801174A0; /* radar player arrow (POLY_G3 layout) */
+extern IfaceRect D_80105EAC[][2]; /* compass letter quads per heading */
+int ratan2(int y, int x);
+void ApplyMatrixLV(GOBJ_MATRIX *m, VECTOR32 *in, VECTOR32 *out);
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
+#define FIX12(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
 extern const IfaceIconDef D_80011BA0[];
 extern u8 gInEOLState;
 extern s16 gLevelSpecificNpcID;
@@ -878,7 +883,92 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003DF74);
 
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003E13C);
 
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003E894);
+static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
+    pt->p.vx += d->p.vx;
+    pt->p.vy += d->p.vy;
+}
+
+/* Offsets a packed screen point to the radar centre. */
+static inline s32 iRadarXY(s32 xy) {
+    IfacePointW pt;
+    IfacePointW center;
+
+    center.w = 0x50FF67;
+    pt.w = xy;
+    iPointAdd(&pt, &center);
+    {
+        u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
+    }
+    return pt.w;
+}
+
+/* Radar: the player's arrow (rotated into view space by m) and the compass letters. */
+void func_8003E894(GOBJ_MATRIX *m) {
+    VECTOR32 dir;
+    s32 sx;
+    s32 sz;
+    s32 tipX;
+    s32 tipY;
+    s32 sideX;
+    s32 sideY;
+    s32 xy0;
+    s32 xy1;
+    s32 xy2;
+    s32 angle;
+    IfaceRect *r;
+    IfacePoly4 *poly;
+    s32 i;
+
+    dir.vx = gObjPlayer->anim->frame->m[0][2];
+    dir.vy = gObjPlayer->anim->frame->m[1][2];
+    dir.vz = gObjPlayer->anim->frame->m[2][2];
+    dir.vy = 0;
+    GTEMath_VectorNormal(&dir, &dir);
+    ApplyMatrixLV(m, &dir, &dir);
+    sx = 1;
+    if (dir.vx < 0) {
+        sx = -1;
+    }
+    sz = 1;
+    if (dir.vz < 0) {
+        sz = -1;
+    }
+    tipX = (FIX12(dir.vx * 24) - sx) / 8;
+    tipY = (FIX12(-dir.vz * 20) - sz) / 8;
+    sideY = (FIX12(dir.vx * 20) - sx) / 6;
+    sideX = (FIX12(-dir.vz * 24) - sz) / 6;
+    xy0 = iRadarXY((tipX & 0xFFFF) | (tipY << 16));
+    xy1 = iRadarXY(((sideX - tipX) & 0xFFFF) | ((-sideY - tipY) << 16));
+    xy2 = iRadarXY(((-sideX - tipX) & 0xFFFF) | ((sideY - tipY) << 16));
+    ((IfacePolyG3 *)&D_801174A0)->xy0 = xy0;
+    ((IfacePolyG3 *)&D_801174A0)->xy1 = xy1;
+    ((IfacePolyG3 *)&D_801174A0)->xy2 = xy2;
+
+
+    dir.vx = m->m[0][2];
+    dir.vy = m->m[1][2];
+    dir.vz = m->m[2][2];
+    angle = ratan2(dir.vz, dir.vx);
+    angle += 0x100;
+    if (angle < 0) {
+        angle += 0x1000;
+    }
+    angle = FIX12(angle * 8);
+    r = D_80105EAC[angle];
+    poly = (IfacePoly4 *)D_80117CB8;
+    for (i = 0; i < 2; i++, r++, poly++) {
+        if (r->x == 0) {
+            break;
+        }
+        poly->xy[0] = (r->x & 0xFFFF) | ((r->y & 0xFFFF) << 16);
+        poly->xy[1] = ((r->x + r->w) & 0xFFFF) | ((r->y & 0xFFFF) << 16);
+        poly->xy[2] = (r->x & 0xFFFF) | (((r->y + r->h) & 0xFFFF) << 16);
+        poly->xy[3] = ((r->x + r->w) & 0xFFFF) | (((r->y + r->h) & 0xFFFF) << 16);
+    }
+    for (; i < 2; i++, poly++) {
+        poly->xy[0] = poly->xy[1] = poly->xy[2] = poly->xy[3] = 0x04000400;
+    }
+}
 
 s32 func_8003ECA0(big)
     u8 big;
