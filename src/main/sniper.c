@@ -2,25 +2,8 @@
 #include "gameobj.h"
 #include "gobj.h"
 
-/* sniper.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F800)
-SDATA_LOCAL(D_8010F802)
-SDATA_LOCAL(D_8010F810)
-SDATA_LOCAL(D_8010F814)
-SDATA_LOCAL(D_8010F818)
-SDATA_LOCAL(D_8010FFB8)
-SDATA_LOCAL(D_8010FFBC)
-SDATA_LOCAL(D_8010FFC0)
-SDATA_LOCAL(D_8010FFC4)
-SDATA_LOCAL(D_8010FFC8)
-SDATA_LOCAL(D_8010FFCC)
-SDATA_LOCAL(D_8010FFD8)
-SDATA_LOCAL(gSniperBonesHit)
-SDATA_LOCAL(gSniperGobjBoxHit)
-SDATA_LOCAL(gSniperGobjHit)
-SDATA_LOCAL(gSniperMode)
-SDATA_LOCAL(mSniperCameraIsActive)
-SDATA_LOCAL(sWindowCount)
+/* sniper.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_8001148C[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 /* 16 bytes copied as a block (camera move-info parameters) */
 typedef struct SniperQuad {
@@ -197,36 +180,40 @@ typedef struct SniperAnim {
     /* 0x08 */ u8 flags;
 } SniperAnim;
 
-extern s16 D_8010F800;
-extern s16 D_8010F802;
-extern u16 D_8010F810;
-extern s32 D_8010F814; /* sniper-scope camera parameter */
-extern s32 D_8010F818; /* game-camera parameter */
-extern s32 D_8010FFB8;
-extern s32 D_8010FFBC;
-extern s32 D_8010FFC0;
-extern s32 D_8010FFC4; /* bitmask of active aim modes (bit n = mode n) */
-extern s32 D_8010FFC8;
-extern u8 D_8010FFCC;
-extern s32 D_8010FFD8;
-extern s32 gSniperBonesHit;
-extern s16 gSniperGobjBoxHit;
-extern s16 gSniperGobjHit;
-extern s32 gSniperMode;
-extern u8 mSniperCameraIsActive;
-extern s32 sWindowCount;
+/* .sdata */
+s32 gSniperMode = 0;
+s16 gSniperView[4] = { 0xC0, 0x78, 0, 0 }; /* scope view rect; interface sets it */
+#define D_8010F800 (gSniperView[2])
+#define D_8010F802 (gSniperView[3])
+u8 mSniperCameraIsActive = 0;
+s32 gSniperBonesHit = 0;
+s16 gSniperGobjHit = 0;
+s16 gSniperGobjBoxHit = 0;
+static u16 D_8010F810 = 0xFFFF;
+static s32 D_8010F814 = 0x33B; /* sniper-scope camera parameter */
+static s32 D_8010F818 = 0x33B; /* game-camera parameter */
+s32 sWindowCount = 0;
+
+/* .sbss */
+static s32 D_8010FFB8;
+static s32 D_8010FFBC;
+static s32 D_8010FFC0;
+static s32 D_8010FFC4; /* bitmask of active aim modes (bit n = mode n) */
+static s32 D_8010FFC8;
+static u8 D_8010FFCC;
+static s32 D_8010FFD0[2]; /* LOS request out-parameter (8-aligned) */
+static s32 D_8010FFD8;
 
 typedef struct SniperMatrix {
     s32 w[9];
 } SniperMatrix;
 
 extern SniperCamera *gCamera;
-/* Line-of-sight result */
-extern VECTOR32 D_801156D8;  /* hit position */
-extern VECTOR32 D_801156E8;  /* hit normal */
-extern SniperHit D_801156F8; /* what was hit */
-extern s32 D_80115748;
-extern s32 D_8010FFD0;
+/* Line-of-sight result (.bss) */
+static VECTOR32 D_801156D8;  /* hit position */
+static VECTOR32 D_801156E8;  /* hit normal */
+static SniperHit D_801156F8; /* what was hit */
+static s32 D_80115748[3]; /* > 8 bytes (it is .bss); 0x80115754-0x80115760 left in the blob, sniper or sprite */
 extern s32 losWindowCount;
 extern s32 losWindowArray[];
 extern s32 sWindowArray[];
@@ -235,9 +222,43 @@ void _LOSPointAlongAngleDirectionYXZ(LOSRequest *req);
 void AnimateGobjRequestAim(GameObjectRuntime *rt, VECTOR32 *hit, s32 arg2, s32 arg3);
 s32 TextIsStringShowing(u16 str);
 void TextRemoveString(u16 str);
-extern u8 gSniperView[];
-extern u8 D_8010531C[];
-extern u8 D_80105424[];
+s32 func_800319FC(void);
+s32 func_80031A04(void);
+s32 func_80031A0C(SniperCamera *cam);
+
+/* .data: the scope camera's mode tables (CameraInit arg8/arg9, cf. gamecam's D_800FE238) */
+static struct {
+    void *callbacks[3];
+    s32 params[63];
+} D_8010531C = {
+    { func_800319FC, func_80031A04, func_80031A0C },
+    {
+    0x0, 0x1, 0x0, -0x1, -0x1, -0x1, -0x1, 0x0,
+    0x1, 0x2, -0x1, -0x1, -0x1, -0x1, 0x0, 0x1,
+    0x0, -0x1, -0x1, -0x1, -0x1, 0x0, 0x1, 0x0,
+    -0x1, -0x1, -0x1, -0x1, 0x0, 0x2, 0x2, -0x1,
+    -0x1, -0x1, -0x1, 0x0, 0x0, -0x1, -0x1, -0x1,
+    -0x1, -0x1, 0x0, 0x2, 0x2, -0x1, -0x1, -0x1,
+    -0x1, 0x0, 0x2, 0x2, -0x1, -0x1, -0x1, -0x1,
+    0x1, 0x0, -0x1, -0x1, -0x1, -0x1, -0x1,
+    },
+};
+static s32 D_80105424[0x6E] = {
+    0x0, 0xB5, 0xA0000, 0xA0000, 0xA0000, 0x0, 0x3320, 0x1980,
+    0x3320, 0x0, 0x400, 0x100, 0x400, 0x0, 0xA0000, 0xA0000,
+    0xA0000, 0x0, 0x3320, 0x3320, 0x3320, 0x0, 0x100, 0x100,
+    0x100, 0x0, 0xA0000, 0xA0000, 0xA0000, 0x0, 0x3320, 0x3320,
+    0x3320, 0x0, 0x100, 0x100, 0x100, 0x0, 0xA0000, 0xA0000,
+    0xA0000, 0x0, 0x3320, 0x1980, 0x3320, 0x0, 0x400, 0x100,
+    0x400, 0x0, 0x1000000, 0x1000000, 0x1000000, 0x0, 0x2466, 0x2466,
+    0x2466, 0x0, 0x200, 0x200, 0x200, 0x0, 0xA0000, 0x0,
+    0x0, 0x0, 0x9980, 0x0, 0x0, 0x0, 0x400, 0x0,
+    0x0, 0x0, 0x1000000, 0x1000000, 0x1000000, 0x0, 0x122D, 0x122D,
+    0x122D, 0x0, 0x100, 0x100, 0x100, 0x0, -0xB000, -0xB000,
+    -0xB000, 0x0, -0xB60B, -0xB60B, -0xB60B, 0x0, 0x1000, 0x1000,
+    0x1000, 0x0, 0x2D82D, 0x0, 0x0, 0x0, 0x5B05B, 0x0,
+    0x0, 0x0, 0x800, 0x0, 0x0, 0x0,
+};
 extern s32 gPlayerOffset;
 extern u8 *gLevData;
 extern SniperHit *losHitsSorted[];
@@ -446,7 +467,7 @@ u8 SniperToggleMode(void) {
 }
 
 s32 SniperSetupCamera(void) {
-    CameraInit(&gSniperCam, 0, 0, 0, 0x33B, gSniperView, 2, 1000, D_8010531C, D_80105424, 0, 0);
+    CameraInit(&gSniperCam, 0, 0, 0, 0x33B, gSniperView, 2, 1000, &D_8010531C, D_80105424, 0, 0);
     CameraSetParent(&gSniperCam, gCamera);
     gSniperCam.unkD1C = 0xB5;
     gSniperCam.unkD40 = 1;
@@ -560,8 +581,8 @@ void SniperCheckHits(s32 weapon) {
     (req).hitPos = &D_801156D8;                   \
     (req).hitNormal = &D_801156E8;                \
     (req).unk28 = 0;                              \
-    (req).unk2C = &D_8010FFD0;                    \
-    (req).unk30 = &D_80115748;
+    (req).unk2C = D_8010FFD0;                     \
+    (req).unk30 = D_80115748; 
 
 void SniperCheckLOS(GameObjectRuntime *rt) {
     s32 weapon = gCurrentWeapon;
@@ -797,6 +818,14 @@ void SniperShoot(void) {
     gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
 }
 #else
+#ifndef _PSYQ
+/* SniperShoot (still INCLUDE_ASM) addresses these through their splat labels */
+__asm__(
+        ".set D_801156DC, D_801156D8+0x4\n"
+        ".set D_801156E0, D_801156D8+0x8\n"
+        ".set D_80115700, D_801156F8+0x8\n"
+        ".set D_80115740, D_801156F8+0x48\n");
+#endif
 INCLUDE_ASM("asm/main/nonmatchings/sniper", SniperShoot);
 #endif
 
@@ -1031,4 +1060,3 @@ void func_800323C4(SniperTarget *target) {
     target->unk58 = 0;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/sniper", D_8001148C);

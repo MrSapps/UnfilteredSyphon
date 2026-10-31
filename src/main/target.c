@@ -8,14 +8,37 @@
 /* the original was built with gcc's builtin abs() */
 #define abs(x) __builtin_abs(x)
 
-/* target.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F821)
-SDATA_LOCAL(D_8010F822)
-SDATA_LOCAL(D_8010FFDC)
+/* target.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_8001149C[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
-extern u8 D_8010F821;  /* target release pending */
-extern u8 D_8010F822;  /* re-acquire requested while already in target mode */
-extern u16 D_8010FFDC; /* "no target" status message id */
+
+/* .sdata (0x8010F820/4 unreferenced; joystick.c's gButtonStrings literals follow) */
+static u8 D_8010F820 = 0;
+static u8 D_8010F821 = 0; /* target release pending */
+static u8 D_8010F822 = 0; /* re-acquire requested while already in target mode */
+static s32 D_8010F824 = 0;
+/* .sbss */
+static u16 D_8010FFDC; /* "no target" status message id */
+/* .data: targeting profiles for kinds 1..3, 0x36 bytes each */
+static s16 D_801055DC[3][0x1B] = {
+    {
+        0xA00, 1, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0x64,
+        0, 0, 0, 0, 0, 0, 0, 0, -0x3E8, -1, 0x4B, 0,
+        0, 0, 0,
+    },
+    {
+        0xA00, 1, 1, -0x32, 0, 0, 0, 0, 0, 0, 0, 0,
+        3, 0xC8, 0, 0, -0x32, -0x64, 0, 0, -0x3E8, 0, -0xA, 0,
+        0, 0, 0,
+    },
+    {
+        0xB40, 1, 1, -0x1E, 5, 0x50, 0x28, 0xA, 0, -0xA, 0xA, 0x14,
+        0x10, 0x50, 0xA, 0, -0x14, -0x28, 0x28, 0, -0x3E8, -0xA, -0xA, 0,
+        -0xA, 0, 0x14,
+    },
+};
+#define D_801055A6 ((u8 *)D_801055DC - 0x36) /* profile of kind 0 would be here */
+#define D_8010562A (D_801055DC[1][12])       /* kind 2's field 0x18, set from the level data */
 extern u8 gTargetModeFlag;
 extern s32 gSniperMode;
 extern void *gNoTgtMsg;
@@ -25,7 +48,6 @@ typedef struct TargetTimer {
     s32 tick;
 } TargetTimer;
 extern TargetTimer mTargetTimerList[8];
-extern s16 D_8010562A;
 extern u8 *gLevData;
 extern s32 gCurrentWeapon;
 
@@ -146,7 +168,6 @@ void GameCameraSetModeTarget(s32 on, s32 arg1, GameObjectRuntime *target, s32 ar
 s32 TextIsStringShowing(u16 str);
 void TextChangeStringDuration(u16 str, s32 ticks);
 void TextRemoveString(u16 str);
-extern u8 D_801055A6[];   /* targeting profiles, 0x36 bytes per kind */
 extern s32 D_8012C8AC[];  /* mTargetTimerList[i] start tick (aliases its +4) */
 extern s32 gExeTick;
 void func_80031AEC();
@@ -453,7 +474,6 @@ void TargetInit(void) {
     D_8010562A = *(u16 *)(gLevData + 0x4C);
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/target", D_8001149C);
 
 void TargetInitGobj(GameObjectRuntime *rt, TargetInfo *target, s32 kind, u8 arg3) {
     int i;

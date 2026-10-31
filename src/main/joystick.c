@@ -3,8 +3,10 @@
 #include "gobj.h"
 #include "level.h"
 
-SDATA_LOCAL(D_8010F84C)
-SDATA_LOCAL(D_8010FFE0)
+/* joystick.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_800114B8[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
+static const VECTOR32 D_800114C8 = { 0, 0, 0, 0 };
+static const s32 D_800114D8[4] = { -0xAA, 0, 0, 0 }; /* unreferenced (an asm function's?) */
 
 #define JOY_BUTTONS 16
 #define JOY_MAPPED_BUTTONS 9 /* buttons remapped through gJoyMap, the rest are cleared */
@@ -80,14 +82,19 @@ typedef struct JoyController {
     /* 0x010 */ u8 deactivated;     /* D_801056D8 */
     /* 0x011 */ u8 menuDeactivated; /* D_801056D9 */
     /* 0x012 */ u8 pad012[2];
-    /* 0x014 */ s32 bitA;
+    /* 0x014 */ s32 bitA; /* mapped index of the button with gJoyMap value 2 */
     /* 0x018 */ u8 downA;
     /* 0x019 */ u8 pad019[3];
-    /* 0x01C */ s32 bitB;
+    /* 0x01C */ s32 bitB; /* mapped index of the button with gJoyMap value 0 */
     /* 0x020 */ u8 downB;
-    /* 0x021 */ u8 pad021[0xF];
+    /* 0x021 */ u8 pad021[3];
+    /* 0x024 */ s32 btnIndex4; /* mapped index of the button with gJoyMap value 4 */
+    /* 0x028 */ s32 btnIndex3; /* mapped index of the button with gJoyMap value 3 */
+    /* 0x02C */ u8 unk02C;
+    /* 0x02D */ u8 unk02D;
+    /* 0x02E */ u8 pad02E[2];
     /* 0x030 */ s32 unk030;
-    /* 0x034 */ u8 unk034[4];
+    /* 0x034 */ s32 unk034;
     /* 0x038 */ JoyDirInfo *dirs;
     /* 0x03C */ JoyStickState sticks[4];
     /* 0x12C */ struct JoyDirDefault *dirDefaults; /* 4 per set, indexed by JoyDirInfo.type */
@@ -111,7 +118,6 @@ typedef struct JoyDirDefault {
 s32 GameCameraGetMode(void);
 void EGSDeviceControllerRead(u8 **pad, s32 port);
 void InterfaceWeaponSelect(s32 select, s32 dir);
-extern u16 D_8010F84C[2]; /* [1]: pad buttons last seen by func_80039B24 */
 
 /* Bit n of a bit array that may start at an unaligned address. */
 static inline u8 JoyTestBit(u8 *bits, s32 n) {
@@ -144,22 +150,111 @@ static inline u32 JoyBitMask(u8 *bits, s32 n) {
 }
 
 extern JoyBtnInfo mJoyBtnInfo[][JOY_BUTTONS];
-extern s32 gJoyMap[JOY_MAPPED_BUTTONS];
-extern JoyBtnInfo D_8010581C[]; /* default layout, indexed by gJoyMap */
-extern JoyBtnInfo D_80105918[];
-extern JoyBtnInfo D_80105A14[];
+
+/* .data (the gButtonStrings literals go to .sdata in reverse) */
+s32 gJoyMap[JOY_MAPPED_BUTTONS] = { 3, 4, 0, 2, 1, 5, 6, 7, 8 };
+char *gButtonStrings[JOY_MAPPED_BUTTONS] = { "%l2", "%r2", "%l1", "%r1", "%t", "%c", "%x", "%sq", "%se" };
+/* .sdata */
+static u16 D_8010F84C[2] = { 0, 0 }; /* [1]: pad buttons last seen by func_80039B24 */
+/* .data: the controller state */
+static JoyController D_801056C8 = { 0 };
+/* default layouts, indexed by gJoyMap */
+static JoyBtnInfo D_8010581C[JOY_MAPPED_BUTTONS] = {
+    { 0x3C, 0xD, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x22, 0, 1, { 0 }, 0, 0, 0, 0 },
+    { 3, 0x41, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x42, 0x43, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x42, 0x43, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x5E, 0, 1, { 0 }, 0, 0, 0, 0 },
+    { 0xA, 0xB, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x15, 0x16, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x34, 0, 0, { 0 }, 0, 0, 0, 0 },
+};
+static JoyBtnInfo D_80105918[JOY_MAPPED_BUTTONS] = {
+    { 0, 0xD, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x22, 0, 1, { 0 }, 0, 0, 0, 0 },
+    { 3, 0x41, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x42, 0x43, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x42, 0x43, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x5E, 0, 1, { 0 }, 0, 0, 0, 0 },
+    { 0xA, 0xB, 1, { 0 }, 0, 0, 0, 0 },
+    { 0x15, 0x16, 0, { 0 }, 0, 0, 0, 0 },
+    { 0x34, 0, 1, { 0 }, 0, 0, 7, 0 },
+};
+static JoyBtnInfo D_80105A14[JOY_MAPPED_BUTTONS] = {
+    { 0, 0, 1, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 3, 0x41, 1, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 0, { 0 }, 0, 0, 0, 0 },
+    { 0, 0, 1, { 0 }, 0, 0, 0, 0 },
+};
+static JoyDirInfo D_80105B10[4] = {
+    { 0, 0, 0, 0, 0, 0, 0 },
+    { 0, 0, 0, 0, 0, 0, 1 },
+    { 0, 0, 0, 0, 0, 0, 1 },
+    { 0, 0x20, 0, 0, 0, 0, 2 },
+};
+static JoyDirDefault D_80105B80[20] = { /* 4 per set */
+    { 0, 0 }, { 0xF, 0xD }, { 1, 1 }, { 0xF, 0xD },
+    { 0, 0 }, { 6, 5 }, { 1, 1 }, { 6, 5 },
+    { 0, 0 }, { 1, 1 }, { 1, 1 }, { 1, 1 },
+    { 0, 0 }, { 9, 9 }, { 1, 1 }, { 9, 9 },
+    { 2, 2 }, { 2, 2 }, { 0, 0 }, { 0, 0 },
+};
+/* the code still names many fields by their splat symbols */
+#define D_801056CC (D_801056C8.mode)
+#define D_801056D0 (D_801056C8.prevMode)
+#define D_801056D4 (D_801056C8.btns)
+#define D_801056D8 (D_801056C8.deactivated)
+#define D_801056D9 (D_801056C8.menuDeactivated)
+#define D_801056E0 (D_801056C8.downA)
+#define D_801056E8 (D_801056C8.downB)
+#define D_801056F4 (D_801056C8.unk02C)
+#define D_801056F5 (D_801056C8.unk02D)
+#define D_801056F8 (D_801056C8.unk030)
+#define D_801056FC (D_801056C8.unk034)
+#define D_80105700 (D_801056C8.dirs)
+#define D_801057F4 (D_801056C8.dirDefaults)
+#define D_801057F8 (D_801056C8.prevAimState)
+#define D_801057FC (D_801056C8.aimState)
+#define D_80105800 (D_801056C8.unk138)
+#define D_80105804 (D_801056C8.unk13C)
+#define D_80105808 (D_801056C8.dirActive)
+#define D_8010580C (D_801056C8.sniperZoom)
+#define D_80105810 (D_801056C8.panTicks)
+#define D_80105814 (D_801056C8.runTicks)
+#define D_80105818 (D_801056C8.invertY)
+#ifndef _PSYQ
+/* INCLUDE_ASM functions address the fields through their splat labels */
+__asm__(
+        ".set D_801056CC, D_801056C8+0x4\n"
+        ".set D_801056D4, D_801056C8+0xC\n"
+        ".set D_801056D8, D_801056C8+0x10\n"
+        ".set D_801056D9, D_801056C8+0x11\n"
+        ".set D_801056E0, D_801056C8+0x18\n"
+        ".set D_801056E8, D_801056C8+0x20\n"
+        ".set D_801056F4, D_801056C8+0x2C\n"
+        ".set D_801056F5, D_801056C8+0x2D\n"
+        ".set D_801056F8, D_801056C8+0x30\n"
+        ".set D_801056FC, D_801056C8+0x34\n"
+        ".set D_80105700, D_801056C8+0x38\n"
+        ".set D_801057F4, D_801056C8+0x12C\n"
+        ".set D_801057F8, D_801056C8+0x130\n"
+        ".set D_801057FC, D_801056C8+0x134\n"
+        ".set D_80105800, D_801056C8+0x138\n"
+        ".set D_80105804, D_801056C8+0x13C\n"
+        ".set D_80105808, D_801056C8+0x140\n"
+        ".set D_8010580C, D_801056C8+0x144\n"
+        ".set D_80105810, D_801056C8+0x148\n"
+        ".set D_80105814, D_801056C8+0x14C\n"
+        ".set D_80105818, D_801056C8+0x150\n"
+        );
+#endif
 extern s32 gCASJoystickGobjID;
-extern s32 D_801056CC;          /* joystick mode */
-extern JoyBtnInfo *D_801056D4;  /* mJoyBtnInfo[mode] */
-extern u8 D_801056D8;           /* joystick deactivated */
-extern u8 D_801056D9;           /* menu deactivated */
-extern u8 D_801056E0;           /* walk key pressed */
-extern s32 D_801056F8;
-extern JoyDirInfo *D_80105700;
-extern u32 D_801057FC;          /* retreat level */
-extern s32 D_80105804;          /* directional input deactivated */
-extern u8 D_80105808;
-extern u8 D_80105818;           /* flight controls */
 
 void MovementGobjTeleport();
 void MovementGobjTeleport_ByXZLookAtPoint();
@@ -288,19 +383,6 @@ void func_80035724(void) {
     }
 }
 
-/* Start of the joystick globals (D_801056C8); the later fields also have their own symbols. */
-typedef struct JoyGlobals {
-    /* 0x00 */ u8 initialized;
-    /* 0x01 */ u8 pad01[3];
-    /* 0x04 */ s32 mode;
-    /* 0x08 */ u8 unk08[0xC];
-    /* 0x14 */ s32 btnIndex2; /* mapped index of the button with gJoyMap value 2 */
-    /* 0x18 */ u8 unk18[4];
-    /* 0x1C */ s32 btnIndex0;
-    /* 0x20 */ u8 unk20[4];
-    /* 0x24 */ s32 btnIndex4;
-    /* 0x28 */ s32 btnIndex3;
-} JoyGlobals;
 
 /* D_801056E0 onwards: walk key flag, ..., per-port stick state at 0x50. */
 typedef struct JoyStick {
@@ -316,20 +398,7 @@ typedef struct JoyGlobals2 {
     /* 0x50 */ JoyStick sticks[4];
 } JoyGlobals2;
 
-extern JoyGlobals D_801056C8;
 #define D_801056E0_s (*(JoyGlobals2 *)&D_801056E0)
-extern u8 D_801056E8;
-extern u8 D_801056F4;
-extern u8 D_801056F5;
-extern s32 D_801056FC;
-extern JoyDirInfo D_80105B10[];
-extern u8 D_80105B80[];
-extern u8 *D_801057F4;
-extern s32 D_801057F8;
-extern s32 D_80105800;
-extern s32 D_8010580C;
-extern s32 D_80105810;
-extern s32 D_80105814;
 void func_80035480(void);
 void func_8003551C(void);
 void func_80035584(void);
@@ -359,7 +428,7 @@ void GameSysJoystickInit(void) {
     for (i = 0; i < JOY_MAPPED_BUTTONS; i++) {
         switch (gJoyMap[i]) {
         case 2:
-            D_801056C8.btnIndex2 = i;
+            D_801056C8.bitA = i;
             break;
         case 4:
             D_801056C8.btnIndex4 = i;
@@ -368,7 +437,7 @@ void GameSysJoystickInit(void) {
             D_801056C8.btnIndex3 = i;
             break;
         case 0:
-            D_801056C8.btnIndex0 = i;
+            D_801056C8.bitB = i;
             break;
         }
     }
@@ -404,8 +473,7 @@ INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystickInit);
 extern u8 gPlayerRadioFlag;
 extern int gSystemState;
 extern s32 gSystemTick;
-extern u16 D_8010FFE0; /* pad buttons of the previous frame */
-extern s32 D_801056D0;  /* previous joystick mode */
+static u16 D_8010FFE0; /* .sbss: pad buttons of the previous frame */
 void SysStatePush(int state);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
 void SysStopMovie(void);
@@ -750,11 +818,8 @@ void func_80036768(JoyController *joy) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/joystick", D_800114B8);
 
-INCLUDE_RODATA("asm/main/nonmatchings/joystick", D_800114C8);
 
-INCLUDE_RODATA("asm/main/nonmatchings/joystick", D_800114D8);
 
 void func_80036848(JoyController *joy) {
     JoyDirInfo *dirs = joy->dirs;
@@ -844,7 +909,6 @@ typedef struct JoySVector {
     s16 vx, vy, vz, pad;
 } JoySVector;
 
-extern VECTOR32 D_800114C8; /* zero vector */
 void RotMatrixYXZ(JoySVector *r, GOBJ_MATRIX *m);
 s32 ratan2(s32 y, s32 x);
 void EGSGeometry_AngleInterpolate(s32 from, s32 to, s32 step, u8 mode, s32 *out, s32 *remain);

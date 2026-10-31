@@ -3,43 +3,37 @@
 #include "gameobj.h"
 #include "gobj.h"
 
-/* object.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F7CC)
-SDATA_LOCAL(D_8010F7D0)
-SDATA_LOCAL(D_8010F7D4)
-SDATA_LOCAL(D_8010F7D8)
-SDATA_LOCAL(gObjectMovieDoneCallback)
-SDATA_LOCAL(gNotKilledByFallingObject)
-SDATA_LOCAL(D_8010FF98)
-SDATA_LOCAL(D_8010FF9C)
-SDATA_LOCAL(D_8010FFA0)
-SDATA_LOCAL(D_8010FFA4)
-SDATA_LOCAL(D_8010FFA8)
-SDATA_LOCAL(D_8010FFAC)
-SDATA_LOCAL(D_8010FFB0)
-SDATA_LOCAL(D_8010FFB4)
+/* object.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_80010F60[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 typedef void (*ObjectCallback)();
 
-extern ObjectCallback D_8010F7CC; /* quip object callback */
-extern ObjectCallback D_8010F7D0; /* special object callback */
-extern ObjectCallback D_8010F7D4; /* special ambient callback */
-extern ObjectCallback D_8010F7D8; /* ambient sound index callback */
-extern ObjectCallback gObjectMovieDoneCallback;
-extern u8 gNotKilledByFallingObject;
-extern s32 D_8010FF98;
-extern s32 D_8010FF9C;
-extern s32 D_8010FFA0;
-extern s32 D_8010FFA4;
-extern s32 D_8010FFA8;
-extern s32 D_8010FFAC;
-extern s32 D_8010FFB0;
-extern s32 D_8010FFB4;
+/* .sdata */
+static ObjectCallback D_8010F7CC = NULL; /* quip object callback */
+static ObjectCallback D_8010F7D0 = NULL; /* special object callback */
+static ObjectCallback D_8010F7D4 = NULL; /* special ambient callback */
+static ObjectCallback D_8010F7D8 = NULL; /* ambient sound index callback */
+ObjectCallback gObjectMovieDoneCallback = NULL;
+u8 gNotKilledByFallingObject = 0;
+
+/* .sbss */
+static s32 D_8010FF98;
+static s32 D_8010FF9C;
+static s32 D_8010FFA0;
+static s32 D_8010FFA4;
+static s32 D_8010FFA8;
+static s32 D_8010FFAC;
+static s32 D_8010FFB0;
+static s32 D_8010FFB4;
+
+/* .data */
+static s32 D_801052E0[3] = { 0xFFFF, 0x80FFC0, 0xFF8080 }; /* spark colours */
+VECTOR32 gObjPathScaleVector = { 0x1000, 0x1000, 0x1000, 0 };
+VECTOR32 gExploShakeVector = { 6, 9, 6, 0 };
+VECTOR32 gExploDir = { 0, -0x1000, 0, 0 };
+
 extern MovieInfo gObjectMovieInfo;
-extern char D_8010F7E4[]; /* "\\CUT\\%s" (.sdata) */
-extern char D_8010F7EC[]; /* "MOVIE" (.sdata) */
 extern u8 gUsingSndBigFire;
-extern VECTOR32 gExploDir;
 
 ObjectCallback ObjectSetMovieDoneCallback(ObjectCallback cb);
 ObjectCallback ObjectSetQuipObjectCallback(ObjectCallback cb);
@@ -84,7 +78,6 @@ typedef struct LevelData {
 } LevelData;
 
 extern s32 gPlayerOffset;
-extern s32 gExploShakeVector;
 
 void ParticleExplosion(s16 id, VECTOR32 *pos, void *dir, s32 size, s32 arg4);
 void GameCameraShakeStart(void *state, s32 ticks, s32 arg2, void *vec, s32 arg4, void *pos);
@@ -125,12 +118,10 @@ void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist
 void SysSetSongVolPan(s32 arg0, s32 song, Gobj *gobj, s32 vol, s32 pan);
 void ParticleSparkShower(VECTOR32 *pos, s32 count, s32 color);
 void func_80148780(Gobj *gobj, SysMsg *msg);
-extern s32 D_801052E0[2]; /* spark colours */
 
 u8 PathHandleEx(Gobj *gobj, s32 scale, s32 orient, u8 pingPong, s16 first, s16 last, u8 *reachedEnd);
-extern VECTOR32 gObjPathScaleVector;
 void func_80148EA8(Gobj *gobj);
-extern char D_80010FD0[]; /* "s/object.c" */
+static const char D_80010FD0[11]; /* "s/object.c", defined below */
 
 extern u8 gPlayerOnFireFlag;
 void func_80148938(Gobj *gobj, s16 type);
@@ -248,7 +239,7 @@ void iObjectDoMovieEx(void) {
 }
 
 void ObjectDoMovieEx(char *name, s32 doneMsgId, s32 doneMsgTo, s32 doneMsgFrom) {
-    sprintf(gObjectMovieInfo.name, D_8010F7E4, name);
+    sprintf(gObjectMovieInfo.name, "\\CUT\\%s", name);
     gObjectMovieInfo.halfSize = 0x28;
     gObjectMovieInfo.width = 320;
     gObjectMovieInfo.height = 240;
@@ -257,8 +248,10 @@ void ObjectDoMovieEx(char *name, s32 doneMsgId, s32 doneMsgTo, s32 doneMsgFrom) 
     gObjectMovieInfo.doneMsgFrom = doneMsgFrom;
     gObjectMovieInfo.doneMsgTo = doneMsgTo;
     gObjectMovieInfo.trueColor = 1;
-    SysStall(D_8010F7EC, 0xE, iObjectDoMovieEx);
+    SysStall("MOVIE", 0xE, iObjectDoMovieEx);
 }
+
+static char D_8010F7F4[1] = ""; /* unreferenced .sdata literal after "MOVIE" */
 
 ObjectCallback ObjectSetMovieDoneCallback(ObjectCallback cb) {
     ObjectCallback old = gObjectMovieDoneCallback;
@@ -909,7 +902,6 @@ void func_8002D190(Gobj *gobj, s16 type) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/object", D_80010F60);
 
 typedef struct ObjectKick {
     s32 up;
@@ -1051,7 +1043,8 @@ void EFFECTSObjDispatch(SysMsg *msg) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/object", D_80010FD0);
+/* first used by LASERObjDispatch below, but the original emitted it here */
+static const char D_80010FD0[11] = "s/object.c";
 
 /* Sparking electrical object: keeps re-posting message 10 to itself while active. */
 void EFFECTS2ObjDispatch(SysMsg *msg) {

@@ -197,9 +197,15 @@ segments:
       - [0xED784, data, data_ED784]
       - [0xEEDE4, .data, physics]
       - [0xEEDF4, .data, playcas]
-      - [0xF5048, data, data_F5048]
+      - [0xF5048, .data, player]
+      - [0xF5A1C, .data, cas]
+      - [0xF5AE0, .data, object]
+      - [0xF5B1C, .data, sniper]
+      - [0xF5DDC, .data, target]
+      - [0xF5E80, .data, joystick]
       - [0xF6420, .data, sprite]
       - [0xF66AC, data, data_F66AC]
+      - [0xF674C, .data, weapon]
       - [0xF6AC4, .data, particle]
       - [0xF6C38, data, data_F6C38]
       - [0xF71E0, .data, damage]
@@ -217,8 +223,17 @@ segments:
       - [0xFFE54, .sdata, level]
       - [0xFFF00, .sdata, camera]
       - [0xFFF14, sdata, sdata_FFF14]
+      - [0xFFF40, .sdata, player]
+      - [0xFFFB0, sdata, sdata_FFFB0]
+      - [0xFFFB8, .sdata, cas]
+      - [0xFFFCC, .sdata, object]
+      - [0xFFFF8, .sdata, sniper]
+      - [0x100020, .sdata, target]
+      - [0x100028, .sdata, joystick]
       - [0x100050, .sdata, sprite]
       - [0x100074, sdata, sdata_100074]
+      - [0x1000FC, .sdata, weapon]
+      - [0x100138, sdata, sdata_100138]
       - [0x10013C, .sdata, movement]
       - [0x100144, .sdata, particle]
       - [0x10014C, sdata, sdata_10014C]
@@ -241,6 +256,15 @@ segments:
       - [0x100764, .sdata, egshog]
       - { start: 0x100768, type: .sbss, vram: 0x8010FF68, name: system }
       - { type: sbss, vram: 0x8010FF78, name: sbss_8010FF78 }
+      - { type: .sbss, vram: 0x8010FF80, name: player }
+      - { type: .sbss, vram: 0x8010FF88, name: cas }
+      - { type: sbss, vram: 0x8010FF94, name: sbss_8010FF94 }
+      - { type: .sbss, vram: 0x8010FF98, name: object }
+      - { type: .sbss, vram: 0x8010FFB8, name: sniper }
+      - { type: .sbss, vram: 0x8010FFDC, name: target }
+      - { type: .sbss, vram: 0x8010FFE0, name: joystick }
+      - { type: sbss, vram: 0x8010FFE4, name: sbss_8010FFE4 }
+      - { type: .sbss, vram: 0x80110028, name: weapon }
       - { type: .sbss, vram: 0x80110030, name: particle }
       - { type: sbss, vram: 0x80110118, name: sbss_80110118 }
       - { type: .sbss, vram: 0x80110170, name: damage }
@@ -250,6 +274,9 @@ segments:
       - { type: .bss, vram: 0x801104A0, name: system }
       - { type: .bss, vram: 0x80111EB8, name: game }
       - { type: bss, vram: 0x80112D40, name: bss_80112D40 }
+      - { type: .bss, vram: 0x80115634, name: cas }
+      - { type: .bss, vram: 0x801156D8, name: sniper }
+      - { type: bss, vram: 0x80115754, name: bss_80115754 }
       - { type: .bss, vram: 0x80118FC0, name: particle }
       - { type: bss, vram: 0x8011D1D0, name: bss_8011D1D0 }
       - { type: .bss, vram: 0x8011E8D8, name: damage }

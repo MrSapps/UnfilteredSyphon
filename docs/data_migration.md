@@ -129,6 +129,16 @@ so a TU's data has to come from that TU's object.
   right after it, in *reverse* element order, the short ones into `.sdata` and the
   long ones into `.rdata` (level.c's `gLevelNames`, sprite.c's texture tables). Two
   `.sdata` pointers whose strings appear reversed are one 2-element array.
+* **String literals of a table of structs come out in element order** (weapon.c's
+  `gWeaponInfo` names), unlike a plain pointer array's (reverse, player.c's
+  `gGabeAnimFiles`). cc1 shares identical literals within a file, so a table that
+  points at an earlier literal (weapon's `""`) needs that literal as a named array.
+* **An array at an offset inside a migrated object.** Where C indexed a splat label
+  inside another object (cas.c's `D_80115638` = hip table + 4), neither
+  `&s.hip[1]` nor `s.hip[i + 1]` gives the original's per-store `sym($reg)`
+  addressing; cas.c keeps `extern` + `.set` for the modern build (FIXME under `_PSYQ`).
+  Plain field symbols are different: joystick.c's `D_801056CC` etc. became
+  `#define D_801056CC (D_801056C8.mode)` with identical code.
 * **Don't retype another TU's extern to reach a migrated struct.** movement.c reads
   gravity y/z as the scalars `D_800FE5E8/EC`. As struct members, cc1 hoists the base
   address into a register and the code changes, so those labels stay as absolute
@@ -231,6 +241,13 @@ has its own `_PSYQ` variant of the one GAS macro it used.
 | playcas  | .rdata .text .data                  | OK          | OK |
 | sprite   | .rdata .text .data .sdata (.bss still in the blob) | OK | OK |
 | movement | .sdata                              | OK          | data OK (asm functions) |
+| cas      | .rdata .data .sdata .sbss .bss      | OK          | data OK (asm functions) |
+| object   | .rdata .data .sdata .sbss           | OK          | data + .rdata OK (asm functions) |
+| sniper   | .rdata .data .sdata .sbss .bss (not 0x80115754-60) | OK | data OK (SniperShoot asm) |
+| target   | .rdata .data .sdata .sbss           | OK          | data + .rdata OK (TargetViewConeCheck asm) |
+| joystick | .rdata .data .sdata .sbss (not 0x8010FFE4) | OK    | data + .rdata OK (asm functions) |
+| weapon   | .rdata .data .sdata .sbss (.bss still in the blob) | OK | data + .rdata OK (asm functions) |
+| player   | .rdata .data .sdata .sbss + commons (.bss still in the blob) | OK | data OK; .rdata short by PLAYERObjDispatch's jump table (asm) |
 
 path and los have no data of their own (los only reaches commons).
 

@@ -7,20 +7,10 @@
 
 #define abs(x) __builtin_abs(x)
 
-/* player.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F7A8)
-SDATA_LOCAL(D_8010FF80)
-SDATA_LOCAL(D_8010FF84)
-SDATA_LOCAL(gPlayerNumConsecutiveHits)
-SDATA_LOCAL(mFootFx)
-SDATA_LOCAL(mGabeAnim)
-SDATA_LOCAL(mGrenadeGobj)
-SDATA_LOCAL(mPlayerFeetCollisionDetector_Left)
-SDATA_LOCAL(mPlayerFeetCollisionDetector_Right)
-SDATA_LOCAL(mShootReqFlag)
-SDATA_LOCAL(mUseInfo)
+/* player.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_8001040C[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
-extern u16 mUseInfo;     /* message id of the pending use action, 0 for none */
+u16 mUseInfo;            /* (common, $gp) message id of the pending use action, 0 for none */
 extern s16 D_801103BE;   /* object the pending use action targets, -1 for none */
 extern s32 gPlayerOffset;
 /* Player flashlight (EGS display light); the first word is nonzero while it is on */
@@ -30,8 +20,6 @@ typedef struct PlayerFlashlight {
 } PlayerFlashlight;
 extern PlayerFlashlight gPlayerFlashlight;
 extern u8 mPlayerFlashlightPS[];
-extern u8 D_801051D8[]; /* "mission failed" XA list */
-extern u8 D_80105194[]; /* "orders confirmed" XA list */
 
 /* Face the feet collision detector stands on */
 typedef struct PlayerFloorFace {
@@ -73,7 +61,6 @@ typedef struct PlayerCollPhys {
     /* 0xB0 */ s32 unkB0;
 } PlayerCollPhys;
 
-extern PlayerFeetState D_8010F7AC; /* feet state set on jump */
 
 /* Collision contact (0x88 bytes) */
 typedef struct PlayerContact {
@@ -102,10 +89,10 @@ extern PlayerContact *D_80113E00[15]; /* feet contacts */
 extern PlayerContact D_80113E3C[15];
 extern PlayerContact D_80114634[15];
 extern PlayerContact D_80114E2C[15];
-extern s32 D_8010FF80; /* body collision detector */
-extern s32 D_8010FF84; /* head collision detector */
-extern s32 mPlayerFeetCollisionDetector_Left;
-extern s32 mPlayerFeetCollisionDetector_Right;
+static s32 D_8010FF80; /* .sbss: body collision detector */
+static s32 D_8010FF84; /* .sbss: head collision detector */
+s32 mPlayerFeetCollisionDetector_Left; /* commons, $gp */
+s32 mPlayerFeetCollisionDetector_Right;
 
 void CollisionGobjInit(Gobj *gobj, s32 *kind);
 s32 func_80025F18(Gobj *gobj);
@@ -119,8 +106,8 @@ typedef struct PlayerLevData {
 } PlayerLevData;
 
 extern PlayerLevData *gLevData;
-extern void *mGabeAnim;
-extern Gobj *mGrenadeGobj[2];
+void *mGabeAnim;      /* common, $gp */
+Gobj *mGrenadeGobj[2]; /* common, $gp */
 extern struct EGSFrame *mGrenadeFrame[2];
 /* Fire button state */
 typedef struct PlayerShootState {
@@ -129,7 +116,7 @@ typedef struct PlayerShootState {
     /* 0x8 */ u32 lastTick; /* tick of the last shot (grenade: throw start) */
 } PlayerShootState;
 extern PlayerShootState mShootInfo;
-extern s32 gPlayerNumConsecutiveHits;
+s32 gPlayerNumConsecutiveHits; /* common, $gp */
 extern u8 gPlayerOnFireFlag;
 
 void LevelGetHMDModel(char *name, void **out);
@@ -186,17 +173,14 @@ typedef struct PlayerAnimFrames {
 } PlayerAnimFrames;
 
 extern u8 gSoundFootstep[];
-extern s32 mFootFx;
+s32 mFootFx; /* common, $gp */
 
 s32 SpriteFootFxTextureGet(s32 foot);
 void EGSDisplayRegisterFootprint(void *frame, s32 tex, VECTOR32 *pos);
 void SysPlaySong(s32 arg0, s32 song, void *arg2, s32 arg3);
 
-extern u8 mShootReqFlag; /* 1: shot requested, 2: shot queued, 3: shot queued unrequested */
+u8 mShootReqFlag; /* (common, $gp) 1: shot requested, 2: shot queued, 3: shot queued unrequested */
 extern s32 gCurrentWeapon;
-extern char *gGabeAnimFiles[];
-extern char *gLevelAnimFiles[8];
-extern char *gAddlLevelAnimFiles[][8];
 extern u8 iAnimationArray[];
 
 /* Only the field used here; see weapon.c for the full WeaponInfo. */
@@ -370,7 +354,122 @@ extern s32 particleTaserState;
 
 extern VECTOR32 grenadePos; /* NPC grenade target */
 
-INCLUDE_RODATA("asm/main/nonmatchings/player", D_8001040C);
+/* .data; cc1 emits each table's literals right after it, in reverse, the short
+ * ones into .sdata and the rest into .rdata (they start .rdata and .sdata) */
+char *gGabeAnimFiles[156] = {
+    "CLIMBA.HAN", "CW0.LWR", "CW0.UPR", "CW1.UPR", "CW1AIM.UPR", "CW2.UPR",
+    "CW2AIM.UPR", "CW2PSG.UPR", "CW1RLD.UPR", "CW2RLD.UPR", "CWDRW0.UPR", "CWDRW1.UPR",
+    "CWDRW2.UPR", "CWLOB.UPR", "CWRHL0.UPR", "CWRHL1.UPR", "CWRHL2.UPR", "CWSTP2.HAN",
+    "DETH11A.HAN", "DETH11B.HAN", "DETH11C.HAN", "DETH11D.HAN", "DETH12A.HAN", "DETH12B.HAN",
+    "DETH12C.HAN", "DETH12D.HAN", "DETH1A.HAN", "DETH1B.HAN", "DETH1C.HAN", "DETH1D.HAN",
+    "DETH6A.HAN", "DETH6B.HAN", "DETH6C.HAN", "DETH6D.HAN", "DETHFIR0.HAN", "DISARM.UPR",
+    "EXDETH00.HAN", "EXDTH12C.HAN", "FALL1.HAN", "FALL2.HAN", "FIREDANC.HAN", "FLEE0.HAN",
+    "HLDDRPA.HAN", "HLDDRPB.HAN", "IDLE13.HAN", "IDLE2C.UPR", "IDLE3A.UPR", "IDLE5C.UPR",
+    "IDLE6B.UPR", "IDLE7C.UPR", "JACK.HAN", "JP1.HAN", "KIKDR.HAN", "KN0.LWR",
+    "KN1AIM.UPR", "KN2AIM.UPR", "KN2FIRE.UPR", "KN1RLD.UPR", "KN2RLD.UPR", "KNCW0.HAN",
+    "KNCW1.HAN", "KNCW2.HAN", "KNDRW0.UPR", "KNDRW1.UPR", "KNDRW2.UPR", "KNLOB.UPR",
+    "KNPKL0.UPR", "KNPKL1.UPR", "KNPKL2.UPR", "KNRHL0.UPR", "KNRHL1.UPR", "KNRHL2.UPR",
+    "KNROL0.HAN", "KNROL1.HAN", "KNROL2.HAN", "KNST0.HAN", "KNST2.HAN", "KNTNA.LWR",
+    "KNTNL.LWR", "KNTNR.LWR", "KNTOSU.HAN", "PKH0.UPR", "PKH2.UPR", "PUL4.HAN",
+    "PUL8.HAN", "RADIOC1.UPR", "RADIOC2.UPR", "RADKN1.UPR", "RADKN2.UPR", "RN0.LWR",
+    "RN0.UPR", "RN1AIM.UPR", "RN1RLD.UPR", "RN2.UPR", "RN2AIM.UPR", "RN2PSG.UPR",
+    "RN2RLD.UPR", "RNDRW0.UPR", "RNDRW2.UPR", "RNFAL0B.HAN", "RNFAL2A.HAN", "RNFAL2B.HAN",
+    "RNLOB.UPR", "RNLUN0.HAN", "RNLUN1.HAN", "RNLUN2.HAN", "RNRHL0.UPR", "RNRHL2.UPR",
+    "RNSTTR0.HAN", "RNSTTR2.HAN", "SHIML.HAN", "SHIMR.HAN", "ST0.LWR", "ST02.UPR",
+    "ST1AIM.UPR", "ST2AIM.UPR", "ST2FIRE.UPR", "ST2RLD.UPR", "STDRW0.UPR", "STDRW2.UPR",
+    "STEPL0.LWR", "STEPR0.LWR", "STKN0.HAN", "STKN2.HAN", "STLOB.UPR", "STRHL0.UPR",
+    "STRHL2.UPR", "STRLD1B.UPR", "STRNTRN0.HAN", "STRNTRN2.HAN", "STROL0.HAN", "STROL2.HAN",
+    "STTNA.LWR", "SUREND1.HAN", "SWIT0_1.UPR", "SWIT2.UPR", "TURNL0.LWR", "TURNR0.LWR",
+    "WK0.LWR", "WK0.UPR", "WK1AIM.UPR", "WK1RLD.UPR", "WK2.UPR", "WK2AIM.UPR",
+    "WK2PSG.UPR", "WK2RLD.UPR", "WKDRW0.UPR", "WKDRW2.UPR", "WKFAL01.HAN", "WKFAL02.HAN",
+    "WKFAL2A.HAN", "WKFAL2B.HAN", "WKLOB.UPR", "WKRHL0.UPR", "WKRHL2.UPR", NULL,
+};
+char *gLevelAnimFiles[9] = {
+    "ADDL_ANIM_01", "ADDL_ANIM_02", "ADDL_ANIM_03", "ADDL_ANIM_04", "ADDL_ANIM_05", "ADDL_ANIM_06", "ADDL_ANIM_07", "ADDL_ANIM_08", NULL,
+};
+char *gAddlLevelAnimFiles[20][8] = {
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { "HUDDLE.HAN", "VIDLEA.HAN", "VIRUSWLK.HAN", NULL, NULL, NULL, NULL, NULL },
+    { "HUDDLE.HAN", "VIDLEA.HAN", "VIRUSWLK.HAN", NULL, NULL, NULL, NULL, NULL },
+    { "XRUN0.HAN", "XRUN0.HAN", "TCRN.UPR", "TCRNAIM.UPR", "TCST.UPR", "TCSTAIM.UPR", "TCWK.UPR", "TCWKAIM.UPR" },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+    { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL },
+};
+
+/* .sdata (0x8010F7B0-0x8010F7B8, unreferenced, player or cas, stays in the blob) */
+/* (defined before the probe tables: maspsx needs non-.sdata before the next asm) */
+static u8 D_8010F7A8 = 0; /* set while the player stands in a hazard (0x40000 movement flag) */
+static PlayerFeetState D_8010F7AC = { 1, 1, 1, 0 }; /* feet state set on jump */
+
+/* Collision probe used while hanging on an edge, one per animation frame */
+typedef struct EdgeGrabProbe {
+    /* 0x00 */ s32 unk00[0x12];
+} EdgeGrabProbe;
+
+static EdgeGrabProbe D_80104D5C[4] = { /* grab */
+    { { 0xE, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 1 } },
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 3, -3, 0, 1, 0 } },
+    { { 7, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0xC, 0, 0, 1, 0 } },
+    { { 1, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+};
+static EdgeGrabProbe D_80104E7C[2] = {
+    { { 0xE, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 1 } },
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, -4, -3, 0, 1, 0 } },
+};
+static EdgeGrabProbe D_80104F0C[4] = {
+    { { 0xA, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 2 } },
+    { { 4, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { { 7, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 1, 0 } },
+};
+static EdgeGrabProbe D_8010502C[2] = {
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+    { { 8, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, -4, 6, 0, 1, 1 } },
+};
+static EdgeGrabProbe D_801050BC[2] = {
+    { { 8, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, -4, 6, 0, 1, 1 } },
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+};
+static EdgeGrabProbe D_8010514C[1] = {
+    { { 2, 0, 0, 0, 0, -1, 0, 0, 0,
+        0, 0, 0, 0, -4, 6, 0, 1, 1 } },
+};
+static s16 D_80105194[0x22] = { /* "orders confirmed" XA list */
+    0, 0, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, -1, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+static s16 D_801051D8[0x22] = { /* "mission failed" XA list */
+    0, 0, 0xE3, 0xE4, 0xE5, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
 
 void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move);
 void TargetInitGobj(Gobj *gobj, TargetInfo *target, s32 kind, u8 arg3);
@@ -395,7 +494,6 @@ void iPlayerShoot(Gobj *gobj, s32 action);
 extern s32 HANGpc;
 extern u8 gTargetModeFlag;
 extern u8 gNotKilledByFallingObject;
-extern u8 D_8010F7A8; /* set while the player stands in a hazard (0x40000 movement flag) */
 
 /* GameObjectAnim fields used here */
 typedef struct PlayerAnimView {
@@ -992,17 +1090,6 @@ void PlayerJumpCASAnimCB(s16 id, u32 action) {
 INCLUDE_RODATA("asm/main/nonmatchings/player", jtbl_80010C1C); /* PLAYERObjDispatch */
 #endif
 
-/* Collision probe used while hanging on an edge, one per animation frame */
-typedef struct EdgeGrabProbe {
-    /* 0x00 */ u8 unk00[0x48];
-} EdgeGrabProbe;
-
-extern EdgeGrabProbe D_80104D5C[]; /* grab */
-extern EdgeGrabProbe D_80104E7C[];
-extern EdgeGrabProbe D_80104F0C[];
-extern EdgeGrabProbe D_8010502C[];
-extern EdgeGrabProbe D_801050BC[];
-extern EdgeGrabProbe D_8010514C[];
 
 void CollisionGobjSetModeEdgeGrab(Gobj *gobj, EdgeGrabProbe *probe);
 

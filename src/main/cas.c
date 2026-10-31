@@ -4,25 +4,25 @@
 #include "gobj.h"
 #include "level.h"
 
-/* cas.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F7B8)
-SDATA_LOCAL(D_8010F7C4)
-SDATA_LOCAL(D_8010FF88)
-SDATA_LOCAL(D_8010FF8C)
-SDATA_LOCAL(D_8010FF90)
+/* cas.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_80010F50[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
-extern EGSListNode *D_8010F7B8; /* gobjs with pending CAS requests */
-extern s16 D_8010FF88;          /* gobj whose requests are being delayed */
-extern s32 D_8010FF8C;          /* delay length in ticks (0: none) */
-extern s32 D_8010FF90;          /* delay start tick */
-extern CASQueue D_8010521C;     /* this frame's de-duplicated action list */
-extern u8 D_80115670[];         /* per-action "already queued this frame" flags */
+/* .sdata */
+static EGSListNode *D_8010F7B8 = NULL; /* gobjs with pending CAS requests */
+static char D_8010F7BC[8] = "s/cas.c"; /* __FILE__; first used by CASInit (still asm) */
+static u8 D_8010F7C4 = 1;              /* the generated hip table still needs building */
+static s32 D_8010F7C8 = 0;             /* unreferenced; taken as cas.c's (object.c's .sdata follows) */
+
+/* .sbss */
+static s16 D_8010FF88; /* gobj whose requests are being delayed */
+static s32 D_8010FF8C; /* delay length in ticks (0: none) */
+static s32 D_8010FF90; /* delay start tick */
+
+/* .data */
+static CASQueue D_8010521C = { 0 }; /* this frame's de-duplicated action list */
+u8 gNullSequence[0x18] = { 0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0xFF };
+
 extern s32 gSystemTick;
-extern u8 gNullSequence[];
-extern char D_8010F7BC[]; /* "s/cas.c" (in .sdata, still assembled from asm) */
-extern u8 D_8010F7C4;     /* the generated hip table still needs building */
-extern struct CASHipMotion D_80115634[15]; /* generated hip motion (default anim) */
-extern struct CASHipMotion D_80115638[14]; /* = &D_80115634[1] */
 
 u8 EGSListFind(EGSListNode **list, s32 arg1, void *data);
 void *EGSDisplayGetHAWithType(void *anim, s32 type);
@@ -485,6 +485,13 @@ count:
     }
 }
 #else
+#ifndef _PSYQ
+/* INCLUDE_ASM functions still address these through their splat labels */
+__asm__(
+        ".set D_8010521D, D_8010521C+0x1\n"
+        ".set D_80105220, D_8010521C+0x4\n"
+        ".set D_80115670, D_80115634+0x3C\n");
+#endif
 INCLUDE_ASM("asm/main/nonmatchings/cas", CASInit);
 #endif
 
@@ -514,6 +521,20 @@ void CASReset(s32 id) {
 typedef struct CASHipMotion {
     s8 x, y, z, pad;
 } CASHipMotion;
+
+/* .bss: one object, since aspsx would 16-align a separate .lcomm for the flags at +0x3C */
+static struct {
+    CASHipMotion hip[15]; /* generated hip motion (default anim) */
+    u8 queued[0x68];      /* per-action "already queued this frame" flags */
+} D_80115634;
+#ifdef _PSYQ
+#define D_80115638 (&D_80115634.hip[1]) /* FIXME: the original's code addresses a separate symbol */
+#else
+/* cc1 only gives the original's per-store addressing for a symbol of its own: alias it */
+extern CASHipMotion D_80115638[14];
+__asm__(".set D_80115638, D_80115634+0x4\n");
+#endif
+#define D_80115670 (D_80115634.queued)
 
 typedef struct CASModelExt {
     /* 0x000 */ u8 unk000[0x164];
@@ -585,7 +606,7 @@ CASHipMotion *CASGetHipMotion(s32 id) {
                         }
                         D_8010F7C4 = 0;
                     }
-                    return &D_80115634[frame];
+                    return &D_80115634.hip[frame];
                 }
             }
             if (frame == 1 && ha->unk2C == 0) {
@@ -970,4 +991,3 @@ void CASProcess(void) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/cas", D_80010F50);

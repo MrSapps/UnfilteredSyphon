@@ -5,17 +5,8 @@
 #include "game.h"
 #include "egsmath.h"
 
-/* weapon.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F900)
-SDATA_LOCAL(D_8010F904)
-SDATA_LOCAL(gCurrentWeapon)
-SDATA_LOCAL(gWeaponsAvailable)
-SDATA_LOCAL(D_8010F928)
-SDATA_LOCAL(gTaserGobjID)
-SDATA_LOCAL(D_8010F92E)
-SDATA_LOCAL(D_8010F930)
-SDATA_LOCAL(D_80110028)
-SDATA_LOCAL(D_8011002C)
+/* weapon.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_80011E8C[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 typedef void (*WeaponCallback)();
 typedef void (*WeaponFiredCallback)(s16 id, s16 weapon);
@@ -59,18 +50,60 @@ typedef struct WeaponState {
 
 #define WEAPON_TASER 0xE
 
-extern WeaponFiredCallback D_8010F900; /* weapon fired callback */
-extern WeaponCallback D_8010F904; /* taser hit NPC callback */
-extern s32 gCurrentWeapon;
-extern u32 gWeaponsAvailable[]; /* bit per weapon */
-extern WeaponInfo gWeaponInfo[];
+/* .sdata; the "" comes first, so it is a named array the table points at */
+static char D_8010F8FC[1] = "";
+static WeaponFiredCallback D_8010F900 = NULL; /* weapon fired callback */
+static WeaponCallback D_8010F904 = NULL;      /* taser hit NPC callback */
+/* .data (the long names go to .rdata, the short ones to .sdata) */
+WeaponInfo gWeaponInfo[0x1A] = {
+    { D_8010F8FC, NULL, 0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0xF, 0xF, 0, 0, 0, { 0, 0 }, 0, 0, { 0, 0, 0, 0 } },
+    { "GLOKSIL.GMD", NULL, 1, 0xF, 0xF, 5, 5, 0xB01, 0, -2, 0x1E0, 0xF, 0xA, 0x32, 0x19, 4, 0, { 5, 0 }, -0x27, -9, { 8, 6, 4, 0 } },
+    { "GLOCK17.GMD", NULL, 0, 0xF, 0xF, 0xA, 5, 0x301, 1, -2, 0x960, 0xF, 0xA, 0x32, 0x19, 0xC, 0, { 6, 0 }, -0x17, -9, { 0x50, 0x40, 0x30, 0 } },
+    { D_8010F8FC, NULL, 0, 0, 0, 0, 0, 0, -1, -2, 0, 0, 0xF, 0xF, 0, 0, 0, { 0, 0 }, 0, 0, { 0x50, 0x40, 0x30, 0 } },
+    { "COLT45.GMD", NULL, 2, 0xA, 0xA, 0xA, 5, 0x101, 2, -2, 0x960, 0xF, 5, 0x96, 0x4B, 8, 0, { 7, 0 }, -0x18, -8, { 0x50, 0x40, 0x30, 0 } },
+    { "GLOCK18.GMD", NULL, 3, 0x21, 0x21, 0x21, 5, 0x241, 0x25, 0x1F, 0x960, 0xF, 5, 0x32, 0x19, 1, 0, { 0xD, 0 }, -0x17, -9, { 0x50, 0x40, 0x30, 0 } },
+    { "BERELLI.GMD", NULL, 4, 0x1E, 5, 5, 0, 2, 0xC, -2, 0x960, 0x11, 0x1E, 0x12C, 0x96, 0x12, 0, { 9, 0 }, -0x4E, -0xF, { 0x50, 0x40, 0x30, 0 } },
+    { "ITHICA37.GMD", NULL, 5, 0x19, 5, 5, 0, 0x42, 0xD, -2, 0x960, 0x11, 0x1E, 0xC8, 0x4B, 0xF, 0, { 8, 0 }, -0x4E, -0xB, { 0x50, 0x40, 0x30, 0 } },
+    { "AK102.GMD", NULL, 6, 0x1E, 0x1E, 0xA, 5, 0x322, 0x2C, 0x26, 0x960, 0x10, 0, 0x32, 0x19, 2, 0, { 0xA, 0 }, -0x44, -8, { 0x50, 0x40, 0x30, 0 } },
+    { "M16.GMD", NULL, 7, 0x1E, 0x1E, 0xF, 5, 0x322, 0x25, 0x1F, 0x960, 0x10, 0, 0x32, 0x19, 2, 0, { 0xB, 0 }, -0x53, -0xA, { 0x50, 0x40, 0x30, 0 } },
+    { "BIZON2.GMD", NULL, 8, 0x42, 0x42, 0x42, 5, 0x241, 0x33, 0x2D, 0x960, 0x10, 0, 0x4B, 0x23, 2, 0, { 0xE, 0 }, -0x3B, -6, { 0x50, 0x40, 0x30, 0 } },
+    { "MP5.GMD", NULL, 9, 0x20, 0x20, 8, 5, 0x341, 0x2C, 0x26, 0x960, 0x10, 0, 0x32, 0x19, 2, 0, { 0xC, 0 }, -0x24, -0x11, { 0x50, 0x40, 0x30, 0 } },
+    { "DRAGSVD.GMD", NULL, 0xB, 0xA, 0xA, 0xA, 2, 0x902, 0, -2, 0x1E0, 0xF, 0x3C, 0xC8, 0x64, 0x14, 0, { 0x10, 0 }, -0x5A, -9, { 0x1A, 0x15, 0x10, 0 } },
+    { "SUPERG.GMD", NULL, 0xC, 0xA, 0xA, 0xA, 2, 0x902, 0, -2, 0x1E0, 0xF, 0xF, 0x32, 0x19, 4, 0, { 0x11, 0 }, -0x43, -0xC, { 0x1A, 0x15, 0x10, 0 } },
+    { "TASER.GMD", NULL, 0xD, 0, 0, 0, 0, 0x801, 0x11, -2, 0x960, 0x10, 0x23, 0x64, 0, 0, 0, { 0x15, 0 }, -0x2C, 0, { 0x50, 0x40, 0x30, 0 } },
+    { "FLAMEGDF.GMD", NULL, 0, 0x5A, 0x5A, 0x5A, 5, 0x242, 0x12, -2, 0x960, 0x10, 0, 0x32, 0x32, 2, 0, { 0x15, 0 }, -0x5F, -0x11, { 0x50, 0x40, 0x30, 0 } },
+    { "GRENLAUN.GMD", NULL, 0x10, 0xF, 5, 1, 0, 1, 0x1C, -2, 0x1E0, 0x11, 0, 0x258, 0x258, 0x14, 0, { 0x14, 0 }, 0, 0, { 0x50, 0x40, 0x30, 0 } },
+    { "G3.GMD", NULL, 0xA, 0x14, 0x14, 0x14, 5, 0x322, 0x33, 0x2D, 0x960, 0x10, 0, 0x32, 0x19, 2, 0, { 0xF, 0 }, -0x53, -0xA, { 0x50, 0x40, 0x30, 0 } },
+    { "FLASHLT.GMD", NULL, 0x13, 0, 0, 0, 0, 1, -1, -1, 0, 0, 0x28, 0, 0, 0, 0, { 0x17, 0 }, -0x22, 0, { 0, 0, 0, 0 } },
+    { "GRENADE.GMD", NULL, 0xE, 0xA, 5, 1, 0, 4, 0xA, -2, 0x1E0, 0x11, 0, 0x258, 0, 0xF, 0, { 0x12, 0 }, 0, 0, { 0x50, 0x40, 0x30, 0 } },
+    { "GRENADE.GMD", NULL, 0xF, 0xA, 5, 1, 0, 0x804, 0xA, -2, 0x1E0, 0x12, 0, 0x258, 0, 0xF, 0, { 0x13, 0 }, 0, 0, { 0x50, 0x40, 0x30, 0 } },
+    { "FLASHLT.GMD", NULL, 0x12, 0, 0, 0, 0, 1, -1, -1, 0, 0, 0x28, 0, 0, 0, 0, { 0x16, 0 }, 0x22, 0, { 0, 0, 0, 0 } },
+    { "CHNGUN.GMD", NULL, 0, 0x5A, 0x5A, 0x5A, 5, 0x122, 9, -2, 0x960, 0x10, 0, 0x64, 0x64, 2, 0, { 0x15, 0 }, -0x5F, -0x11, { 0xA0, 0x80, 0x60, 0 } },
+    { "KEYCARD.ZZZ", NULL, 0x14, 0, 0, 0, 0, 4, -1, -1, 0, 0, 0x28, 0, 0, 0, 0, { 0x19, 0 }, 0x22, 0, { 0, 0, 0, 0 } },
+    { "DEVICE.ZZZ", NULL, 0x15, 0, 0, 0, 0, 4, -1, -1, 0, 0, 0x28, 0, 0, 0, 0, { 0x1A, 0 }, 0x22, 0, { 0, 0, 0, 0 } },
+    { "SYRINGE.ZZZ", NULL, 0x16, 0, 0, 0, 0, 4, -1, -1, 0, 0, 0x28, 0, 0, 0, 0, { 0x1B, 0 }, 0x22, 0, { 0, 0, 0, 0 } },
+};
+static u8 D_8010628C[0x1C] = { /* next weapon in the selection order */
+    1, 4, 0, 0, 9, 0xA, 5, 6, 7, 0xB, 0x11, 8, 0x13, 0xC, 0x15, 0, 0xE, 0xD, 0x17, 0x14, 0x10, 0x12, 0, 0x18, 0x19, 1, 0, 0,
+};
+static u8 D_801062A8[0x1C] = { /* previous weapon in the selection order */
+    1, 0x19, 0, 0, 1, 6, 7, 8, 0xB, 4, 5, 9, 0xD, 0x11, 0x10, 0, 0x14, 0xA, 0x15, 0xC, 0x13, 0xE, 0, 0x12, 0x17, 0x18, 0, 0,
+};
+/* .sdata */
+s32 gCurrentWeapon = 1;
+u32 gWeaponsAvailable[1] = { 0 }; /* bit per weapon */
+static s32 D_8010F928 = 0;        /* last allocated weapon anim slot */
+s16 gTaserGobjID = -1;
+static s16 D_8010F92E = -1;       /* taser hum song, -1 when not playing */
+static s32 D_8010F930 = -1;       /* taser shock ticks, -1 before the first */
+static char D_8010F934[2] = " ";  /* first used by WeaponMakeRoundsString (still asm) */
+/* 0x8010F938 (unreferenced, weapon or movement) stays in the blob */
+/* .sbss */
+static u8 D_80110028;
+static WeaponMasterAnim *D_8011002C; /* body armour (VEST.GMD) */
+
 extern WeaponState gWeaponState[];
-extern u8 D_8010628C[]; /* next weapon in the selection order */
-extern u8 D_801062A8[]; /* previous weapon in the selection order */
 extern s32 particleTaserState;
-extern WeaponMasterAnim *D_8011002C; /* body armour (VEST.GMD) */
-extern s16 gTaserGobjID;
-extern u8 D_80110028;
 extern s32 gPermHogFile;
 s32 EGSHogGetBlockByName(s32 hog, char *name, void **out);
 void LevelGetModel(char *name, void **out);
@@ -136,7 +169,6 @@ typedef struct WeaponAnim {
     /* 0x18 */ GameObjectAnim *unk18; /* owner's anim while held */
 } WeaponAnim;
 
-extern s32 D_8010F928;                       /* last allocated weapon anim slot */
 extern s32 D_80118F40[WEAPON_ANIM_MAX];      /* owner per slot: -1 free, negative = dropped */
 extern WeaponAnim *D_80118A8C[WEAPON_ANIM_MAX];
 
@@ -169,7 +201,6 @@ s32 WeaponGetPreviousID(s32 weapon);
 void InterfaceWeaponChange(void);
 u8 WeaponReload(s32 weapon);
 void CASRequestAction(s32 id, s32 action);
-extern char D_8010F934[]; /* " " (.sdata) */
 
 u16 TextReplaceString(u16 id, char *str, s32 arg2, s32 arg3);
 s32 SysPlaySong(s32 arg0, s32 song, void *arg2, s32 arg3);
@@ -226,7 +257,6 @@ WeaponDropSector *EGSDisplayGetPointSector(s32 *pos);
 
 void EGSAnimSimpleCreate(void *model, s32 arg1, s32 flags, WeaponAnim **out);
 
-INCLUDE_RODATA("asm/main/nonmatchings/weapon", D_80011E8C);
 
 void WeaponInit(void) {
     char name[16];
@@ -858,8 +888,6 @@ extern s32 gSniperMode;
 extern s32 gSniperBonesHit;
 extern s32 sWindowCount;
 extern Gobj *sWindowArray[];
-extern s32 D_8010F930;           /* taser shock ticks, -1 before the first */
-extern s16 D_8010F92E;           /* taser hum song, -1 when not playing */
 extern struct GameCamSlot D_80118A78; /* camera slot for the taser close-up */
 
 #define GOBJ_TYPE_WINDOW 0x6D
