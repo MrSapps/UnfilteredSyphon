@@ -1,0 +1,8 @@
+# C TUs that build_psyq.ninja (python3 configure.py --psyq) builds with the MODERN
+# compiler (cpp | cc1 | maspsx | GNU as, converted by tools/elf2psyq.py) instead of
+# the original ccpsx/aspsx.  One TU name per line (src/main/<tu>.c, or an overlay
+# name for src/<ovl>/<ovl>.c); `#` starts a comment.  Use it only for a TU that does
+# not (yet) compile or match under ccpsx, and remove the line once it does
+# (check with tools/psyq_check_tu.py <tu>).
+#
+# Empty: all 51 main TUs and all 14 overlay TUs match under ccpsx (2026-10-31).

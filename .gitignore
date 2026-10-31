@@ -32,3 +32,4 @@ __pycache__/
 /.claude/
 /permute/
 /tools/decomp-permuter/
+/build_psyq.ninja

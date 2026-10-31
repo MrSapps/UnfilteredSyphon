@@ -2,21 +2,27 @@
 """Generate a psylink (Psy-Q 4.3 linker) command file for the whole game: the main
 exe, every overlay and the embedded hogs, laid out as in orig/siphon.map.
 
-    tools/gen_psylink.py [--out build/psyq] [--libs] [--obj TU=path.obj ...]
+    tools/gen_psylink.py [--out build/psyq] [--gnu-dir build] [--libs] [--obj TU=path.obj ...]
 
-Inputs (from the modern build, run `python3 configure.py && ninja` first):
-  * build/scus_942.40.ld and build/<ovl>.ld, the splat linker scripts.  They give,
-    per output section, the objects in link order.  psylink has a single include
-    order for all sections, so the per-section orders are merged (only objects
-    that actually contribute bytes constrain the order).
-  * every object they name, converted with tools/elf2psyq.py into
-    <out>/obj/<same path>.obj.  Overlay objects get their sections renamed
-    (.text -> menu.text, ...; the overlay id word -> $menu) because psylink
-    assigns sections to groups by name and the original map has per-overlay
-    section names.
-  * the modern ELFs' symbol tables, for equates: every name some object
-    references but no object defines (splat's undefined_syms, linker-script
-    symbols) becomes `name equ $value` in the command file.
+Inputs:
+  * build/scus_942.40.ld and build/<ovl>.ld, the splat linker scripts (written by
+    `python3 configure.py`, which runs splat).  They give, per output section, the
+    objects in link order.  psylink has a single include order for all sections, so
+    the per-section orders are merged (only objects that actually contribute bytes
+    constrain the order).
+  * every object they name (build/<path>.o, read from <gnu-dir>/<path>.o), converted
+    with tools/elf2psyq.py into <out>/obj/<same path>.obj, unless --obj replaces it.
+    Overlay objects get their sections renamed (.text -> menu.text, ...; the overlay
+    id word -> $menu) because psylink assigns sections to groups by name and the
+    original map has per-overlay section names.  A TU given with --obj needs no
+    GNU object at all.
+  * equates: every name some object references but no object defines becomes
+    `name equ $value`.  The values come from the same text files the GNU link uses
+    (config/undefined_{syms,funcs}_auto.<module>.txt, config/<module>.syms.ld,
+    config/syms.d/<module>/*.ld, for an overlay also main's) and the splat symbol
+    lists (config/symbols/<module>[.manual].txt); splat's address labels
+    (D_80123456, func_..., jtbl_...) are valued by their name.  No linked ELF or
+    map is read.  <out>/equates.txt lists every equate and where its value came from.
 
 --libs     use the real Psy-Q library modules listed in config/psyq_libs.txt
            (tools/psyq_liborder.py; extracted into <out>/lib) instead of the lib_*.s asm
@@ -25,6 +31,8 @@ Inputs (from the modern build, run `python3 configure.py && ninja` first):
 --obj TU=FILE  use FILE (e.g. a ccpsx-compiled OBJ) for TU <TU> instead of
            converting build/src/main/<TU>.c.o (or, for an overlay TU, build/src/<TU>/<TU>.c.o;
            its sections and clashing symbols are renamed like a converted object's)
+--gnu-dir DIR  read the GNU objects from DIR instead of build/ (build_psyq.ninja
+           builds its own under build/psyq/gnu)
 
 Writes <out>/siphon.lnk; link with tools/psyq_link.sh.
 """
@@ -32,7 +40,6 @@ import argparse
 import os
 import re
 import shutil
-import struct
 import struct
 import sys
 
@@ -122,33 +129,50 @@ def lib_raw_modules(b):
     return out
 
 
-def blob_cuts():
-    """{ELF object: {section: (keep start, keep end)}} for main objects that need cutting
-    (from the modern build's map):
+EXE_DELTA = 0x8000F800                  # vram - file offset of scus_942.40
+
+
+def blob_vram(obj):
+    """Start address of a splat data blob of the main exe, from its file name: splat
+    names data blobs <type>_<file offset> and bss blobs <type>_<vram>."""
+    stem = os.path.basename(obj)[:-len(".s.o")].split(".")[0]
+    m = re.match(r"(bss|sbss)_([0-9A-F]+)$", stem)
+    if m:
+        return int(m.group(2), 16)
+    m = re.match(r"(data|sdata|rdata|rodata)_([0-9A-F]+)$", stem)
+    if m:
+        return int(m.group(2), 16) + EXE_DELTA
+    return None
+
+
+def blob_cuts(order, info):
+    """{ELF object: {section: (keep start, keep end)}} for main splat blobs that need
+    cutting:
       * a section that runs into the library data is cut where that starts;
       * in .sbss/.bss psylink starts every object's contribution 8-aligned (the
         sections hold commons), so a splat bss blob that starts 4 bytes past an
         8-byte boundary loses those 4 bytes - psylink's padding after the previous
-        object recreates them.  Names defined there become equates."""
+        object recreates them.  Names defined there become equates.
+    Blob addresses come from their file names (blob_vram), sizes from the object."""
     cuts = {}
-    for l in open(os.path.join(ROOT, "build/scus_942.40.map")):
-        m = re.match(r"\s(\.(?:data|sbss|bss))\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(build/\S+)", l)
-        if not m:
+    for obj in order:
+        if "/asm/main/data/" not in obj or "/data/lib_" in obj:
             continue
-        sec, start, size, obj = m.group(1), int(m.group(2), 16) & 0xFFFFFFFF, int(m.group(3), 16), m.group(4)
-        if not size or "/asm/main/lib_" in obj or "/assets/" in obj or not 0x80010000 <= start < 0x801377E0:
-            continue
-        lo, hi = 0, size
-        if sec in LIB_DATA and start + size > LIB_DATA[sec]:
-            hi = max(0, LIB_DATA[sec] - start)
-        if sec in (".sbss", ".bss") and start & 7:
-            if "/asm/" not in obj:
-                print("warning: %s %s starts at %08x, not 8-aligned; psylink will move it"
-                      % (obj, sec, start), file=sys.stderr)
-            else:
+        for sec in (".data", ".sbss", ".bss"):
+            size = info[obj][2].get(sec, 0)
+            if not size:
+                continue
+            start = blob_vram(obj)
+            if start is None:
+                raise SystemExit("gen_psylink: can't tell the address of %s (%s); "
+                                 "extend blob_vram()" % (obj, sec))
+            lo, hi = 0, size
+            if sec in LIB_DATA and start + size > LIB_DATA[sec]:
+                hi = max(0, LIB_DATA[sec] - start)
+            if sec in (".sbss", ".bss") and start & 7:
                 lo = min(hi, -start & 7)
-        if (lo, hi) != (0, size):
-            cuts.setdefault(obj, {})[sec] = (lo, hi)
+            if (lo, hi) != (0, size):
+                cuts.setdefault(obj, {})[sec] = (lo, hi)
     return cuts
 
 
@@ -229,10 +253,44 @@ def obj_info(path):
     return {x[3] for x in o.xdefs}, set(o.xrefs.values()) | {c[3] for c in o.commons}
 
 
-def elf_symtab(path):
-    """{name: value} of a linked ELF (globals and locals)."""
-    secs, syms, _, _ = elf2psyq.read_elf(open(path, "rb").read())
-    return {y["name"]: y["value"] for y in syms if y["name"] and y["shndx"] != 0}
+def config_symtab(mod):
+    """[(source file, {name: value})] for module <mod>, in lookup order: the absolute
+    symbols its GNU link is given (-T files), then splat's symbol lists."""
+    files = ["config/undefined_syms_auto.%s.txt" % mod, "config/undefined_funcs_auto.%s.txt" % mod,
+             "config/%s.syms.ld" % mod]
+    d = os.path.join(ROOT, "config/syms.d", mod)
+    if os.path.isdir(d):
+        files += ["config/syms.d/%s/%s" % (mod, f) for f in sorted(os.listdir(d)) if f.endswith(".ld")]
+    files += ["config/symbols/%s.manual.txt" % mod, "config/symbols/%s.txt" % mod]
+    out = []
+    for f in files:
+        path = os.path.join(ROOT, f)
+        if not os.path.exists(path):
+            continue
+        tab = {}
+        for l in open(path):
+            m = re.match(r"\s*(\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)\s*;", l)
+            if m:
+                tab.setdefault(m.group(1), int(m.group(2), 0) & 0xFFFFFFFF)
+        out.append((f, tab))
+    return out
+
+
+ADDR_LABEL = re.compile(r"(?:D|func|jtbl|jpt|L|switch|lbl)_([0-9A-F]{8})$")
+
+
+def symbol_value(mod, name, tabs):
+    """(value, source) for an unresolved name of module <mod>, or None."""
+    for src in ([mod, "main"] if mod != "main" else ["main"]):
+        if src not in tabs:
+            tabs[src] = config_symtab(src)
+        for f, tab in tabs[src]:
+            if name in tab:
+                return tab[name], f
+    m = ADDR_LABEL.match(name)
+    if m:
+        return int(m.group(1), 16), "address label"
+    return None
 
 
 def merge_orders(lists):
@@ -266,8 +324,27 @@ def merge_orders(lists):
     return order
 
 
-def module_objects(mod, ld):
-    """(object order, {object: renames}) for one module."""
+def sn_info(path):
+    """elf_info() for an SN OBJ (section sizes under the ELF names)."""
+    o = read_lib(path)[0].obj
+    defs, undef = obj_info(path)
+    sizes = {}
+    for sec in o.sections.values():
+        n = {".rdata": ".rodata"}.get(sec.name, sec.name)
+        sizes[n] = sizes.get(n, 0) + (len(sec.data) or sec.bss)
+    return defs, undef, sizes
+
+
+def swap_tu(mod, obj):
+    """The TU name --obj uses for this object, or None."""
+    if not obj.endswith(".c.o"):
+        return None
+    tu = os.path.basename(obj)[:-len(".c.o")]
+    return tu if mod == "main" or tu == mod else None
+
+
+def module_objects(mod, ld, gnu, swap):
+    """(object order, {object: elf_info}) for one module."""
     secs = ld_sections(os.path.join(ROOT, ld))
     lists = []
     info = {}
@@ -275,7 +352,8 @@ def module_objects(mod, ld):
         per = {}
         for obj, insec in items:
             if obj not in info:
-                info[obj] = elf_info(os.path.join(ROOT, obj))
+                tu = swap_tu(mod, obj)
+                info[obj] = sn_info(swap[tu]) if tu in swap else elf_info(gnu(obj))
             if info[obj][2].get(insec, 0):
                 per.setdefault(insec, []).append(obj)
         lists += per.values()
@@ -290,6 +368,7 @@ def main():
     ap.add_argument("--out", default="build/psyq")
     ap.add_argument("--libs", action="store_true")
     ap.add_argument("--obj", action="append", default=[], metavar="TU=FILE")
+    ap.add_argument("--gnu-dir", default="build", help="where the GNU objects build/<path>.o are")
     ap.add_argument("--commons-order", default="rev", choices=["none", "addr", "rev"],
                     help="--libs: enter the common names into psylink's symbol table first, in this "
                     "order (rev = reverse address order, which reproduces the original layout)")
@@ -299,16 +378,22 @@ def main():
     swap = dict(x.split("=", 1) for x in a.obj)
     swapped = set()
 
-    libmods = lib_modules(os.path.join(ROOT, a.out, "lib")) if a.libs else []
-    cuts = blob_cuts() if a.libs else {}
+    gnudir = os.path.join(ROOT, a.gnu_dir)
 
-    mods = [("main", "build/scus_942.40.ld", "build/scus_942.40.elf")]
-    mods += [(o, "build/%s.ld" % o, "build/bin/%s.ovl.elf" % o) for o in OVERLAYS]
+    def gnu(o):
+        """Path of the GNU object a linker script names build/<path>.o."""
+        return os.path.join(gnudir, o[len("build/"):])
+
+    libmods = lib_modules(os.path.join(ROOT, a.out, "lib")) if a.libs else []
+
+    mods = [("main", "build/scus_942.40.ld")]
+    mods += [(o, "build/%s.ld" % o) for o in OVERLAYS]
     plan = []                   # (module, ELF object, OBJ path, renames)
     alldefs = {}
     refs = []                   # (module, name)
-    for mod, ld, _ in mods:
-        order, info = module_objects(mod, ld)
+    for mod, ld in mods:
+        order, info = module_objects(mod, ld, gnu, swap)
+        cuts = blob_cuts(order, info) if a.libs and mod == "main" else {}
         for o in order:
             if o.endswith("/tail_pad.bin.o"):
                 continue                       # cpe2exe pads the exe to 2 KB itself
@@ -325,9 +410,7 @@ def main():
             elif "/assets/main/" in o:
                 ren[".data"] = os.path.basename(o)[:-len(".bin.o")]
             dst = os.path.join(a.out, "obj", o[len("build/"):-2] + ".obj")
-            tu = os.path.basename(o)[:-len(".c.o")] if o.endswith(".c.o") else None
-            if mod != "main" and tu != mod:
-                tu = None
+            tu = swap_tu(mod, o)
             if tu in swap:
                 dst = os.path.join(a.out, "obj", "swap", tu + ".obj")
                 os.makedirs(os.path.join(ROOT, os.path.dirname(dst)), exist_ok=True)
@@ -346,7 +429,7 @@ def main():
             elif trunc:
                 os.makedirs(os.path.dirname(os.path.join(ROOT, dst)), exist_ok=True)
                 open(os.path.join(ROOT, dst), "wb").write(elf2psyq.convert(
-                    open(os.path.join(ROOT, o), "rb").read(), ren, truncate=trunc,
+                    open(gnu(o), "rb").read(), ren, truncate=trunc,
                     commons_as_xrefs=True))
                 defs, undef = obj_info(os.path.join(ROOT, dst))
             for d in defs:
@@ -388,34 +471,36 @@ def main():
         if any(m == "main" for m, _ in alldefs[n]):
             print("warning: %s defined in main and an overlay" % n, file=sys.stderr)
 
-    # equates for references no object resolves, valued from the module's own ELF
-    elfs = dict((m, e) for m, _, e in mods)
+    # equates for references no object resolves, valued from the config symbol files
     tabs = {}
     want = {}                   # (mod, name) -> value
+    source = {}                 # (mod, name) -> where the value came from
+    missing = []
     for mod, n in sorted(set(refs)):
         if n in modefs.get(mod, ()) or n in modefs.get("main", ()):
             continue
         if mod == "main" and n in alldefs:
             continue
-        for src in ([mod, "main"] if mod != "main" else ["main"]):
-            if src not in tabs:
-                tabs[src] = elf_symtab(os.path.join(ROOT, elfs[src]))
-            if n in tabs[src]:
-                want[(mod, n)] = tabs[src][n] & 0xFFFFFFFF
-                break
-        else:
-            print("warning: no value for %s (%s)" % (n, mod), file=sys.stderr)
+        v = symbol_value(mod, n, tabs)
+        if v is None:
+            missing.append("%s (%s)" % (n, mod))
+            continue
+        want[(mod, n)], source[(mod, n)] = v
+    if missing:
+        raise SystemExit("gen_psylink: no value for: " + ", ".join(missing))
     values = {}
     for (mod, n), v in want.items():
         values.setdefault(n, set()).add(v)
     symren = {}                 # mod -> {old: new}
     equ = {}
-    for (mod, n), v in want.items():
+    report = []
+    for (mod, n), v in sorted(want.items()):
         name = n
         if mod != "main" and (n in alldefs or len(values[n]) > 1):
             name = "%s_%s" % (mod, n)
             symren.setdefault(mod, {})[n] = name
         equ[name] = v
+        report.append("%-32s %08X  %-8s %s" % (name, v, mod, source[(mod, n)]))
     for n in clashes:
         for m, _ in alldefs[n]:
             if m != "main":
@@ -431,7 +516,7 @@ def main():
         if dst in swapped or o is None or trunc:
             continue
         absdst = os.path.join(ROOT, dst)
-        src = os.path.join(ROOT, o)
+        src = gnu(o)
         os.makedirs(os.path.dirname(absdst), exist_ok=True)
         data = elf2psyq.convert(open(src, "rb").read(), ren, symrename=symren.get(mod),
                                 commons_as_xrefs=a.libs and mod == "main")
@@ -499,6 +584,9 @@ def main():
     lines.append("\tregs\tpc=__SN_ENTRY_POINT")
     lines.append("")
     open(os.path.join(out, "siphon.lnk"), "w").write("\r\n".join(lines) + "\r\n")
+    with open(os.path.join(out, "equates.txt"), "w") as f:
+        f.write("# equates in siphon.lnk: name, value, referencing module, value source\n")
+        f.write("\n".join(report) + "\n")
     print("wrote %s: %d objects, %d equates, %d renamed overlay symbols" % (
         os.path.join(a.out, "siphon.lnk"), len(plan), len(equ), len(clashes)))
 
