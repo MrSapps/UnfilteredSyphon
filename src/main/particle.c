@@ -1611,9 +1611,45 @@ ParticleGroup *ParticleHitFlakJacket(s32 arg0, s32 id, VECTOR32 *pos, VECTOR32 *
 }
 
 /* Texture animation strip (gMultiTextures[], 0xC bytes each) */
+/* libgs GsIMAGE */
+typedef struct ParticleImage {
+    /* 0x00 */ u32 pmode;
+    /* 0x04 */ s16 px, py;
+    /* 0x08 */ u16 pw, ph;
+    /* 0x0C */ u32 *pixel;
+    /* 0x10 */ s16 cx, cy;
+    /* 0x14 */ u16 cw, ch;
+    /* 0x18 */ u32 *clut;
+} ParticleImage;
+
+/* One animation frame (EGSTexture) */
+typedef struct ParticleTexture {
+    /* 0x00 */ u32 *tim;
+    /* 0x04 */ void *slot;
+    /* 0x08 */ u8 animated;
+    /* 0x09 */ u8 loaded;
+    /* 0x0C */ ParticleImage image;
+    /* 0x28 */ s32 unk28;
+} ParticleTexture; /* size 0x2C */
+
+/* Particle display primitive (Particle + 0x28) as an EGSSprite (GsSPRITE) */
+typedef struct ParticleGsSprite {
+    /* 0x00 */ u32 attribute;
+    /* 0x04 */ s16 x, y;
+    /* 0x08 */ u16 w, h;
+    /* 0x0C */ u16 tpage;
+    /* 0x0E */ u8 u, v;
+    /* 0x10 */ s16 cx, cy;
+    /* 0x14 */ u8 r, g, b;
+    /* 0x18 */ s16 mx, my;
+    /* 0x1C */ s16 scalex, scaley;
+    /* 0x20 */ s32 rotate;
+} ParticleGsSprite;
+
 typedef struct MultiTexture {
     /* 0x00 */ s16 frames;
-    /* 0x02 */ u8 unk02[0xA];
+    /* 0x02 */ u8 unk02[6];
+    /* 0x08 */ ParticleTexture *tex;
 } MultiTexture;
 
 extern MultiTexture gMultiTextures[];
@@ -3264,7 +3300,210 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateFragmentMeterFrictionFloor);
 #endif
 
+#ifdef NON_MATCHING
+/* regalloc: prev and p swap s0/s1; min-loop head lands in a0 */
+/* Explosion fireballs: animated sprites respawned around the (drifting) group centre */
+void ParticleUpdateExplosion(ParticleGroup *g) {
+    VECTOR32 cam;
+    VECTOR32 dir;
+    Particle *p;
+    s32 prev = 0;
+    s32 set = 0;
+    s32 i = g->head;
+    u32 fade = g->fade;
+    s32 next;
+    s32 j;
+    s32 min;
+    s32 c;
+    s32 range;
+    s32 spread;
+    s32 offset;
+    s32 frame;
+    s32 mode;
+    s32 shift;
+    s32 tpage;
+    s32 vy;
+    s32 drag;
+    ParticleGsSprite *sprite;
+    ParticleTexture *tex;
+
+    if ((s32)fade < 0) {
+        if (fade & 0xFF0000) {
+            set = 3;
+            g->fade = fade - 0x10000;
+        } else if (fade & 0xFF00) {
+            set = 2;
+            if ((fade & 0xFF00) != 0xFF00) {
+                g->fade = fade - 0x100;
+            }
+            if (!(g->flags & 0x800)) {
+                if ((g->id & 0x3FFF) < 0xFFF && D_80110094 != g) {
+                    D_80110094 = g;
+                    D_8011009C = g->unk23;
+                    D_8011D140 = D_80119040[i].pos;
+                }
+                if (g->id == 0) {
+                    D_8011D140 = D_80119040[i].pos;
+                }
+            }
+        } else {
+            set = 3;
+            if ((fade & 0xFF) != 0xFF && fade != 0x80000000) {
+                g->fade = fade - 1;
+            }
+            if (D_80110094 == g) {
+                D_80110094 = NULL;
+            }
+        }
+    }
+    if (g->flags & 0x800) {
+        g->x += g->dx >= 0 ? g->dx >> 6 : -(-g->dx >> 6);
+        g->y += g->dy >= 0 ? g->dy >> 6 : -(-g->dy >> 6);
+        g->z += g->dz >= 0 ? g->dz >> 6 : -(-g->dz >> 6);
+        g->dy += g->wind >> 7;
+        if (g->y < D_80110088) {
+            g->fade = 0x80000000;
+            g->y = D_80110088;
+        }
+        min = 100;
+        for (c = j = g->head; c >= 0; c = p->next) {
+            p = &D_80119040[c];
+            if (--p->state < min) {
+                j = c;
+                min = p->state;
+            }
+        }
+        D_80119040[j].state = 0;
+        c = (g->y - D_80110088) >> 1;
+        if (c >= 0x100) {
+            c = 0xFF;
+        }
+        D_80119040[j].color = (c << 16) | (c << 8) | c;
+    }
+    while (i >= 0) {
+        p = &D_80119040[i];
+        p->state--;
+        next = p->next;
+        if (g->id >= 0) {
+            if (p->state > 0) {
+                goto show;
+            }
+            if (g->fade == 0x80000000) {
+                ParticleFree(g, p, prev, i);
+                i = next;
+                continue;
+            }
+            if ((s32)g->fade < 0) {
+                p->unk62 = set;
+                if (set == 3) {
+                    EGSTextureSetSpriteTransparency(p->prim, 3);
+                    p->unk64 = gMultiTextures[3].frames - 1;
+                } else {
+                    if (!(g->flags & 0x800)) {
+                        EGSTextureSetSpriteTransparency(p->prim, 1);
+                    } else {
+                        EGSTextureSetSpriteTransparency(p->prim, 3);
+                    }
+                    p->unk64 = gMultiTextures[set].frames - 5;
+                }
+                if (!(g->fade & 0xFFFF00)) {
+                    g->unk23 -= g->unk23 >> 4;
+                }
+            }
+            p->state = p->unk60 = p->unk64 + (rand() & 7);
+            range = g->unk23 * 127;
+            spread = range >> 7;
+            offset = range >> 8;
+            p->pos.vx = (spread & rand()) - offset + g->x;
+            p->pos.vz = (spread & rand()) - offset + g->z;
+            if (g->flags & 0x2000) {
+                cam.vx = (*D_8011008C)->pos.vx;
+                cam.vy = (*D_8011008C)->pos.vy;
+                cam.vz = (*D_8011008C)->pos.vz;
+                cam.vy = -cam.vy;
+                dir.vx = (*D_8011008C)->m[0][2];
+                dir.vy = (*D_8011008C)->m[1][2];
+                dir.vz = (*D_8011008C)->m[2][2];
+                dir.vy = -dir.vy;
+                p->pos.vx = cam.vx + (dir.vx >> 4);
+                p->pos.vz = cam.vz + (dir.vz >> 4);
+                p->pos.vy = cam.vy + (dir.vy >> 4);
+                if (g->x < 0) {
+                    p->pos.vx -= dir.vz >> 5;
+                    p->pos.vz += dir.vx >> 5;
+                }
+                if (g->x > 0) {
+                    p->pos.vx += dir.vz >> 5;
+                    p->pos.vz -= dir.vx >> 5;
+                }
+                p->vel.vx = (rand() & 0xF) - 7;
+                p->vel.vy = ((rand() & 0xF) - 7) << 12;
+                p->vel.vz = (rand() & 0xF) - 7;
+            } else if (g->flags & 0x40000) {
+                if (g->unk1C != 1) {
+                    p->pos.vy = (spread & rand()) - offset + g->y;
+                    spread = range >> 9;
+                    range >>= 10;
+                    p->vel.vx = g->dx + (spread & rand()) - range;
+                    p->vel.vy = (g->dy + (spread & rand()) - range) << 12;
+                    p->vel.vz = g->dz + (spread & rand()) - range;
+                }
+            } else {
+                range >>= 9;
+                p->pos.vy = (spread & rand()) + g->y;
+                p->vel.vx = (offset & rand()) - range;
+                p->vel.vy = (offset & rand()) << 10;
+                p->vel.vz = (offset & rand()) - range;
+            }
+        } else if (p->state <= 0) {
+            ParticleFree(g, p, prev, i);
+            i = next;
+            continue;
+        }
+    show:
+        frame = p->unk64 * p->state / p->unk60;
+        sprite = (ParticleGsSprite *)p->prim;
+        if ((s32)g->fade >= 0) {
+            set = g->unk1C;
+        } else {
+            set = p->unk62;
+        }
+        tex = &gMultiTextures[set].tex[p->unk64 - frame];
+        mode = tex->image.pmode & 3;
+        shift = 2 - mode;
+        tpage = GetTPage(mode, 0, tex->image.px, tex->image.py) & 0x1F;
+        if (tpage < 16) {
+            sprite->u = (tex->image.px - tpage * 64) << shift;
+        } else {
+            sprite->u = (tex->image.px - (tpage - 16) * 64) << shift;
+        }
+        sprite->v = tex->image.py;
+        sprite->tpage = tpage;
+        sprite->w = tex->image.pw << shift;
+        sprite->h = tex->image.ph;
+        sprite->mx = sprite->w >> 1;
+        sprite->my = sprite->h >> 1;
+        sprite->cx = tex->image.cx;
+        sprite->cy = tex->image.cy;
+        sprite->attribute |= 0x80000000 | (mode << 24);
+        if (!(g->flags & 0x800)) {
+            p->pos.vx += p->vel.vx;
+            p->pos.vy += (vy = p->vel.vy + g->wind) >= 0 ? vy >> 12 : -(-vy >> 12);
+            p->pos.vz += p->vel.vz;
+            if (g->flags & 0x10) {
+                drag = (g->flags & 0x1000) ? 4 : 2;
+                p->vel.vx -= (p->vel.vx + 1) >> drag;
+                p->vel.vy -= (p->vel.vy + 1) >> drag;
+                p->vel.vz -= (p->vel.vz + 1) >> drag;
+            }
+        }
+        prev = i;
+        i = next;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateExplosion);
+#endif
 
 /* GPU code word: r, g, b and the primitive code in the top byte */
 typedef union ParticleRGBC {
@@ -3433,7 +3672,8 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
                 sprite->h = w;
                 sprite->y = -screen.vy - (POSITION.y - 0x78);
             }
-            depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+            depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
             if (depth >= 0) {
                 sprite->z = depth;
             } else {
@@ -3515,7 +3755,8 @@ void ParticleUpdateGlass(ParticleGroup *g) {
                         q->vel.vy = 0;
                         q->vel.vz = rsin(angle) >> 8;
                         EGSDisplayTransformWorldToScreen(&q->pos, &screen);
-                        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                        depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
                         if (depth >= 0) {
                             q->depth = depth;
                         } else {
@@ -3539,12 +3780,6 @@ void ParticleUpdateGlass(ParticleGroup *g) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayRain);
-
-
-SDATA_LOCAL(D_8010F944)
-extern s32 D_8010F944; /* snow brightness, follows the player's size */
-
 /* View of GameObjectAnim's bounding box */
 typedef struct SnowAnimView {
     /* 0x00 */ u8 unk00[0x1C];
@@ -3553,6 +3788,180 @@ typedef struct SnowAnimView {
         s16 x, y, z;
     } *box;
 } SnowAnimView;
+
+/* Particle display primitive (Particle + 0x28) drawn as a gouraud line */
+typedef struct ParticleLine {
+    /* 0x00 */ s32 data;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ u8 unk08[4];
+    /* 0x0C */ ParticleRGBC rgbc0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ u32 rgb1;
+    /* 0x18 */ s32 xy1;
+} ParticleLine;
+
+#ifdef NON_MATCHING
+/* depth: v0/a0 swapped between the g->unk26 term and the screen.vz shifts */
+/* Rain: falling gouraud lines in a box around the camera, with a splash at the floor */
+void ParticleDisplayRain(ParticleGroup *g) {
+    VECTOR32 cam;
+    VECTOR32 old;
+    VECTOR32 dir;
+    VECTOR32 screen;
+    VECTOR32 player;
+    GameObjectRuntime *gobj = gameObjectsInfo[gPlayerOffset].runtime;
+    s32 i = g->head;
+    SnowAnimView *anim;
+    s32 size;
+    s32 fall;
+    s32 top;
+    s32 windX;
+    s32 windZ;
+    s32 floor;
+    s32 c;
+    u32 color;
+    u32 head;
+    u32 tail;
+    s32 odd;
+    s32 width;
+    s32 x;
+    s32 d;
+    s32 depth;
+    s32 height;
+    Particle *p;
+    ParticleLine *line;
+
+    ParticleGroupUpdateRain(g);
+    anim = (SnowAnimView *)gobj->anim;
+    size = (anim->box->x + anim->box->y + anim->box->z) >> 1;
+    windX = D_8011D1C0.vx >> 3;
+    fall = g->wind >> 8;
+    windZ = D_8011D1C0.vz >> 3;
+    if (size > 0x1000) {
+        size = 0x1000;
+    }
+    c = (size >> 6) + 0x10;
+    color = (c << 16) + (c << 8) + c;
+    if (color & 0xFF000000) {
+        head = (color & 0xFFFFFF) | 0x50000000;
+    } else {
+        head = color | 0x50000000;
+    }
+    c >>= 1;
+    tail = (c << 16) + (c << 8) + c;
+    if (gSniperMode && gCurrentWeapon == 12) {
+        head &= 0xFF00FF00;
+        tail &= 0xFF00;
+    }
+    player.vx = ((AnimFramesView *)gobj->anim)->frames[13]->pos.vx;
+    player.vy = ((AnimFramesView *)gobj->anim)->frames[13]->pos.vy;
+    player.vz = ((AnimFramesView *)gobj->anim)->frames[13]->pos.vz;
+    top = player.vy = -player.vy;
+    floor = ParticleFindFloor(D_80110088);
+    cam.vx = (*D_8011008C)->pos.vx;
+    cam.vy = (*D_8011008C)->pos.vy;
+    cam.vz = (*D_8011008C)->pos.vz;
+    cam.vy = -cam.vy;
+    dir.vx = (*D_8011008C)->m[0][2];
+    dir.vy = (*D_8011008C)->m[1][2];
+    dir.vz = (*D_8011008C)->m[2][2];
+    dir.vy = -dir.vy;
+    cam.vx += dir.vx >> 3;
+    cam.vz += dir.vz >> 3;
+    while (i >= 0) {
+        p = &D_80119040[i];
+        line = (ParticleLine *)p->prim;
+        odd = i & 1;
+        if (p->state <= odd) {
+            p->pos.vx = cam.vx + (rand() & 0x3FF) - 0x1FF;
+            p->pos.vy = top - (height = (i & 0x1F) - 0x104);
+            p->pos.vz = cam.vz + (rand() & 0x3FF) - 0x1FF;
+            p->state = 3;
+            line->rgbc0.word = head;
+            line->rgb1 = tail;
+        }
+        if (p->pos.vx < cam.vx - 0x1FF) {
+            p->pos.vx += 0x3FF;
+        }
+        if (cam.vx + 0x1FF < p->pos.vx) {
+            p->pos.vx -= 0x3FF;
+        }
+        if (p->pos.vz < cam.vz - 0x1FF) {
+            p->pos.vz += 0x3FF;
+        }
+        if (cam.vz + 0x1FF < p->pos.vz) {
+            p->pos.vz -= 0x3FF;
+        }
+        D_80110080++;
+        old = p->pos;
+        p->pos.vy += fall;
+        if (p->pos.vy <= floor) {
+            width = (4 - p->state) << 1;
+            if (p->state == 3) {
+                p->pos.vx = old.vx + windX * (floor - old.vy) / fall;
+                p->pos.vz = old.vz + windZ * (floor - old.vy) / fall;
+                if (!odd) {
+                    line->rgb1 = head & 0xFFFFFF;
+                    if (tail & 0xFF000000) {
+                        line->rgbc0.word = (tail & 0xFFFFFF) | 0x50000000;
+                    } else {
+                        line->rgbc0.word = tail | 0x50000000;
+                    }
+                }
+            }
+            p->pos.vy = floor;
+            EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+            if (screen.vz > 0) {
+                width >>= (cam.vy - floor) >> 8;
+                line->xy0 = -(screen.vy << 16) + (u16)(screen.vx - width);
+                line->xy1 = -(screen.vy << 16) + (u16)(screen.vx + width);
+                depth = g->unk26;
+                depth = (screen.vz >> 2) - (screen.vz >> 4) + (depth - 16);
+                if (depth >= 0) {
+                    line->z = depth;
+                } else {
+                    line->z = 0;
+                }
+            } else {
+                line->xy0 = line->xy1 = 0x4000400;
+            }
+            p->state--;
+        } else {
+            p->pos.vx += windX;
+            p->pos.vz += windZ;
+            EGSDisplayTransformWorldToScreen(&old, &screen);
+            if (screen.vz > 0) {
+                x = screen.vx;
+                p->xy1 = -(screen.vy << 16) + (u16)x;
+                EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+                if (screen.vz > 0 && (d = screen.vx - x, (d >= 0 ? d : -d) < 0x40)) {
+                    p->xy0 = -(screen.vy << 16) + (u16)screen.vx;
+                    depth = g->unk26;
+                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (depth - 16);
+                    if (depth >= 0) {
+                        p->depth = depth;
+                    } else {
+                        p->depth = 0;
+                    }
+                } else {
+                    line->xy0 = line->xy1 = 0x4000400;
+                }
+            } else {
+                p->xy0 = p->xy1 = 0x4000400;
+            }
+        }
+        line->rgbc0.c.code |= 2;
+        i = p->next;
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayRain);
+#endif
+
+
+SDATA_LOCAL(D_8010F944)
+extern s32 D_8010F944; /* snow brightness, follows the player's size */
+
 
 /* Snow flakes: a box of flat triangles that follows the camera */
 void ParticleUpdateSnow(ParticleGroup *g) {
@@ -3630,7 +4039,8 @@ void ParticleUpdateSnow(ParticleGroup *g) {
         angle = (s16)(p->unk62 += p->unk64);
         EGSDisplayTransformWorldToScreen(&p->pos, &screen);
         poly = (ParticlePolyF3 *)p->prim;
-        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+        depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
         if (depth >= 0) {
             poly->z = depth;
         } else {
@@ -3787,7 +4197,8 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                     polyT->xy0 = xy0;
                     polyT->xy1 = xy1;
                     polyT->xy2 = xy2;
-                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
                     if (depth >= 0) {
                         polyT->z = depth;
                     } else {
@@ -3806,7 +4217,8 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                     poly->xy0 = xy0;
                     poly->xy1 = xy1;
                     poly->xy2 = xy2;
-                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
                     if (depth >= 0) {
                         poly->z = depth;
                     } else {
@@ -3903,16 +4315,6 @@ s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateMovement);
 #endif
 
-/* Particle display primitive (Particle + 0x28) drawn as a gouraud line */
-typedef struct ParticleLine {
-    /* 0x00 */ s32 data;
-    /* 0x04 */ s32 z;
-    /* 0x08 */ u8 unk08[4];
-    /* 0x0C */ ParticleRGBC rgbc0;
-    /* 0x10 */ s32 xy0;
-    /* 0x14 */ u32 rgb1;
-    /* 0x18 */ s32 xy1;
-} ParticleLine;
 
 void ParticleUpdateLineMeter(ParticleGroup *g) {
     VECTOR32 screen;
@@ -3941,7 +4343,8 @@ void ParticleUpdateLineMeter(ParticleGroup *g) {
             goto free;
         }
         line->xy1 = (u16)screen.vx - (screen.vy << 16);
-        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+        depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
         if (depth >= 0) {
             line->z = depth;
         } else {
@@ -4101,7 +4504,8 @@ void ParticleUpdateTracer(ParticleGroup *g) {
                 EGSDisplayTransformWorldToScreen(&world, &screen);
                 if (screen.vz > 0) {
                     p->xy0 = (u16)screen.vx - (screen.vy << 16);
-                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
                     if (depth >= 0) {
                         p->depth = depth;
                     } else {
@@ -4144,8 +4548,6 @@ typedef struct ParticleLineF2 {
 SDATA_LOCAL(D_80110084)
 extern Particle *D_80110084; /* last shell that bounced */
 
-#ifdef NON_MATCHING
-/* bounce velocity: rand()&energy lands in a0 instead of v0 (6 insns) */
 /* Spent shell casings: a spinning line segment that bounces on the floor */
 void ParticleUpdateShell(ParticleGroup *g) {
     VECTOR32 screen;
@@ -4158,7 +4560,6 @@ void ParticleUpdateShell(ParticleGroup *g) {
     s32 depth;
     s32 bias;
     s16 energy;
-    s32 r;
     s32 half;
 
     while (i >= 0) {
@@ -4179,7 +4580,8 @@ void ParticleUpdateShell(ParticleGroup *g) {
             EGSDisplayTransformWorldToScreen(&tip, &screen);
             if (screen.vz > 0) {
                 line->xy0 = (u16)screen.vx - (screen.vy << 16);
-                depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                depth = (screen.vz >> 2) - (screen.vz >> 4);
+                depth += (bias = g->unk26 - 16);
                 if (depth >= 0) {
                     line->z = depth;
                 } else {
@@ -4212,10 +4614,8 @@ void ParticleUpdateShell(ParticleGroup *g) {
                         p->vel.vx = 0;
                         p->vel.vz = 0;
                     }
-                    r = rand() & energy;
-                    p->vel.vx += r - (p->vel.vx >> 2) - half;
-                    r = rand() & energy;
-                    p->vel.vz += r - (p->vel.vz >> 2) - half;
+                    p->vel.vx += -(p->vel.vx >> 2) + (rand() & energy) - half;
+                    p->vel.vz += -(p->vel.vz >> 2) + (rand() & energy) - half;
                     p->vel.vy = (-p->vel.vy >> 2) + (rand() & (energy * 4)) - energy * 2;
                     p->unk64 = (rand() & 0xFF) - 0x7F;
                     D_80110084 = p;
@@ -4229,9 +4629,6 @@ void ParticleUpdateShell(ParticleGroup *g) {
         D_80110064 = 0;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateShell);
-#endif
 
 void ssUpdateAndDisplay(ParticleGroup *g) {
     if (g->updateType != PARTICLE_UPDATE_NONE) {

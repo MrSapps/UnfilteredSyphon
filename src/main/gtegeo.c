@@ -211,7 +211,7 @@ void WindowLOSLoop(LOSQuery *query) {
 }
 
 #ifdef NON_MATCHING
-/* the forced flag lives in a0 and the npcState load sits at the GOBJ_TYPE join */
+/* regalloc: gobj/forced swap s0/s1 and node/hit s3/s4; the original computes forced in a0 and copies it */
 void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     LOSNode *node;
     GameObjectRuntime *gobj;
@@ -221,7 +221,7 @@ void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     GameObjectRuntime *ignore0;
     GameObjectRuntime *ignore1;
     s32 objType;
-    u8 state;
+    u32 state;
     u8 forced;
 
     node = D_80128A20[type];

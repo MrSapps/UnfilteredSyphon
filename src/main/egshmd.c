@@ -3,6 +3,7 @@
 #include "game.h"
 #include "egsmath.h"
 #include "egsframe.h"
+#include "scratch.h"
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
@@ -12,6 +13,12 @@ SDATA_LOCAL(gInfraredModel)
 SDATA_LOCAL(gSnifferAnim)
 SDATA_LOCAL(gHADoneCallback)
 SDATA_LOCAL(gHMDDLA)
+SDATA_LOCAL(gHMDSortCount)
+SDATA_LOCAL(gInfraredColorSniffer)
+SDATA_LOCAL(gGouraudLightLevel)
+SDATA_LOCAL(gImageEnd)
+SDATA_LOCAL(gGabeZ)
+SDATA_LOCAL(D_8010FEA4)
 
 typedef struct GsOT {
     u32 length;
@@ -101,14 +108,15 @@ typedef struct EGSDisplayObj {
     /* 0x1C */ void **dla;
 } EGSDisplayObj;
 
-/* Infrared image slots (0x44 bytes). */
+/* Infrared image slots (0x44 bytes): packets of up to 6 models drawn into a private area. */
 typedef struct EGSImage {
     /* 0x00 */ u8 unk00[4];
-    /* 0x04 */ s32 used;
-    /* 0x08 */ u8 unk08[4];
+    /* 0x04 */ u8 *start;
+    /* 0x08 */ u8 *end;
     /* 0x0C */ u8 *packets;
-    /* 0x10 */ u8 unk10[0x30];
-    /* 0x40 */ s32 unk40;
+    /* 0x10 */ u8 *marks[6]; /* packet start per model */
+    /* 0x28 */ s32 depths[6];
+    /* 0x40 */ s32 levels; /* models in the image */
 } EGSImage;
 
 #define EGS_IMAGE_MAX 5
@@ -119,7 +127,7 @@ extern s32 gImagePtr;
 extern s32 gInfraredColor;
 extern s32 gInfraredModes[];
 extern void *gInfraredModel;
-extern void *gSnifferAnim;
+extern struct HMDSortAnim *gSnifferAnim;
 extern void (*gHADoneCallback)(EGSHMD *hmd);
 extern void *D_8012D8DC;
 extern DamageCache gGabeCache;
@@ -167,8 +175,8 @@ void EGSDisplayInfraredOn(EGSHMD *hmd, s32 mode)
     for (i = 0; i < EGS_IMAGE_MAX; i++) {
         gImages[i].packets = area;
         area += 8000;
-        gImages[i].used = 0;
-        gImages[i].unk40 = 0;
+        gImages[i].start = NULL;
+        gImages[i].levels = 0;
     }
     gImagePtr = 0;
 }
@@ -255,12 +263,388 @@ void InitImages(void)
     int i;
 
     for (i = 0; i < EGS_IMAGE_MAX; i++) {
-        gImages[i].used = 0;
+        gImages[i].start = NULL;
     }
     gImagePtr = 0;
 }
 
+
+/* Display list node (camera->anims) */
+typedef struct EGSListNode {
+    /* 0x00 */ void *data;
+    /* 0x04 */ struct EGSListNode *prev;
+    /* 0x08 */ struct EGSListNode *next;
+} EGSListNode;
+
+/* View of EGSCamera */
+typedef struct HMDCamera {
+    /* 0x00 */ u8 unk00[6];
+    /* 0x06 */ u16 flags; /* 0x10: infrared view */
+    /* 0x08 */ u8 unk08;
+    /* 0x09 */ u8 index; /* non-zero for the secondary (rear view) camera */
+} HMDCamera;
+
+/* View of GameObjectModel */
+typedef struct HMDSortModel {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ EGSHMD *hmd;
+    /* 0x24 */ EGSHMD *farHmd; /* low detail model */
+    /* 0x28 */ u32 flags; /* 0x400000: visible, 0x2000000: only in sniffer view */
+} HMDSortModel;
+
+/* Per-object light parameters (anim + 0x1C) */
+typedef struct HMDSortLight {
+    /* 0x00 */ void *dla;
+    /* 0x04 */ s16 r, g, b;
+    /* 0x0A */ u8 unk0A[8];
+    /* 0x12 */ s16 fog; /* 0..100 */
+} HMDSortLight;
+
+/* View of GameObjectAnim as seen by the sorter */
+typedef struct HMDSortAnim {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ u8 flags8; /* 8: hidden */
+    /* 0x09 */ u8 flags9;
+    /* 0x0A */ u8 flagsA; /* 0x10: no fog cull, 0x40: far clip */
+    /* 0x0B */ u8 flagsB;
+    /* 0x0C */ void *frame;
+    /* 0x10 */ HMDSortModel *model;
+    /* 0x14 */ u8 unk14[2];
+    /* 0x16 */ s16 side; /* +-1: z bias direction */
+    /* 0x18 */ EGSFrame **frames;
+    /* 0x1C */ HMDSortLight *light;
+    /* 0x20 */ void *animList;
+    /* 0x24 */ SVECTOR *rotations;
+} HMDSortAnim;
+
+/* View of EGSPointSource (0x2C bytes) */
+typedef struct HMDPointSource {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ HMDSortAnim *anim;
+    /* 0x0C */ u8 unk0C[0x1C];
+    /* 0x28 */ HMDSortAnim *anim2;
+} HMDPointSource;
+
+typedef struct Str7 {
+    char c[7];
+} Str7;
+
+extern s32 gTerrainFog; /* near distance | fog shift << 16 */
+extern s32 gFogFlag;
+extern s32 gHMDSortCount;
+extern HMDSortAnim *gHMDSortArray[];
+extern HMDPointSource gPointSourceArray[];
+extern s32 gPointSourceCount;
+extern s32 gInfraredColorSniffer;
+extern s32 gGouraudLightLevel;
+extern u8 *gImageEnd;
+extern s32 gGabeZ;
+extern u8 D_8010FEA4; /* reset the infrared images */
+extern char D_8010FEA8[];
+extern char gErrorString[];
+extern EGSListNode *D_8012D8CC;
+extern u16 D_8012DB22;
+extern s16 gCurrentDrawBuffer;
+extern GsOT gOtbl[];
+extern u8 *GsOUT_PACKET_P;
+extern VECTOR gPCGouraudLight;
+extern VECTOR gNPCGouraudLight;
+
+void EGSDisplaySetupGTE(void *frame);
+s32 EGSDisplayOnScreen(s32 dist, s32 arg1);
+void GsSetFlatLight(s32 id, VECTOR *light);
+void GsSortOt(GsOT *src, GsOT *dst);
+void InitImages(void);
+void EGSDisplayAnimateHMD(EGSHMD *hmd);
+
+/* GTE far (back) colour: RBK, GBK, BBK */
+#define gte_SetBackColor(r, g, b) \
+    __asm__ volatile("ctc2 %0, $13\n\tctc2 %1, $14\n\tctc2 %2, $15" : : "r"(r), "r"(g), "r"(b))
+
+/* Four-argument call on the scratchpad stack (see scratch.h) */
+#define SCRATCH_CALL4(fn, a, b, c, d)                                                    \
+    __asm__ volatile(SCRATCH_ENTER "move $4, %0\n\tmove $5, %1\n\tmove $6, %2\n\tmove $7, %3\n\t" \
+                     "jal " #fn "\n\t" SCRATCH_LEAVE                                     \
+                     :                                                                   \
+                     : "r"(a), "r"(b), "r"(c), "r"(d)                                    \
+                     : SCRATCH_CLOBBERS)
+
+#define SORT_MAX 6
+
+#ifdef NON_MATCHING
+/* register allocation: different pseudos spill and the reload registers are s0/s5/s7 instead of s3/s5/s7 */
+void SortHMDs(HMDCamera *camera, EGSListNode *anims, s32 sortBuffer)
+{
+    HMDSortAnim *sorted[SORT_MAX];
+    s16 depths[SORT_MAX];
+    s32 slot = 0;
+    s32 count = 0;
+    s32 fogNear = gTerrainFog & 0xFFFF;
+    HMDSortAnim *gabe = gPointSourceArray[0].anim;
+    s32 index = camera->index;
+    s32 fogFar;
+    s32 fogRange;
+    s32 fogOn;
+    u8 *savedPacket;
+    u8 infrared;
+    u8 sniffer;
+    HMDSortModel *snifferModel;
+    EGSImage *image;
+    HMDSortAnim *anim;
+    HMDSortModel *model;
+    HMDSortLight *light;
+    EGSHMD *hmd;
+    u8 isSniffer;
+    u8 isGabe;
+    s16 bias;
+    s16 z;
+    s16 r, g, b;
+    s32 dist;
+    s32 flags;
+    s32 ot;
+    s32 i;
+    s32 t;
+    s32 level;
+    s32 d;
+
+    if (index) {
+        fogNear += fogNear >> 3;
+    }
+    gHMDDLA = gDLA_none;
+    savedPacket = NULL;
+    infrared = 0;
+    sniffer = 0;
+    fogFar = fogNear + ((0x1000 - fogNear) >> (gTerrainFog >> 16));
+    fogRange = fogFar - fogNear;
+    fogOn = gFogFlag;
+    image = NULL;
+    gHMDSortCount = 0;
+    snifferModel = gSnifferAnim->model;
+    if (camera->flags & 0x10) {
+        if (gInfraredColor == gInfraredColorSniffer) {
+            sniffer = 1;
+        } else {
+            infrared = 1;
+        }
+    }
+    if (anims != NULL && camera->index) {
+        anims = D_8012D8CC;
+    }
+    if (D_8010FEA4) {
+        D_8010FEA4 = 0;
+        InitImages();
+    }
+    if (camera->flags & 0x10) {
+        i = gImagePtr++;
+        if (gImagePtr == EGS_IMAGE_MAX) {
+            gImagePtr = 0;
+        }
+        image = &gImages[i];
+        image->levels = 0;
+    }
+
+    for (; anims != NULL; anims = anims->next) {
+        anim = anims->data;
+        isSniffer = 0;
+        if (sniffer) {
+            isSniffer = anim->model == snifferModel;
+        }
+        if ((anim->model->flags & 0x400000) && anim->frames != NULL && anim->rotations != NULL &&
+            (!(anim->flags8 & 8) || isSniffer) && (!(anim->model->flags & 0x2000000) || isSniffer)) {
+            if (anim->flagsA & 0x40) {
+                dist = 20000;
+            } else {
+                dist = 4500;
+            }
+            EGSDisplaySetupGTE(anim->frame);
+            if (!index && !isSniffer) {
+                EGSDisplayAnimateHMD((EGSHMD *)anim);
+            }
+            z = EGSDisplayOnScreen(dist, 0xF0);
+            if (z > 1000 && !index) {
+                z = EGSDisplayOnScreen(dist, 0xCD);
+            }
+            if (anim == gabe) {
+                gGabeZ = z;
+                if (index || (camera->flags & 0x10) || (D_8012DB22 & 1)) {
+                    goto next;
+                }
+            }
+            if (z != 0) {
+                if (count >= SORT_MAX) {
+                    count = SORT_MAX - 1;
+                }
+                sorted[count++] = anim;
+                if (!isSniffer) {
+                    depths[slot++] = z;
+                } else {
+                    depths[slot++] = 200;
+                }
+            } else {
+                anim->light->fog = 100;
+            }
+        }
+    next:
+        anim->flags8 &= ~0x40;
+        anim->flags9 &= ~0x20;
+    }
+
+    for (i = 0; i < count; i++) {
+        anim = sorted[i];
+        model = anim->model;
+        light = anim->light;
+        if (index) {
+            ot = i * 4 + gCurrentDrawBuffer + 2;
+        } else {
+            ot = i * 4 + gCurrentDrawBuffer;
+        }
+        bias = 0;
+        isSniffer = 0;
+        hmd = model->hmd;
+        z = depths[i];
+        if (sniffer) {
+            isSniffer = model == snifferModel;
+        }
+        isGabe = anim == gabe;
+        flags = camera->flags;
+        r = light->r;
+        if (r >= 0x1000) {
+            r = 0xFFF;
+        }
+        g = light->g;
+        if (g >= 0x1000) {
+            g = 0xFFF;
+        }
+        b = light->b;
+        if (b >= 0x1000) {
+            b = 0xFFF;
+        }
+        if (anim->flagsB & 0x20) {
+            bias = -24;
+        } else {
+            d = 24;
+            if (isGabe && !(anim->flagsB & 1)) {
+                if (gabe->flagsB & 0x80) {
+                    d = 18;
+                } else {
+                    d = 12;
+                }
+            }
+            if (anim->side == 1) {
+                bias = d;
+            } else if (anim->side == -1) {
+                bias = -d;
+            }
+        }
+        light->fog = 0;
+        gGouraudLightLevel = 0x600;
+        if (infrared) {
+            gte_SetBackColor(0, 3000, 0);
+        } else {
+            if (fogOn && fogFar < z && !index && !(anim->flagsA & 0x10)) {
+                light->fog = 100;
+                continue;
+            }
+            if (fogOn && fogNear < z) {
+                t = fogFar - z;
+                d = t * 100 / fogRange;
+                level = t * 1536 / fogRange;
+                r = r * t / fogRange;
+                g = g * t / fogRange;
+                light->fog = 100 - d;
+                gGouraudLightLevel = level;
+                gte_SetBackColor(r, g, b * t / fogRange);
+            } else if (z >= 0x200 && model->farHmd != NULL) {
+                level = 0x400 - z;
+                if (level < 0) {
+                    level = 0;
+                }
+                gGouraudLightLevel = level * 3;
+                d = 0x600 - level * 3;
+                if (d > 0) {
+                    r = r + d < 0x1000 ? r + d : 0xFFF;
+                    g = g + d < 0x1000 ? g + d : 0xFFF;
+                    b = b + d < 0x1000 ? b + d : 0xFFF;
+                }
+                gte_SetBackColor(r, g, b);
+            } else {
+                gte_SetBackColor(r, g, b);
+            }
+        }
+        GsClearOt(0, 0, &hmdOtbl[ot]);
+        if (model->farHmd != NULL && !index && z >= 0x400) {
+            hmd = model->farHmd;
+        }
+        if (flags & 0x10) {
+            if (infrared || isSniffer) {
+                savedPacket = GsOUT_PACKET_P;
+                gImageEnd = image->packets + 8000;
+                if (image->levels == 0) {
+                    image->start = image->packets;
+                    GsOUT_PACKET_P = image->packets;
+                } else {
+                    GsOUT_PACKET_P = image->end;
+                }
+                image->marks[image->levels] = GsOUT_PACKET_P;
+                image->depths[image->levels++] = z >> 2;
+                if (model != snifferModel) {
+                    hmd = gInfraredModel;
+#line 640
+                    ASSERT(hmd != NULL);
+                }
+            } else {
+                flags = (flags & ~0x10) | 0x8000;
+            }
+        }
+        if (z < 70 && isGabe && !(anim->flagsB & 0x20)) {
+            flags |= 0x8000;
+            anim->flags9 |= 0x20;
+        }
+        GsSetFlatLight(1, isGabe ? &gPCGouraudLight : &gNPCGouraudLight);
+        if (isSniffer) {
+            gte_SetBackColor(0, 0, 0xC00);
+            DoSortHMD(hmd, 0x100000, (s32)gOtbl[sortBuffer].org, (EGSDisplayObj *)anim);
+        } else if (index || !(D_8012DB22 & 1)) {
+            if (hmd->flags0 & 1) {
+                DoSortHMD(hmd, (flags << 16) + z, (s32)hmdOtbl[ot].org + 0x200, (EGSDisplayObj *)anim);
+            } else {
+                SCRATCH_CALL4(DoSortHMD, hmd, (flags << 16) + z, (s32)hmdOtbl[ot].org + 0x200, anim);
+            }
+        }
+        if (infrared || isSniffer) {
+            image->end = GsOUT_PACKET_P;
+            if (GsOUT_PACKET_P - image->start > 8000) {
+                *(Str7 *)gErrorString = *(Str7 *)D_8010FEA8;
+            }
+            GsOUT_PACKET_P = savedPacket;
+            if (isSniffer) {
+                continue;
+            }
+        }
+        if (!index && !isGabe) {
+            gHMDSortArray[gHMDSortCount++] = anim;
+        }
+        d = (z >> 2) + bias;
+        if (d <= 0) {
+            d = 1;
+        }
+        hmdOtbl[ot].point = d;
+        GsSortOt(&hmdOtbl[ot], &gOtbl[sortBuffer]);
+    }
+
+    if (!index) {
+        for (i = 0; i < gHMDSortCount; i++) {
+            if (gPointSourceCount >= 10) {
+                break;
+            }
+            gPointSourceArray[gPointSourceCount].anim = NULL;
+            gPointSourceArray[gPointSourceCount++].anim2 = gHMDSortArray[i];
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egshmd", SortHMDs);
+#endif
 
 void EGSDisplayRegisterInfraredModel(void *model)
 {
