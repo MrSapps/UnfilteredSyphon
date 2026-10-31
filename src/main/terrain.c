@@ -165,7 +165,7 @@ extern LevData *gLevData;
 extern VramMapEntry gVRAMMap[2][33];
 extern DisplayCamera *gSniperCam;
 extern s32 gSniperMode;
-extern char D_80012360[]; /* "s/terrain.c", still owned by asm SetupTerrain */
+static const char D_80012360[12]; /* "s/terrain.c", defined below */
 extern char gVramFileName[];
 void InitStreamRequests(void);
 void HotboxInit(TerrainAnim *anim);
@@ -176,7 +176,7 @@ void EGSDisplayGetSectorBox(EMDHeader *emd, s32 arg1);
 void LoadImage(TerrainRect *rect, void *pixels);
 void SectorActivated(s32 sector);
 
-/* ASSERT against the asm-owned file name string. */
+/* ASSERT against this file's name string. */
 #define TASSERT(cond, line) \
     if (!(cond)) EGSDebugAssert(1, 0, D_80012360, line)
 
@@ -262,8 +262,6 @@ void AckVram(void) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/terrain", D_8001233C);
 
-#ifdef NON_MATCHING
-/* loop counter/registers: the original steps a bank*32 induction variable (12 insns) */
 void InitStreaming(void) {
     u8 pos[0x50];
     u8 *map;
@@ -274,9 +272,9 @@ void InitStreaming(void) {
     VramMapEntry *entry;
 
     InitStreamRequests();
-    for (bank = 0, map = gTexturePageMap; bank < 2; bank++, map += VRAM_PAGES_PER_BANK) {
+    for (bank = 0, map = gTexturePageMap; bank < 2; bank++) {
         for (i = VRAM_PAGES_PER_BANK - 1; i >= 0; i--) {
-            map[i] = 0;
+            (map + bank * VRAM_PAGES_PER_BANK)[i] = 0;
         }
         sprintf(gVramFileName, "\\%s\\VRAM%s.HOG;1", gLevelNames[gSysInfo.level], bank ? D_8010F9F0 : D_8010F9D0);
         file = EGSFileSearchCD(pos, gVramFileName);
@@ -296,11 +294,8 @@ void InitStreaming(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", InitStreaming);
-#endif
 
-INCLUDE_RODATA("asm/main/nonmatchings/terrain", D_80012360);
+static const char D_80012360[12] = "s/terrain.c";
 
 /* Level header fields used to preload terrain (levelLoadHeader). */
 typedef struct TerrLoadHeader {
@@ -610,8 +605,6 @@ void StreamVramPage(s32 page, s32 bank) {
     SysLoadTextureCacheOverlay(0, 0);
 }
 
-#ifdef NON_MATCHING
-/* page map base: the original adds the bank offset to the address the other way round */
 void SectorActivated(s32 sector) {
     TerrSector *ts = &gTerrSector[sector];
     TerrainAnim *anim = ts->anim;
@@ -625,17 +618,13 @@ void SectorActivated(s32 sector) {
     bank = part->bank >> 4;
     part->sector = sector;
     TASSERT(bank < gVramHogCount, 0x33A);
-    for (i = 0, map = &gTexturePageMap[bank * VRAM_PAGES_PER_BANK]; i < VRAM_PAGES_PER_BANK;
-         map++, i++, pages >>= 1) {
-        if ((pages & 1) && *map == 0) {
+    for (i = 0, map = gTexturePageMap; i < VRAM_PAGES_PER_BANK; i++, pages >>= 1) {
+        if ((pages & 1) && (map + bank * VRAM_PAGES_PER_BANK)[i] == 0) {
             StreamVramPage(i, bank);
         }
     }
     GSAddAnim(anim);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", SectorActivated);
-#endif
 
 void FixupTerrain(void) {
     TerrainCacheEntry *entry;

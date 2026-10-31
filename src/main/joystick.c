@@ -281,18 +281,20 @@ typedef struct ReactionSet {
     /* 0x14 */ s32 unk14;
 } ReactionSet;
 
-/* First entry matching key/mask/flags; returns its result (0 if none). */
 #ifdef NON_MATCHING
-/* regalloc: the original never forms an e+0xC pointer. Static in the original (only caller: GameSysJoystick). */
+/* 2 insns: the original schedules the u8 key andi before the offset=0 init. Static in the original (only caller: GameSysJoystick). */
+/* First entry matching key/mask/flags; returns its result (0 if none). */
 s32 func_80035328(ReactionSet *set, u8 key, u32 mask, GameObjectRuntime *rt) {
     ReactionEntry *e;
     s32 result;
     s32 offset;
+    ReactionEntry *entries;
 
     result = 0;
     offset = 0;
-    e = set->entries;
+    entries = set->entries;
     do {
+        e = (ReactionEntry *)((u8 *)entries + offset);
         if (e->key == key && (e->mask == 0 || (e->mask & mask)) &&
             (e->requiredFlags == 0 || (e->requiredFlags & rt->cas->flags))) {
             set->unk14 = set->unk10 + 1;
@@ -300,8 +302,7 @@ s32 func_80035328(ReactionSet *set, u8 key, u32 mask, GameObjectRuntime *rt) {
             break;
         }
         offset += sizeof(ReactionEntry);
-        e++;
-    } while (((ReactionEntry *)((u8 *)set->entries + offset))->result != 0);
+    } while (((ReactionEntry *)(offset + (s32)set->entries))->result != 0);
     return result;
 }
 #else

@@ -517,7 +517,7 @@ typedef struct PlayerTargetInfo {
 } PlayerTargetInfo;
 
 #ifdef NON_MATCHING
-/* regalloc: msg in s2 instead of s0; msg->from load scheduled above the mUseInfo store */
+/* regalloc: msg in s2 and ticks in s0 (original: msg s0, ticks s2). The switch's jump table is the INCLUDE_RODATA jtbl_80010C1C below; drop it when this matches. */
 void PLAYERObjDispatch(SysMsg *msg) {
     Gobj *gobj = gameObjectsInfo[msg->to].runtime;
     struct EGSFrame *frame = NULL;
@@ -599,7 +599,7 @@ void PLAYERObjDispatch(SysMsg *msg) {
     case 35:
     case 36:
         mUseInfo = msg->id;
-        D_801103BE = msg->from;
+        D_801103BE = *(s32 *)((u8 *)msg + 4); /* not msg->from: keeps the load after the mUseInfo store */
         break;
     case 25:
         mUseInfo = 0;
