@@ -1281,11 +1281,8 @@ void func_80139D24(void) {
     func_80138EE4();
 }
 
-#ifdef NON_MATCHING
-/* first loop: the original fills the entry bltz slot from the exit (i + 1) instead of the item pointer copy; base+offset operand order for D_8013FCBC[D_8013F7C4] */
 void func_80139D64(s32 cursor) {
     MenuItem *item;
-    MenuItem *p;
     RECT *rect;
     s32 i;
 
@@ -1294,8 +1291,10 @@ void func_80139D64(s32 cursor) {
     }
     if (gSystemTick >= D_8013FCA8) {
         if (D_8013F7C4 < D_8013FCC0[D_8013FCB4]) {
-            if (*D_8013FCBC[D_8013F7C4].textIds != 0xFFFF) {
-                TextSetStringIntensity(*D_8013FCBC[D_8013F7C4].textIds, 0x50, 0x82, 0xF0);
+            MenuItem *cur = &D_8013FCBC[D_8013F7C4];
+
+            if (*cur->textIds != 0xFFFF) {
+                TextSetStringIntensity(*cur->textIds, 0x50, 0x82, 0xF0);
             }
         }
     }
@@ -1317,8 +1316,8 @@ void func_80139D64(s32 cursor) {
                 func_80138AD4(rect->x, rect->y, rect->w, rect->h);
                 TextSetStringIntensity(*item->textIds, 0xB4, 0xB4, 0xF0);
             } else {
-                for (i = cursor, p = item; i >= 0; i--, p--) {
-                    if (*p->textIds != 0xFFFF) {
+                for (i = cursor; i >= 0; i--) {
+                    if (*D_8013FCBC[i].textIds != 0xFFFF) {
                         break;
                     }
                 }
@@ -1333,9 +1332,6 @@ void func_80139D64(s32 cursor) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_80139D64);
-#endif
 
 void func_80139FFC(s32 cursor) {
     s32 i;
@@ -2696,8 +2692,6 @@ void func_8013DC98(void) {
     D_8013FCC0[11] = item - D_8013F7D0;
 }
 
-#ifdef NON_MATCHING
-/* loop setup: the constant 1 is materialized after the ids pointer (3 insns) */
 void func_8013DEEC(void) {
     MenuItem *items = D_8013F7D0;
     u16 *ids;
@@ -2705,7 +2699,10 @@ void func_8013DEEC(void) {
     s32 i;
 
     if (D_8013FE6C->unk28 == 0) {
+        s32 one;
+
         i = 0;
+        one = 1;
         ids = D_8013FE20;
         names = gBriefings->names;
         D_8013FE90 = 0;
@@ -2715,7 +2712,7 @@ void func_8013DEEC(void) {
         for (; i < 3; i++) {
             items[i].textIds = ids++;
             items[i].strings = names++;
-            items[i].count = 1;
+            items[i].count = one;
         }
         items[3].count = 1;
         items[3].strings = &gBriefings->texts[D_8013F7C4];
@@ -2723,9 +2720,6 @@ void func_8013DEEC(void) {
         D_8013FCC0[12] = 4;
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013DEEC);
-#endif
 
 void func_8013DFB0(void) {
     s32 i;
