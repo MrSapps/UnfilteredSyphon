@@ -1860,4 +1860,4 @@ void JoystickSetFlightControls(u8 enable) {
     D_80105818 = enable;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/joystick", D_8001151C);
+/* (the texture names that followed in .rdata are sprite.c's) */

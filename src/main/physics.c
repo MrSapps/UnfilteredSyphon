@@ -22,7 +22,8 @@ typedef struct PhysGobj {
     /* 0x0C */ PhysMove *move;
 } PhysGobj;
 
-extern PhysVector gPhysicsGravityAcceleration;
+/* .data (docs/data_migration.md) */
+VECTOR32 gPhysicsGravityAcceleration = { 0, -10518, 0, 0 };
 
 void *EGSMemMalloc(u32 size);
 s32 EGSMathFIXMul(s32 a, s32 b);

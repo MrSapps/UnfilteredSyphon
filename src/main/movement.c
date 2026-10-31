@@ -3,7 +3,6 @@
 #include "gobj.h"
 #include "scratch.h"
 
-SDATA_LOCAL(D_8010F93C)
 
 typedef struct MovementState {
     /* 0x00 */ VECTOR32 pos;
@@ -118,7 +117,9 @@ typedef struct MovementInfo {
 
 #define MOVE(gobj) ((MovementInfo *)(gobj)->move)
 
-extern Gobj *D_8010F93C; /* objects with movement */
+/* .sdata (docs/data_migration.md) */
+static Gobj *D_8010F93C = NULL; /* objects with movement */
+static s32 D_8010F940 = 0;      /* unreferenced; that it is movement.c's is a guess */
 extern s32 gCASJoystickGobjID;
 
 s32 MovementBasicInfoReset(MovementBasicInfo *info, VECTOR32 *pos);

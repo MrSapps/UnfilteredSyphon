@@ -3,35 +3,100 @@
 #include "gameobj.h"
 #include "scratch.h"
 
-/* system.c's small data, still assembled from asm/main/data/sdata.sdata.s */
-SDATA_LOCAL(mSystemStateDepth)
-SDATA_LOCAL(gSystemState)
-SDATA_LOCAL(gSysHaltState)
-SDATA_LOCAL(D_8010F622)
-SDATA_LOCAL(gSysMovieDoneCallback)
-SDATA_LOCAL(gStallLoaded)
-SDATA_LOCAL(gStallFaded)
-SDATA_LOCAL(exeTickTimerList)
-SDATA_LOCAL(gStallCallback)
-SDATA_LOCAL(gUsePCFiles)
-SDATA_LOCAL(gSystemStopDebugDisplay)
-SDATA_LOCAL(D_8010F624)
-SDATA_LOCAL(D_8010FF68)
-SDATA_LOCAL(D_8010FF6A)
-SDATA_LOCAL(D_8010FF6C)
-SDATA_LOCAL(D_8010FF70)
 
-/* debug overlay (top-right status window) */
-extern u8 gSystemStopDebugDisplay;
-extern s32 D_8010F624;  /* last shown "no damage" state */
-extern u16 D_8010FF68;  /* text ids */
-extern u16 D_8010FF6A;
-extern u16 D_8010FF6C;
-extern u16 D_8010FF70;
-extern char D_8010F628[]; /* short .sdata strings */
-extern char D_8010F62C[];
-extern char D_8010F630[];
-extern u8 D_80111B48[];   /* text sprite buffer */
+/* system.c's data, defined in original order (docs/data_migration.md). */
+void PLAYERObjDispatch(SysMsg *msg), NPCObjDispatch(SysMsg *msg), COMPUTERObjDispatch(SysMsg *msg);
+void DOORObjDispatch(SysMsg *msg), CAMERAObjDispatch(SysMsg *msg), ELEVATORObjDispatch(SysMsg *msg);
+void SPECIALObjDispatch(SysMsg *msg), FIREObjDispatch(SysMsg *msg), GENObjDispatch(SysMsg *msg);
+void LASERObjDispatch(SysMsg *msg), LIGHTObjDispatch(SysMsg *msg), INTERACTObjDispatch(SysMsg *msg);
+void SWITCHObjDispatch(SysMsg *msg), GLASSObjDispatch(SysMsg *msg), TGTObjDispatch(SysMsg *msg);
+void ANIMATEDObjDispatch(SysMsg *msg), NPCGenDispatch(SysMsg *msg), BOMBObjDispatch(SysMsg *msg);
+void EFFECTS2ObjDispatch(SysMsg *msg), EFFECTSObjDispatch(SysMsg *msg);
+void ROTATINGObjDispatch(SysMsg *msg), PICKUPObjDispatch(SysMsg *msg);
+void AUTOPICKUPObjDispatch(SysMsg *msg);
+void func_80015DDC(void);
+
+/* .data */
+SysMsgHandler gDispatchFunctions[125] = {
+    PLAYERObjDispatch, NPCObjDispatch, NPCObjDispatch, (SysMsgHandler)0x80144FA0,
+    COMPUTERObjDispatch, COMPUTERObjDispatch, DOORObjDispatch, DOORObjDispatch, CAMERAObjDispatch,
+    CAMERAObjDispatch, DOORObjDispatch, ELEVATORObjDispatch, ELEVATORObjDispatch,
+    ELEVATORObjDispatch, SPECIALObjDispatch, (SysMsgHandler)0x801435DC, FIREObjDispatch,
+    GENObjDispatch, LASERObjDispatch, LIGHTObjDispatch, LIGHTObjDispatch, LIGHTObjDispatch,
+    (SysMsgHandler)0x801443E8, (SysMsgHandler)0x8014216C, SPECIALObjDispatch, GENObjDispatch,
+    INTERACTObjDispatch, SWITCHObjDispatch, SWITCHObjDispatch, SWITCHObjDispatch,
+    (SysMsgHandler)0x80144AF4, (SysMsgHandler)0x80144AF4, GLASSObjDispatch, TGTObjDispatch,
+    SPECIALObjDispatch, LIGHTObjDispatch, SWITCHObjDispatch, FIREObjDispatch, NULL, FIREObjDispatch,
+    LIGHTObjDispatch, ANIMATEDObjDispatch, NPCGenDispatch, NULL, TGTObjDispatch, GLASSObjDispatch,
+    BOMBObjDispatch, EFFECTS2ObjDispatch, FIREObjDispatch, LIGHTObjDispatch, NULL, LIGHTObjDispatch,
+    LIGHTObjDispatch, NPCObjDispatch, EFFECTSObjDispatch, GLASSObjDispatch, TGTObjDispatch,
+    EFFECTS2ObjDispatch, SWITCHObjDispatch, DOORObjDispatch, (SysMsgHandler)0x80141998,
+    TGTObjDispatch, DOORObjDispatch, ROTATINGObjDispatch, ELEVATORObjDispatch, SWITCHObjDispatch,
+    TGTObjDispatch, (SysMsgHandler)0x8014365C, TGTObjDispatch, TGTObjDispatch, LIGHTObjDispatch,
+    LIGHTObjDispatch, LIGHTObjDispatch, DOORObjDispatch, TGTObjDispatch, TGTObjDispatch,
+    NPCObjDispatch, GLASSObjDispatch, GENObjDispatch, PICKUPObjDispatch, PICKUPObjDispatch,
+    GLASSObjDispatch, GLASSObjDispatch, EFFECTSObjDispatch, DOORObjDispatch, GLASSObjDispatch,
+    GLASSObjDispatch, INTERACTObjDispatch, INTERACTObjDispatch, INTERACTObjDispatch,
+    FIREObjDispatch, EFFECTS2ObjDispatch, NPCObjDispatch, SPECIALObjDispatch, LIGHTObjDispatch,
+    SPECIALObjDispatch, DOORObjDispatch, DOORObjDispatch, TGTObjDispatch, AUTOPICKUPObjDispatch,
+    INTERACTObjDispatch, NPCObjDispatch, TGTObjDispatch, TGTObjDispatch, SPECIALObjDispatch,
+    SPECIALObjDispatch, SWITCHObjDispatch, LIGHTObjDispatch, INTERACTObjDispatch, LIGHTObjDispatch,
+    (SysMsgHandler)0x80144114, LIGHTObjDispatch, GLASSObjDispatch, DOORObjDispatch,
+    (SysMsgHandler)0x80143B9C, SPECIALObjDispatch, SPECIALObjDispatch, EFFECTSObjDispatch,
+    DOORObjDispatch, CAMERAObjDispatch, ELEVATORObjDispatch, SWITCHObjDispatch, SWITCHObjDispatch,
+    SWITCHObjDispatch, SWITCHObjDispatch,
+};
+int mSystemStateStack[10] = { 0 };
+char tcOverlay[16] = { 0 };
+static SysMsgDesc gSysMsgTable[2] = { { 0, NULL, NULL }, { 1, (SysMsgHandler)func_80015DDC, NULL } };
+static u8 D_800FCB28[SYS_MOVIE_VRAM_PAGES] = { /* texture pages the movie decoder overwrites */
+    0x00, 0x01, 0x02, 0x06, 0x07, 0x08, 0x10, 0x11, 0x12, 0x16, 0x17, 0x18,
+};
+
+/* .sdata */
+static char D_8010F608[] = "";
+int mSystemStateDepth = 1;
+int gSystemState = 0;
+u8 gSysHaltState = 1;
+void (*gSysMovieDoneCallback)(void) = NULL;
+s32 gSysFrameCounter = 0;
+u8 gUsePCFiles = 0;
+u8 gSystemStopDebugDisplay = 0; /* debug overlay (top-right status window) */
+static u8 D_8010F622 = 0xFF;          /* its text window */
+static s32 D_8010F624 = 1;      /* last shown "no damage" state */
+static char D_8010F628[] = "FR "; /* used by the asm SysExecute */
+static char D_8010F62C[] = "INV";
+static char D_8010F630[] = "XX";
+/* then the literals "%s.OVL" and "MENU" */
+
+/* .sbss */
+static u16 D_8010FF68; /* text ids */
+static u16 D_8010FF6A;
+static u16 D_8010FF6C;
+/* Only [0] is used, but the next item is at +8 and the section ends at 0x8010FF78:
+ * an 8-byte object (aspsx 8-aligns 8-byte .lcomm). */
+static u16 D_8010FF70[4];
+
+/* .bss. aspsx 16-aligns every .lcomm larger than 8 bytes, but the original has
+ * mSysMsgQueueNext and the sprite buffer at 4-aligned offsets, so the two queues and
+ * the buffer must have been one object.  (The asm SysExecute reaches the three by
+ * name through config/main.syms.ld.) */
+static ExeTickTimer mExeTickTimers[SYS_EXE_TICK_TIMER_MAX];
+static struct {
+    SysMsgQueue queue;
+    SysMsgQueue next;
+    u8 textSprites[0x370];
+} D_80110560;
+#define mSysMsgQueue D_80110560.queue
+#define mSysMsgQueueNext D_80110560.next
+#define D_80111B48 D_80110560.textSprites /* text sprite buffer */
+
+/* commons this TU reaches through $gp */
+EGSListNode *exeTickTimerList;
+void (*gStallCallback)(void);
+u8 gStallFaded;
+u8 gStallLoaded;
+
 extern char cdError[];
 extern s16 gGabeSector;
 extern char **gSectorMap; /* 0x10 bytes per sector, name first */
@@ -62,7 +127,7 @@ static void func_800153BC(SysMsgQueue *src, SysMsgQueue *dst);
 /* Functions missing from siphon.map were static in system.c. */
 static void SysEnterState(u32 state, int push);
 
-INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010028);
+static const s32 D_80010028[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 void SysChangeLevel(u32 level) {
 #line 329
@@ -225,13 +290,13 @@ void SysExecute(void) {
                 TextAddStringMulti(D_8010F622, 2, noDmgText, -1, D_80111B48 + 0x2C0, &D_8010FF68);
                 TextSetStringIntensity(D_8010FF6C, 0xA0, 0x60, 0xA0);
                 TextSetStringIntensity(D_8010FF6A, 0x30, 0x60, 0xA0);
-                D_8010FF70 = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48 + 0x39C);
+                D_8010FF70[0] = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48 + 0x39C);
                 D_8010FF68 = TextReplaceString(D_8010FF68, D_8010F608);
-                TextSetStringIntensity(D_8010FF70, 0xA0, 0x50, 0x30);
+                TextSetStringIntensity(D_8010FF70[0], 0xA0, 0x50, 0x30);
             }
             D_8010FF6C = TextReplaceString(D_8010FF6C, cdError[0] ? cdError : gSectorMap[gGabeSector * 4]);
             EGSDisplayGetLoad(&loadA, &loadB, &loadC, &loadText);
-            D_8010FF70 = TextReplaceString(D_8010FF70, loadText);
+            D_8010FF70[0] = TextReplaceString(D_8010FF70[0], loadText);
             if (noDamage != D_8010F624) {
                 D_8010FF6A = TextReplaceString(D_8010FF6A, noDamage ? D_8010F62C : D_8010F608);
                 D_8010F624 = noDamage;
@@ -499,7 +564,7 @@ void SysStall(char *overlay, s32 fadeSpeed, void (*callback)(void)) {
     GameSysSetLetterBoxMode(3);
     EGSDisplayFade(1, fadeSpeed, StallFadeCallback);
     SysStopXA();
-    sprintf(name, D_8010F634, overlay);
+    sprintf(name, "%s.OVL", overlay);
     SysStreamTextureCacheOverlay(name, (void (*)(s32))StallOverlayCallback);
 }
 
@@ -543,7 +608,7 @@ static void SysEnterState(u32 state, int push) {
         break;
     case SYS_STATE_MENU:
         if (push) {
-            SysStall(D_8010F63C, 14, func_8001593C);
+            SysStall("MENU", 14, func_8001593C);
         }
         break;
     case SYS_STATE_COUNT:

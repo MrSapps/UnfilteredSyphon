@@ -34,8 +34,9 @@ void func_8013F480(void); /* menu.ovl MenuExecute */
 extern u8 gMovieOpenFlag;  /* movie.ovl */
 extern u16 D_8014BAD0;     /* pause message text id */
 extern u8 gSpareTextWindow;
-extern s32 D_8010F604;     /* state the display was last sorted for */
-extern char D_8010F600[];  /* "" */
+/* .sdata (docs/data_migration.md); MainLoop reads the "" with lui/addiu */
+static char D_8010F600[] = "";  /* "" */
+static s32 D_8010F604 = 0;      /* state the display was last sorted for */
 
 /* cc1 inserts the __main() constructor call itself */
 int main(void) {

@@ -4,16 +4,47 @@
 #include "gobj.h"
 #include "scratch.h"
 
-/* game.c's small data, still assembled from asm */
-SDATA_LOCAL(gMoveRequestCount)
-SDATA_LOCAL(D_8010F64C)
+/* game.c's data, defined in original order (docs/data_migration.md). */
+static void func_80016690(void);
+static void func_80016764(void);
+static void func_80016840(void);
+void GameSysJoystick(void);
+void InterfaceUpdate(void);
+void InterfaceCountdownUpdate(void);
+void ParticleUpdate(void);
+void TextUpdate(void);
 
-extern s16 gMoveRequestCount;
-extern s32 D_8010F64C;                /* gGobjPool allocation cursor */
-extern Gobj D_80111EB8[GOBJ_POOL_SIZE]; /* gobj pool */
-extern Gobj *D_80112CC8[GOBJ_MOVE_REQUEST_MAX];
-extern VECTOR32 D_800100F0;           /* zero vector */
-extern SysMsgDesc D_800FCB34[];       /* this game's level-message table */
+/* .data: this game's level-message table */
+static SysMsgDesc D_800FCB34[46] = {
+    { 0, NULL, NULL }, { 1, (SysMsgHandler)func_80016764, NULL }, { 2, NULL, NULL },
+    { 3, (SysMsgHandler)func_80016840, NULL }, { 4, (SysMsgHandler)GameSysJoystick, NULL },
+    { 5, NULL, NULL }, { 6, NULL, NULL }, { 7, NULL, NULL }, { 8, NULL, NULL }, { 9, NULL, NULL },
+    { 10, NULL, NULL }, { 11, NULL, NULL }, { 12, NULL, NULL }, { 13, NULL, NULL },
+    { 14, (SysMsgHandler)InterfaceUpdate, NULL },
+    { 15, (SysMsgHandler)InterfaceCountdownUpdate, NULL },
+    { 16, (SysMsgHandler)ParticleUpdate, NULL }, { 17, (SysMsgHandler)func_80016690, NULL },
+    { 18, NULL, NULL }, { 19, NULL, NULL }, { 20, NULL, NULL }, { 21, NULL, NULL },
+    { 22, NULL, NULL }, { 23, NULL, NULL }, { 24, NULL, NULL }, { 25, NULL, NULL },
+    { 26, NULL, NULL }, { 27, NULL, NULL }, { 28, NULL, NULL }, { 29, NULL, NULL },
+    { 30, NULL, NULL }, { 31, (SysMsgHandler)TextUpdate, NULL }, { 32, NULL, NULL },
+    { 33, (SysMsgHandler)GameSysEOL, NULL }, { 34, NULL, NULL }, { 35, NULL, NULL },
+    { 36, NULL, NULL }, { 37, NULL, NULL }, { 38, NULL, NULL }, { 39, NULL, NULL },
+    { 40, NULL, NULL }, { 41, NULL, NULL }, { 42, NULL, NULL }, { 43, NULL, NULL },
+    { 44, NULL, NULL }, { 45, NULL, NULL },
+};
+
+/* .sdata */
+static s16 D_8010F644 = 0; /* unreferenced */
+s16 gMoveRequestCount = 0;
+s32 gCheatEnabled = 1;
+static s32 D_8010F64C = -1; /* gGobjPool allocation cursor */
+static s32 D_8010F650 = 0;  /* unreferenced */
+
+/* .bss */
+static Gobj D_80111EB8[GOBJ_POOL_SIZE]; /* gobj pool */
+static Gobj *D_80112CC8[GOBJ_MOVE_REQUEST_MAX];
+
+
 extern s32 gExeTick;
 extern s32 gInterfaceCurrentMode;
 
@@ -94,7 +125,7 @@ s32 GameSysFuzzyMathXZDistance(VECTOR32 *a, VECTOR32 *b) {
 }
 
 /* Re-activate terrain for the current level (on the scratchpad stack), then notify the level. */
-void func_80016690(void) {
+static void func_80016690(void) {
     SCRATCH_CALL_DS(TerrainUpdateActivation, "addu $4, $0, $0");
     SysPostMessage(0x11, 0, SYS_MSG_LEVEL, SYS_MSG_LEVEL, 0, 0, 0, 0);
 }
@@ -111,11 +142,10 @@ void GameSysEOL(void) {
     SysHalt(5);
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/game", D_800100D4);
+static const s32 D_800100D4[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 /* Level loaded: set up the player either fresh, from the continue point, or carried over. */
-/* static in the original; global until game.c's .data (which points at it) moves to C */
-void func_80016764(void) {
+static void func_80016764(void) {
     GameSysJoystickInit();
     WeaponInit();
     if (SaveIsPlayerVirginal()) {
@@ -142,8 +172,7 @@ void func_80016764(void) {
     SysPostMessage(0x11, 0, SYS_MSG_LEVEL, SYS_MSG_LEVEL, 0, 0, 0, 0);
 }
 
-/* static in the original; global until game.c's .data (which points at it) moves to C */
-void func_80016840(void) {
+static void func_80016840(void) {
 }
 
 s32 GameSysGetYRotationFromZ(VECTOR32 *dir, s32 *rotY) {
@@ -161,7 +190,7 @@ void GameSysRequestMove(Gobj *gobj) {
 }
 
 /* follows "s/game.c" in .rdata, so it comes after the first assert */
-INCLUDE_RODATA("asm/main/nonmatchings/game", D_800100F0);
+static const VECTOR32 D_800100F0 = { 0, 0, 0, 0 }; /* zero vector */
 
 static void func_800168FC(Gobj *gobj) {
     VECTOR32 pos;

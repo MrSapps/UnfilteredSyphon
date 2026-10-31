@@ -62,6 +62,7 @@ segments:
       - [0x1C8C, .rodata, sniper]
       - [0x1C9C, .rodata, target]
       - [0x1CB8, .rodata, joystick]
+      - [0x1D1C, .rodata, sprite]
       - [0x2380, .rodata, los]
       - [0x2390, .rodata, interface]
       - [0x268C, .rodata, weapon]
@@ -189,7 +190,16 @@ segments:
       - [0xE9C74, asm, lib_pad]
       - [0xEC894, asm, lib_card]
       - [0xECC94, asm, lib_pad2]
-      - [0xED0E4, data, data]
+      - [0xED0E4, .data, system]
+      - [0xED334, .data, game]
+      - [0xED55C, .data, level]
+      - [0xED5AC, .data, camera]
+      - [0xED784, data, data_ED784]
+      - [0xEEDE4, .data, physics]
+      - [0xEEDF4, .data, playcas]
+      - [0xF5048, data, data_F5048]
+      - [0xF6420, .data, sprite]
+      - [0xF66AC, data, data_F66AC]
       - [0xF71E0, .data, damage]
       - [0xF7238, data, data_F7238]
       - [0xF72D8, .data, stream]
@@ -199,7 +209,16 @@ segments:
       - [0xF8330, .data, egsdev]
       - [0xF8364, .data, egsanim]
       - [0xF8384, data, data_F8384]
-      - [0xFFE00, sdata, sdata]
+      - [0xFFE00, .sdata, main]
+      - [0xFFE08, .sdata, system]
+      - [0xFFE44, .sdata, game]
+      - [0xFFE54, .sdata, level]
+      - [0xFFF00, .sdata, camera]
+      - [0xFFF14, sdata, sdata_FFF14]
+      - [0x100050, .sdata, sprite]
+      - [0x100074, sdata, sdata_100074]
+      - [0x10013C, .sdata, movement]
+      - [0x100144, sdata, sdata_100144]
       - [0x100180, .sdata, damage]
       - [0x10018C, sdata, sdata_10018C]
       - [0x100208, .sdata, stream]
@@ -217,12 +236,15 @@ segments:
       - [0x100738, .sdata, egsmisc]
       - [0x100740, .sdata, egsfile]
       - [0x100764, .sdata, egshog]
-      - { start: 0x100768, type: sbss, vram: 0x8010FF68, name: sbss }
+      - { start: 0x100768, type: .sbss, vram: 0x8010FF68, name: system }
+      - { type: sbss, vram: 0x8010FF78, name: sbss_8010FF78 }
       - { type: .sbss, vram: 0x80110170, name: damage }
       - { type: sbss, vram: 0x80110180, name: sbss_80110180 }
       - { type: .sbss, vram: 0x80110220, name: egsanim }
       - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
-      - { type: bss, vram: 0x801104A0, name: bss }
+      - { type: .bss, vram: 0x801104A0, name: system }
+      - { type: .bss, vram: 0x80111EB8, name: game }
+      - { type: bss, vram: 0x80112D40, name: bss_80112D40 }
       - { type: .bss, vram: 0x8011E8D8, name: damage }
       - { type: bss, vram: 0x8011EB04, name: bss_8011EB04 }
       - { type: .bss, vram: 0x8011EB40, name: collision }

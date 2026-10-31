@@ -92,6 +92,34 @@ so a TU's data has to come from that TU's object.
   `bss_8011EB04`), not at the next referenced symbol.
 * **`include/scratch.h`** still has no `_PSYQ` variant, so `psyq_check_tu.py` cannot
   assemble TUs that include it (egshmd).
+  egsmath's. Another: sprite's texture-name strings sat inside joystick.c's
+  `INCLUDE_RODATA` blob (fixed: they are sprite.c's whole `.rdata`).
+* **`.lcomm` order is first-declaration order.** cc1 emits the uninitialised statics in
+  the order their names were *first declared*, and an `extern` in a header counts.
+  (system.c: `mExeTickTimers`, then the queues, follow system.h's extern order.)
+  cc1 2.7.2 accepts a `static` definition after a header's `extern` declaration.
+* **aspsx aligns every `.lcomm` to its size rounded up to a power of two, at most 16**
+  (real 2.77; maspsx's `POWER_OF_TWO` agrees). So an 8-byte static lands 8-aligned and
+  a big array 16-aligned. Several game TUs have big `.bss` arrays at 4- or 8-aligned
+  offsets, so they were not separate statics. system.c models its queues and sprite
+  buffer as one static struct (with `#define`s for the old names); sprite.c's `.bss`
+  is left in the blob for now.
+* **maspsx cannot parse `.pushsection` right after a `.sdata` definition.** An
+  `INCLUDE_RODATA` directly after the data block fails with "Unable to parse .sdata
+  instruction". Turn the `{1, 1, 1, 0}` blob into a C const (as stream.c does), or
+  move the include above the data.
+* **Interior addresses.** When asm (or another TU's C) names an address inside data
+  that is now defined in C (`D_800FCB14` = `&gSysMsgTable[0].handle`, `D_80105E10`
+  inside `gMultiTextures`, the `.sbss`/`.bss` start symbols used by lib_sn), splat no
+  longer defines the label. Add it as an absolute symbol in `config/main.syms.ld`.
+* **Pointer tables with string initialisers.** cc1 emits each variable's literals
+  right after it, in *reverse* element order, the short ones into `.sdata` and the
+  long ones into `.rdata` (level.c's `gLevelNames`, sprite.c's texture tables). Two
+  `.sdata` pointers whose strings appear reversed are one 2-element array.
+* **Don't retype another TU's extern to reach a migrated struct.** movement.c reads
+  gravity y/z as the scalars `D_800FE5E8/EC`. As struct members, cc1 hoists the base
+  address into a register and the code changes, so those labels stay as absolute
+  symbols in `config/main.syms.ld`.
 
 ## Finding the TU's data
 
@@ -176,3 +204,19 @@ can't parse `.include`, `.pushsection` or the maspsx markers. `include/scratch.h
 | shadow   | .rdata + mShadowRequestList common  | OK          | .rdata short until its asm functions are C |
 | save     | .rdata .sdata .bss                  | OK          | data OK (SaveRestoreContinue asm) |
 | damage   | .rdata .data .sdata .sbss .bss (not 0x80110180/4) | OK | data OK (2 asm functions) |
+| main     | .sdata                              | OK          | data OK (asm MainLoop) |
+| system   | .data .sdata .sbss .bss + commons   | OK          | data OK (asm functions) |
+| game     | .rdata .text .data .sdata .bss      | OK          | OK with a `_PSYQ` scratch.h (see below) |
+| level    | .rdata .data .sdata + commons       | OK          | data + .rdata OK (asm functions) |
+| camera   | .data .sdata (.bss: boundary with gamecam unclear) | OK | data OK (asm functions) |
+| physics  | .data                               | OK          | data OK (asm functions) |
+| playcas  | .rdata .text .data                  | OK          | OK |
+| sprite   | .rdata .text .data .sdata (.bss still in the blob) | OK | OK |
+| movement | .sdata                              | OK          | data OK (asm functions) |
+
+path and los have no data of their own (los only reaches commons).
+
+The TUs that include `include/scratch.h` (game, system, camera, los, movement, ...)
+don't compile under ccpsx yet: its `scratch_jal_ds` GAS `.macro` needs a `_PSYQ`
+form, e.g. `".set noreorder\n\tjal " #fn "\n\t" ds "\n\t.set reorder"`. With that,
+game.c matches in every section.

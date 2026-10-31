@@ -2,8 +2,6 @@
 
 #include "game.h"
 
-SDATA_LOCAL(D_8010F864)
-SDATA_LOCAL(D_8010F868)
 
 typedef struct EGSListNode {
     /* 0x00 */ void *data;
@@ -57,13 +55,63 @@ typedef struct {
 
 extern ScreenPos POSITION; /* screen offset (POSITION.y is D_8012C7FA) */
 
-extern char *D_8010F864; /* foot fx texture names */
-extern char *D_8010F868;
-extern s32 D_80105E44[]; /* bullet type -> bullet texture */
+/*
+ * sprite.c's .rdata/.data/.sdata, defined in original order (docs/data_migration.md).
+ * cc1 emits each table's names in reverse, the long ones into .rdata (which starts
+ * with them), the short ones into .sdata.  The .bss (0x80115760-0x80117490) stays in
+ * the splat blob: aspsx 16-aligns every .lcomm over 8 bytes, but D_80116C58 and
+ * D_801173E8 are only 8-aligned, so the declarations are not separate statics.
+ */
+static char D_8010F850[] = ""; /* .sdata; the empty name in D_80105DF0 */
+extern EGSTexture D_80116260[], D_80116520[], D_80116680[], D_80116890[], D_80116B50[];
+
+static char *D_80105C20[64] = { /* interface texture names */
+    "PISTOL1A.TIM", "PISTOL1B.TIM", "PISTOL4A.TIM", "PISTOL4B.TIM", "PISTOL5A.TIM", "PISTOL5B.TIM",
+    "SHOT1A.TIM", "SHOT1B.TIM", "SHOT1C.TIM", "SHOT2A.TIM", "SHOT2B.TIM", "SHOT2C.TIM", "AS1A.TIM",
+    "AS1B.TIM", "AS1C.TIM", "AS2A.TIM", "AS2B.TIM", "AS2C.TIM", "AS3A.TIM", "AS3B.TIM", "AS3C.TIM",
+    "AS4A.TIM", "AS4B.TIM", "G3A.TIM", "G3B.TIM", "SNIPER1A.TIM", "SNIPER1B.TIM", "SNIPER1C.TIM",
+    "SUPER1A.TIM", "SUPER1B.TIM", "SUPER1C.TIM", "TASERA.TIM", "TASERB.TIM", "GRENADEA.TIM",
+    "GRENADEB.TIM", "GASGRENA.TIM", "GASGRENB.TIM", "GRENLANA.TIM", "GRENLANB.TIM", "GRENLANC.TIM",
+    "FLASHLTA.TIM", "FLASHLTB.TIM", "SNIFFER.TIM", "FLAKA.TIM", "FLAKB.TIM", "SCOPED.TIM",
+    "INFRA.TIM", "INFRA_R.TIM", "INFRAA.TIM", "INFRAB.TIM", "INFRAC.TIM", "SCP0.TIM", "SCP45.TIM",
+    "SCP90.TIM", "SCP135.TIM", "SCP180.TIM", "SCP225.TIM", "SCP270.TIM", "SCP315.TIM",
+    "KEYCARDA.TIM", "KEYCARDB.TIM", "DEVICE.TIM", "ANTIDOTA.TIM", "ANTIDOTB.TIM",
+};
+static char *D_80105D20[16] = { /*  */
+    "BRETH00.TIM", "BRETH01.TIM", "BRETH02.TIM", "BRETH03.TIM", "BRETH04.TIM", "BRETH05.TIM",
+    "BRETH06.TIM", "BRETH07.TIM", "BRETH08.TIM", "BRETH09.TIM", "BRETH10.TIM", "BRETH11.TIM",
+    "BRETH12.TIM", "BRETH13.TIM", "BRETH14.TIM", "BRETH15.TIM",
+};
+static char *D_80105D60[8] = { /*  */
+    "VAPOR000.TIM", "VAPOR001.TIM", "VAPOR002.TIM", "VAPOR003.TIM", "VAPOR004.TIM", "VAPOR005.TIM",
+    "VAPOR006.TIM", "VAPOR007.TIM",
+};
+static char *D_80105D80[12] = { /*  */
+    "EXPL000.TIM", "EXPL001.TIM", "EXPL002.TIM", "EXPL003.TIM", "EXPL004.TIM", "EXPL005.TIM",
+    "EXPL006.TIM", "EXPL007.TIM", "EXPL008.TIM", "EXPL009.TIM", "EXPL010.TIM", "EXPL011.TIM",
+};
+static char *D_80105DB0[16] = { /*  */
+    "FIRE0000.TIM", "FIRE0001.TIM", "FIRE0002.TIM", "FIRE0003.TIM", "FIRE0004.TIM", "FIRE0005.TIM",
+    "FIRE0006.TIM", "FIRE0007.TIM", "FIRE0008.TIM", "FIRE0009.TIM", "FIRE0010.TIM", "FIRE0011.TIM",
+    "FIRE0012.TIM", "FIRE0013.TIM", "FIRE0014.TIM", "FIRE0015.TIM",
+};
+static char *D_80105DF0[6] = { /* bullet holes */
+    D_8010F850, "BHOLE.TIM", "CBHOLE.TIM", "DBHOLE.TIM", "WBHOLE3.TIM", "GBHOLE2.TIM",
+};
+SpriteGroup gMultiTextures[5] = {
+    { 6, D_80105DF0, D_80116B50 },  { 16, D_80105DB0, D_80116890 }, { 12, D_80105D80, D_80116680 },
+    { 16, D_80105D20, D_80116260 }, { 8, D_80105D60, D_80116520 },
+};
+static s32 D_80105E44[26] = { /* bullet type -> bullet texture */
+    0, 0, 1, 0, 0, 5, 5, 0, 0, 0, 5, 2, 3, 0, 0, 0, 0, 0, 2, 0, 4, 5, 5, 0, 0, 0
+};
+
+/* .sdata */
+static char *D_8010F864[2] = { "SNOPRTR.TIM", "SNOPRTL.TIM" }; /* foot fx texture names */
+static SpriteColor D_8010F86C = { 0xFF, 0xFF, 0xFF, 0 };
+static s32 D_8010F870 = 0; /* unreferenced */
+
 extern SpriteEntry D_80115760[64]; /* interface sprites */
-extern char *D_80105C20[64]; /* interface texture names */
-extern SpriteColor D_8010F86C;
-extern EGSTexture D_80116B50[];
 extern EGSTexture D_80116C58[2];
 extern EGSTexture D_80116CB0[SPRITE_TEMP_MAX]; /* temporary textures */
 extern s32 D_801173E8[SPRITE_TEMP_MAX];
@@ -303,8 +351,8 @@ EGSTexture *BulletTextureGet(u32 type)
 
 void SpriteCreateFootFx(void *hog)
 {
-    SpriteInitTextureRam(hog, D_8010F864, &D_80116C58[0]);
-    SpriteInitTextureRam(hog, D_8010F868, &D_80116C58[1]);
+    SpriteInitTextureRam(hog, D_8010F864[0], &D_80116C58[0]);
+    SpriteInitTextureRam(hog, D_8010F864[1], &D_80116C58[1]);
 }
 
 EGSTexture *SpriteFootFxTextureGet(s32 i)

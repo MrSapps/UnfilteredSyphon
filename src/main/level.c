@@ -3,50 +3,49 @@
 #include "level.h"
 #include "gameobj.h"
 
-/* level.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F654)
-SDATA_LOCAL(D_8010F658)
-SDATA_LOCAL(D_8010F65C)
-SDATA_LOCAL(gAddingObjectiveViaQuip)
-SDATA_LOCAL(gHanHogFile)
-SDATA_LOCAL(gHanLvlHogFile)
-SDATA_LOCAL(gInEOLState)
-SDATA_LOCAL(gLevelGameObjCount)
-SDATA_LOCAL(gLevelSpecificNpcID)
-SDATA_LOCAL(gLevelSpecificNpcID2)
-SDATA_LOCAL(gMissionFailed)
-SDATA_LOCAL(gObjectives)
-SDATA_LOCAL(gPermHogFile)
-SDATA_LOCAL(gStartedEOLFade)
-SDATA_LOCAL(gameObjectsInfo)
-SDATA_LOCAL(gameObjectsModelInfo)
-SDATA_LOCAL(levelLoadHeader)
-SDATA_LOCAL(mGameOverMsgFlag)
-SDATA_LOCAL(mLastTickAddedObjectives)
-SDATA_LOCAL(mMissionFailedMsgFlag)
-SDATA_LOCAL(mNextTickAllowMsgIncompleteObjectives)
-SDATA_LOCAL(mNextTickAllowMsgMissionFailed)
+/* level.c's data, defined in original order (docs/data_migration.md). */
+static const s32 D_80010140[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
-extern u8 (*D_8010F654)();    /* level EOL callback: nonzero allows end of level */
-extern void *(*D_8010F658)(void);  /* objective instructions callback */
-extern u8 D_8010F65C;              /* direction pointer flag */
-extern u8 gAddingObjectiveViaQuip;
-extern s32 gHanHogFile;
-extern s32 gHanLvlHogFile;
-extern u8 gStartedEOLFade;
-extern s32 gPermHogFile;
-extern u8 mGameOverMsgFlag;
-extern u8 mMissionFailedMsgFlag;
-extern s32 mLastTickAddedObjectives;
-extern u32 mNextTickAllowMsgIncompleteObjectives;
-extern u32 mNextTickAllowMsgMissionFailed;
+/* .sdata */
+static u8 (*D_8010F654)() = NULL;          /* level EOL callback: nonzero allows end of level */
+static void *(*D_8010F658)(void) = NULL;   /* objective instructions callback */
+static u8 D_8010F65C = 0;                  /* direction pointer flag */
+u8 mMissionFailedMsgFlag = 0;
+u8 mGameOverMsgFlag = 0;
+GameObjectInfo *gameObjectsInfo = NULL;
+void *gLevelStartHeap = NULL;
+void *gLevelRestartHeap = NULL;
+
+/* .data; cc1 emits the names in reverse, the short ones into .sdata, the rest into .rdata */
+char *gLevelNames[20] = {
+    "SUBWAY",   "SUBWAY2", "SUBWAY3", "PARK",   "PARK2",    "MUSEUM", "MUSEUM2",
+    "BASEEXT",  "BUNKER",  "CHOPPER", "BASEEXT2", "CHURCH", "CHURCH2", "CATACOMB",
+    "WHOUSE",   "INWHOUSE", "CAVE",   "CAVE2",  "SILO",     "TRANSTUN",
+};
+
+/* commons this TU reaches through $gp */
+u8 gAddingObjectiveViaQuip;
+s32 gHanHogFile;
+s32 gHanLvlHogFile;
+u8 gInEOLState;
+s32 gLevelGameObjCount;
+s16 gLevelSpecificNpcID;
+s16 gLevelSpecificNpcID2;
+u8 gMissionFailed;
+LevelObjectives *gObjectives;
+u8 gStartedEOLFade;
+s32 gPermHogFile;
+GameObjectModelInfo *gameObjectsModelInfo;
+s32 mLastTickAddedObjectives;
+u32 mNextTickAllowMsgIncompleteObjectives;
+u32 mNextTickAllowMsgMissionFailed;
 typedef struct LevelLoadHeader {
     /* 0x00 */ u8 unk00[0x30];
     /* 0x30 */ u8 *base;
     /* 0x34 */ u8 unk34[0x34];
     /* 0x68 */ s32 menuHogOffset;
 } LevelLoadHeader;
-extern LevelLoadHeader *levelLoadHeader;
+LevelLoadHeader *levelLoadHeader; /* common, $gp */
 typedef struct LevelData {
     /* 0x00 */ u8 fogOn;
     /* 0x01 */ u8 unk01[3];
@@ -57,8 +56,6 @@ extern LevelData *gLevData;
 extern s32 gExeTick;
 extern void *gGameOverMsg;
 extern void *gObjectiveAddedMsg;
-extern char D_8010F6EC[]; /* "\\SOL\\%s" (.sdata) */
-extern char D_8010F6F4[]; /* "\\EOL\\%s" (.sdata) */
 
 s32 EGSHogGetBlockByName(s32 hog, s32 name, void *out);
 void EGSDisplayFogOn(void *camera);
@@ -175,7 +172,7 @@ void LevelSetupLights(void) {
 void LevelPlaySOLMovie(void) {
     MovieInfo info;
 
-    sprintf(info.name, D_8010F6EC, gLevelNames[gSysInfo.level]);
+    sprintf(info.name, "\\SOL\\%s", gLevelNames[gSysInfo.level]);
     info.width = 320;
     info.height = 240;
     info.halfSize = 40;
@@ -220,7 +217,7 @@ void LevelDoEOLMovie(s32 unused) {
     MovieInfo info;
 
     SysStatePop();
-    sprintf(info.name, D_8010F6F4, gLevelNames[gSysInfo.level]);
+    sprintf(info.name, "\\EOL\\%s", gLevelNames[gSysInfo.level]);
     info.width = 320;
     info.height = 240;
     info.halfSize = 40;
@@ -526,8 +523,6 @@ void LevelSetLevelSpecificNpcID2(s16 id) {
     gLevelSpecificNpcID2 = id;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/level", D_80010140);
-
 u8 *LevelGetMenuHogHeader(void) {
     s32 offset;
 
@@ -536,3 +531,7 @@ u8 *LevelGetMenuHogHeader(void) {
     ASSERT(offset != 0);
     return levelLoadHeader->base + offset;
 }
+
+/* An unreferenced "" follows "\\EOL\\%s" (orig 0x8010F6FC) before camera.c's data;
+ * that it is level.c's (and a static) is a guess. */
+static char D_8010F6FC[] = "";

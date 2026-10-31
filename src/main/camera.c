@@ -4,10 +4,6 @@
 #include "scratch.h"
 
 
-/* camera.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F70A)
-SDATA_LOCAL(gDefaultDisplayPriority)
-SDATA_LOCAL(gCamera)
 
 /* Display-side camera owned by the EGS display code (EGSCameraCreate). */
 typedef struct EGSCamera {
@@ -115,10 +111,25 @@ typedef struct Camera {
     /* 0xD14 */ CameraAccess access;
 } Camera; /* size 0xD48 */
 
-extern u16 D_8010F70A; /* next camera id */
-extern u8 gDefaultDisplayPriority;
-extern Camera *gCamera;
-extern Camera *gCameraList[2];
+/*
+ * camera.c's .data and .sdata, defined in original order (docs/data_migration.md).
+ * Its .bss (from 0x80112D40) stays in the splat blob for now: the boundary with
+ * gamecam.c's .bss is unclear (gamecam code uses 0x80112DD0, the last camera.c
+ * functions use 0x80113BB2/4, both inside the other TU's run).
+ */
+extern Camera D_80112DE4; /* the main camera (size 0xD48), .bss */
+
+/* .data */
+VECTOR32 gDefaultPosition = { 0, 0, 0, 0 };
+VECTOR32 gDefaultAngle = { 0, 0, 0, 0 };
+u8 gDefaultInitParams[0x1B8] = { 0xFF, 0xFF, 0xFF, 0xFF }; /* CameraModeParams, fov -1 */
+
+/* .sdata */
+Camera *gCameraList[2] = { NULL, NULL };
+u8 gDefaultDisplayPriority = 2;
+static u16 D_8010F70A = 0; /* next camera id */
+static s32 D_8010F70C = 0; /* unreferenced */
+Camera *gCamera = &D_80112DE4;
 
 u8 CameraActivate(Camera *cam, u8 on);
 u8 CameraDisplay(Camera *cam, u8 on);
@@ -153,9 +164,6 @@ void EGSFrameTransformPoint(VECTOR32 *point, EGSFrame *frame, s32 arg2, VECTOR32
 void EGSFrameGetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *out);
 
 extern u8 D_80113BB4[];
-extern VECTOR32 gDefaultPosition;
-extern VECTOR32 gDefaultAngle;
-extern u8 gDefaultInitParams[];
 
 void *memset(void *dst, s32 c, u32 n);
 void EGSDisplayProjectionAngleToDistance(s32 angle, u16 *dist);
