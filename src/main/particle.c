@@ -51,10 +51,12 @@ typedef struct ParticleGroup {
     /* 0x08 */ s16 x; /* emitter position */
     /* 0x0A */ s16 y;
     /* 0x0C */ s16 z;
-    /* 0x0E */ u8 unk0E[6];
+    /* 0x0E */ s16 dx; /* group drift velocity */
+    /* 0x10 */ s16 dy;
+    /* 0x12 */ s16 dz;
     /* 0x14 */ s16 gobjId; /* object the particles stick to */
     /* 0x16 */ s16 unk16;
-    /* 0x18 */ u8 unk18[2];
+    /* 0x18 */ s16 owner; /* object id of the shooter */
     /* 0x1A */ s16 wind;
     /* 0x1C */ s16 unk1C;
     /* 0x1E */ s16 head; /* first particle index, -1 when the group is free */
@@ -640,7 +642,7 @@ void ParticleInitBreath(void) {
 }
 
 
-void EGSTextureSetSpriteTransparency(void *sprite, s32 mode);
+s32 EGSTextureSetSpriteTransparency(void *sprite, s32 mode);
 
 /* x >> n rounded towards zero */
 #define SHIFT_TO_ZERO(x, n) ((x) >= 0 ? (x) >> (n) : -(-(x) >> (n)))
@@ -1609,9 +1611,170 @@ ParticleGroup *ParticleHitFlakJacket(s32 arg0, s32 id, VECTOR32 *pos, VECTOR32 *
     return g;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", iParticleExplosion);
+/* Texture animation strip (gMultiTextures[], 0xC bytes each) */
+typedef struct MultiTexture {
+    /* 0x00 */ s16 frames;
+    /* 0x02 */ u8 unk02[0xA];
+} MultiTexture;
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleExplosion);
+extern MultiTexture gMultiTextures[];
+
+ParticleGroup *iParticleExplosion(s32 unused, VECTOR32 *pos, s32 count, s32 type, s32 id, s32 size, s32 range) {
+    VECTOR32 mask;
+    VECTOR32 cam;
+    VECTOR32 dir = D_80012000;
+    ParticleGroup *g;
+    Particle *p;
+    s32 i;
+    s32 next;
+    s32 base;
+    s32 mode;
+    s32 scale;
+    s32 size64;
+
+    cam.vx = (*(EGSFrame **)*gCamera)->pos.vx;
+    cam.vy = (*(EGSFrame **)*gCamera)->pos.vy;
+    cam.vz = (*(EGSFrame **)*gCamera)->pos.vz;
+    cam.vy = -cam.vy;
+    if (id < 0) {
+        dir.vx = pos->vx - cam.vx;
+        dir.vy = pos->vy - cam.vy;
+        dir.vz = pos->vz - cam.vz;
+        GTEMath_VectorNormal(&dir, &dir);
+        range = 0x3FF;
+        dir.vx = -dir.vx >> 5;
+        dir.vy = -dir.vy >> 5;
+        dir.vz = -dir.vz >> 5;
+    }
+    size64 = size << 6;
+    mask.vz = mask.vy = mask.vx = (size64 - size) >> 12;
+    ParticleInitEmitterMask(pos, &mask);
+    ParticleInitDirection(&dir, range, 0);
+    g = ParticlePoolAllocate(count, NULL);
+    if (g != NULL) {
+        g->unk23 = 0x80;
+        g->wind = -size << 8;
+        g->unk1C = 0;
+        g->updateType = 1;
+        g->drawType = 4;
+        ParticleStart(g, count);
+        i = g->head;
+        scale = (size64 + (size << 5)) >> 12;
+        g->unk23 = scale;
+        g->unk25 = 0;
+        if (type == 0) {
+            if (id < 0) {
+                g->unk1C = 2;
+                base = gMultiTextures[2].frames - 1;
+            } else {
+                g->unk1C = 2;
+                base = gMultiTextures[2].frames - 5;
+            }
+            mode = 1;
+        } else {
+            if (type == 3) {
+                g->unk1C = 1;
+                base = gMultiTextures[1].frames - 1;
+                mode = 1;
+                g->wind = 0;
+            } else {
+                g->unk1C = type == 1 ? 3 : 4;
+                base = gMultiTextures[g->unk1C].frames - 1;
+                mode = 3;
+            }
+        }
+        for (; i >= 0; i = next) {
+            p = &D_80119040[i];
+            next = p->next;
+            if (p->pos.vy < pos->vy) {
+                p->pos.vy = pos->vy * 2 - p->pos.vy;
+            }
+            p->vel.vy = p->vel.vy < 0 ? -p->vel.vy : p->vel.vy;
+            p->state = (rand() & 7) + base;
+            p->unk60 = p->state;
+            EGSTextureSetSpriteTransparency(p->prim, mode);
+            p->unk64 = base;
+            p->unk62 = g->unk1C;
+        }
+        g->x = D_8011D150.vx;
+        g->y = D_8011D150.vy;
+        g->z = D_8011D150.vz;
+        g->id = id;
+        g->fade = 0;
+    }
+    return g;
+}
+
+ParticleGroup *ParticleExplosion(s32 id, VECTOR32 *pos, s32 unused, s32 size, s32 big) {
+    VECTOR32 v;
+    ParticleGroup *g;
+    s32 objId;
+    s32 onObject = 0;
+    s32 count;
+    s32 i;
+
+    objId = id;
+    if (id == GOBJ_ID_666) {
+        objId = -1;
+    }
+    ParticleInitLifeColorNoInfrared(16, 0x808080);
+    D_801100B4 = 16;
+    count = 1;
+    if (big) {
+        count = 3;
+    }
+    if (objId >= 0 && GOBJ_TYPE(objId) == 0x6C) {
+        onObject = 1;
+        objId = -1;
+    }
+    g = iParticleExplosion(objId, pos, count, 0, 0, size, 0);
+    if (g != NULL) {
+        g->fade = 0x80000F00;
+        if (onObject) {
+            D_80119040[g->head].pos.vx = pos->vx;
+            D_80119040[g->head].pos.vy = pos->vy;
+            D_80119040[g->head].pos.vz = pos->vz;
+            D_80119040[g->head].vel.vx = 0;
+            D_80119040[g->head].vel.vy = -0x8000;
+            D_80119040[g->head].vel.vz = 0;
+        }
+        if (big) {
+            SysPlaySong(0, 0, 0, (s32)pos);
+            g->flags |= 0x80000;
+            if (id == GOBJ_ID_666 && D_8011007C + 24 < 0x78) {
+                ParticleInitLifeColorNoInfrared(16, 0xFFFFFF);
+                D_801100B4 = 0x810;
+                for (i = 0; i < (rand() & 1) + 2; i++) {
+                    g = iParticleExplosion(-1, pos, 9, 0, GOBJ_ID_666, 0x100, 0);
+                    if (g != NULL) {
+                        v.vx = (rand() & 0xFFF) - 0x7FF;
+                        v.vz = (rand() & 0xFFF) - 0x7FF;
+                        v.vy = 0;
+                        GTEMath_VectorNormal(&v, &v);
+                        g->dx = v.vx >> 2;
+                        g->dz = v.vz >> 2;
+                        v.vx = (*(EGSFrame **)*gCamera)->pos.vx;
+                        v.vy = (*(EGSFrame **)*gCamera)->pos.vy;
+                        v.vz = (*(EGSFrame **)*gCamera)->pos.vz;
+                        v.vy = -v.vy;
+                        v.vx -= pos->vx;
+                        v.vy -= pos->vy;
+                        v.vz -= pos->vz;
+                        GTEMath_VectorNormal(&v, &v);
+                        g->dx += v.vx >> 1;
+                        g->dz += v.vz >> 1;
+                        g->dx >>= 1;
+                        g->dz >>= 1;
+                        g->dy = ((rand() & 0x1FF) + 700) * 2;
+                        g->wind = -0x2916;
+                        g->fade = 0x800007FF;
+                    }
+                }
+            }
+        }
+    }
+    return g;
+}
 
 void ParticleSmoke(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {
     ParticleInitLifeColorNoInfrared(16, 0x808080);
@@ -1619,8 +1782,6 @@ void ParticleSmoke(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {
     iParticleExplosion(a0, a1, 2, a4, -1, a3, 0);
 }
 
-#ifdef NON_MATCHING
-/* flag/a1 callee-saved registers swapped, life constant scheduled late */
 ParticleGroup *ParticleFire(s32 a0, s32 a1, s32 a2, s32 color, s32 r, s32 gr, s32 b) {
     s32 flag = 1;
     ParticleGroup *g;
@@ -1628,8 +1789,11 @@ ParticleGroup *ParticleFire(s32 a0, s32 a1, s32 a2, s32 color, s32 r, s32 gr, s3
     if (r == 0) {
         flag = gr == 0;
     }
-
-    ParticleInitLifeColorNoInfrared(16, color < 0 ? 0x808080 : color);
+    if (color < 0) {
+        ParticleInitLifeColorNoInfrared(16, 0x808080);
+    } else {
+        ParticleInitLifeColorNoInfrared(16, color);
+    }
     D_801100B4 = 16;
     g = iParticleExplosion(a0, a1, 2, flag, GOBJ_ID_666, a2, 0);
     if (g != NULL) {
@@ -1646,9 +1810,6 @@ ParticleGroup *ParticleFire(s32 a0, s32 a1, s32 a2, s32 color, s32 r, s32 gr, s3
     }
     return g;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleFire);
-#endif
 
 ParticleGroup *ParticleFindGroup(s32 id) {
     s32 i;
@@ -1663,7 +1824,87 @@ ParticleGroup *ParticleFindGroup(s32 id) {
     return found;
 }
 
+typedef struct PathPoint {
+    s16 x, y, z, pad;
+} PathPoint;
+
+typedef struct PathData {
+    /* 0x00 */ s32 numPoints;
+    /* 0x04 */ PathPoint *points;
+} PathData;
+
+extern s32 gLevelGameObjCount;
+u8 LevelGetPathInfo(s32 id, s32 *velocity, PathData **path);
+
+#ifdef NON_MATCHING
+/* 0x41010 lands in a0 and is hoisted into a load delay slot; the original uses v1 after the last path use */
+void ParticleFireShow(s16 id, VECTOR32 *pos, s32 size, s32 type) {
+    s32 velocity;
+    PathData *path = NULL;
+    ParticleGroup *g;
+    s32 div;
+    s32 kind;
+    s32 life;
+    s32 i;
+    Particle *p;
+
+    if (id < gLevelGameObjCount) {
+        LevelGetPathInfo(id, &velocity, &path);
+    }
+    if (path != NULL) {
+        VECTOR32 v;
+
+        ParticleInitLifeColorNoInfrared(16, 0x808080);
+        v.vx = path->points[0].x;
+        v.vy = path->points[0].y;
+        D_801100B4 = 0x41010;
+        v.vz = path->points[0].z;
+        kind = 0;
+        if (gSysInfo.level != 18 || type != 0) {
+            div = 9;
+            if (gSysInfo.level == 18) {
+                size >>= 1;
+                kind = -16;
+            }
+            g = iParticleExplosion(-1, &v, 9, type, id, size >> 1, 0);
+        } else {
+            g = iParticleExplosion(-1, &v, 2, 0, 0, size + size / 2, 0);
+            g->unk27 = (rand() & 0xF) + (rand() & 7);
+            div = 2;
+            g->fade = !(id & 1) ? 0x801F7F7F : 0x80007F7F;
+        }
+        if (g != NULL) {
+            v.vx = (path->points[1].x - v.vx) >> 4;
+            v.vy = (path->points[1].y - v.vy) << 8;
+            v.vz = (path->points[1].z - v.vz) >> 4;
+            life = 1;
+            for (i = g->head; i >= 0; i = p->next) {
+                p = &D_80119040[i];
+                p->vel = v;
+                p->unk60 = 18;
+                p->state = life;
+                life += p->unk60 / div;
+            }
+            g->dx = v.vx;
+            g->dy = v.vy >> 12;
+            g->dz = v.vz;
+            g->wind = 0;
+            if (kind) {
+                g->unk26 = kind;
+            }
+        }
+    } else {
+        ParticleInitLifeColorNoInfrared(16, 0x808080);
+        D_801100B4 = 0x1010;
+        g = iParticleExplosion(-1, pos, 2, type, id, size, 0);
+        if (g != NULL) {
+            g->unk26 = 16;
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleFireShow);
+#endif
 
 void ParticleFireHide(s16 id) {
     ParticleGroup *g = ParticleFindGroup(id);
@@ -1764,9 +2005,7 @@ void ParticleNPCFireFade(s32 id) {
     }
 }
 
-#ifdef NON_MATCHING
-/* prologue: id copy scheduled before the pos copy */
-s32 ParticleNPCFireMove(s32 id, VECTOR32 *pos) {
+s32 ParticleNPCFireMove(u16 id, VECTOR32 *pos) {
     s32 notFound = 0;
     ParticleGroup *g;
     s32 i;
@@ -1807,14 +2046,59 @@ s32 ParticleNPCFireMove(s32 id, VECTOR32 *pos) {
     }
     return notFound;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleNPCFireMove);
-#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGrenadeLauncher);
+void WeaponGetTip(GameObjectRuntime *gobj, VECTOR32 *tip);
+void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
 
-#ifdef NON_MATCHING
-/* load scheduling of the angle/velocity update differs */
+void ParticleGrenadeLauncher(s32 id, VECTOR32 *target) {
+    VECTOR32 dir;
+    VECTOR32 tip;
+    s32 dist;
+    ParticleGroup *g;
+    Particle *p;
+    s32 steps;
+
+    WeaponGetTip(gameObjectsInfo[id].runtime, &tip);
+    dir.vx = target->vx - tip.vx;
+    dir.vy = target->vy - tip.vy;
+    dir.vz = target->vz - tip.vz;
+    GTEMath_VectorNormal(&dir, &dir);
+    EGSGeometry_GetFuzzyDistancePoint2Point(&tip, target, &dist);
+    steps = dist / 128;
+    if (steps <= 0) {
+        steps = 1;
+    }
+    dir.vx <<= 7;
+    dir.vy <<= 7;
+    dir.vz <<= 7;
+    g = ParticlePoolAllocate(1, NULL);
+    if (g != NULL) {
+
+        g->x = target->vx;
+        g->y = target->vy;
+        g->z = target->vz;
+        g->unk16 = -1;
+        g->updateType = 9;
+        g->drawType = 5;
+        g->owner = id;
+        g->unk27 = steps;
+        p = &D_80119040[g->head];
+        p->pos.vx = tip.vx << 12;
+        p->pos.vy = tip.vy << 12;
+        p->pos.vz = tip.vz << 12;
+        p->vel = dir;
+        p->state = 1;
+        EGSFrameSetPosition(D_80118FE0[0].frame, 0, &tip);
+        EGSDisplayPointSourceParams(&D_80118FE0[0], 100, 0xFFFF);
+        if (!D_80118FE0[0].on) {
+            EGSDisplayPointSourceOn(&D_80118FE0[0]);
+        }
+        g->wind = dist >> 5;
+        p->unk62 = 0;
+        p->unk64 = 0x800 / steps;
+    }
+}
+
 void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
     Particle *p = &D_80119040[g->head];
     VECTOR32 v;
@@ -1822,11 +2106,11 @@ void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
     s32 color;
     s16 angle;
 
-    angle = p->unk62 + p->unk64;
-    p->unk62 = angle;
     p->pos.vx += p->vel.vx;
     p->pos.vy += p->vel.vy;
     p->pos.vz += p->vel.vz;
+    angle = p->unk62 + p->unk64;
+    p->unk62 = angle;
     s = g->wind * rsin(angle);
     v.vx = p->pos.vx >> 12;
     v.vy = (p->pos.vy + s) >> 12;
@@ -1836,11 +2120,70 @@ void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
     EGSDisplayPointSourceParams(&D_80118FE0[0], 100, color);
     EGSFrameSetPosition(D_80118FE0[0].frame, 0, &v);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateGrenadeLauncher);
-#endif
 
+SDATA_LOCAL(D_8011008C)
+extern EGSFrame **D_8011008C; /* camera frame */
+void EGSDisplaySetFlashTime(s32 ticks);
+
+#ifdef NON_MATCHING
+/* camera-frame loads scheduled differently, one instruction longer */
+void ParticleFireWaveDeath(void) {
+    VECTOR32 pos;
+    VECTOR32 vel;
+    VECTOR32 step;
+    ParticleGroup *g;
+    Particle *p;
+    s32 i;
+    s32 n;
+    s32 life;
+
+    if (!particleFireWaveFlag) {
+        pos.vx = (*D_8011008C)->pos.vx;
+        pos.vy = (*D_8011008C)->pos.vy;
+        pos.vz = (*D_8011008C)->pos.vz;
+        pos.vy = -pos.vy;
+        vel.vx = (*D_8011008C)->m[0][2];
+        vel.vy = (*D_8011008C)->m[1][2];
+        particleFireWaveFlag = 1;
+        vel.vy = -vel.vy;
+        vel.vz = (*D_8011008C)->m[2][2];
+        pos.vx += vel.vx >> 2;
+        pos.vy = D_80110088;
+        pos.vz += vel.vz >> 2;
+        ParticleInitLifeColorNoInfrared(16, 0x808080);
+        D_801100B4 = 0x3010;
+        step.vx = -(vel.vz >> 3);
+        step.vz = vel.vx >> 3;
+        pos.vx -= step.vx;
+        pos.vz -= step.vz;
+        vel.vx = -vel.vx >> 7;
+        vel.vz = -vel.vz >> 7;
+        vel.vy = -vel.vy << 5;
+        for (n = 0; n < 3; n++) {
+            pos.vx += step.vx;
+            pos.vz += step.vz;
+            g = iParticleExplosion(-1, &pos, 3, -1, 0, 0x800, 0);
+            if (g != NULL) {
+                life = 1;
+                for (i = g->head; i >= 0; i = p->next) {
+                    p = &D_80119040[i];
+                    p->vel = vel;
+                    p->unk60 = 12;
+                    p->state = life;
+                    life += (s16)(p->unk60 / 3);
+                }
+                g->x = n - 1;
+                g->wind = 0;
+                g->unk26 = -0x7F;
+                g->fade = 0x8000FF00;
+            }
+        }
+        EGSDisplaySetFlashTime(100);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleFireWaveDeath);
+#endif
 
 ParticleGroup *ParticleHitWall(s32 arg0, VECTOR32 *pos, VECTOR32 *normal, s32 color) {
     VECTOR32 n;
@@ -1955,18 +2298,16 @@ ParticleGroup *ParticleHitChopper(s32 arg0, VECTOR32 *pos, VECTOR32 *dir) {
     return g;
 }
 
-#ifdef NON_MATCHING
-/* empty-count test is blez instead of beqz, registers differ */
 s32 ParticleFindFloor(s32 y) {
     s32 floor;
     s32 i;
-    u8 count;
+    s32 count;
     s16 *floors;
 
     if ((u16)gSysInfo.level < 16) {
+        count = D_801062C4[gSysInfo.level];
         floor = y;
         i = 0;
-        count = D_801062C4[gSysInfo.level];
         floors = levelFloorY[gSysInfo.level];
         for (; i < count; i++) {
             if (floors[i] - 0x80 < y) {
@@ -1979,9 +2320,6 @@ s32 ParticleFindFloor(s32 y) {
     }
     return floor;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleFindFloor);
-#endif
 
 ParticleGroup *ParticleSparkShower(VECTOR32 *pos, s32 size, s32 color) {
     ParticleGroup *g = NULL;
@@ -2146,17 +2484,653 @@ void ParticleGunFlash(void) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/particle", D_80012030);
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPoint);
+ParticleGroup *ParticleGlassPoint(s32 unused, s32 id, VECTOR32 *pos) {
+    VECTOR32 dir = D_80012010;
+    GameObjectRuntime *gobj = gameObjectsInfo[id].runtime;
+    ParticleGroup *g;
+    ParticleGroup *flash;
 
+    if (GOBJ_TYPE(id) == 0x4D) {
+        ParticleInitEmitterPoint(pos);
+        ParticleInitAngle(0x200, 0xFF, 0xFF);
+        ParticleInitLifeColor(12, 0x204080);
+        D_801100B4 = 0x282;
+        ParticleInitDirection(&dir, 0x7FFF, 2);
+        g = ParticlePoolAllocate(8, NULL);
+        if (g != NULL) {
+            g->unk23 = 4;
+            g->unk1C = pos->vy - 16;
+            g->wind = -0x2916;
+            g->updateType = 10;
+            g->drawType = 0;
+            ParticleStart(g, 8);
+        }
+        dir.vy = 0x2000;
+        ParticleInitAngle(0x555, 0, 0xFF);
+        ParticleInitLifeColor(7, 0x6080C0);
+        ParticleInitDirection(&dir, 0xFFF, 1);
+        g = ParticlePoolAllocate(8, NULL);
+        if (g != NULL) {
+            g->unk23 = 5;
+            g->unk1C = pos->vy - 16;
+            g->wind = -0x2916;
+            g->updateType = 10;
+            g->drawType = 0;
+            ParticleStart(g, 8);
+            g->unk24 = 3;
+        }
+    } else if (GOBJ_TYPE(id) == 0x55) {
+        VECTOR32 mask = { 7, 0x3F, 7 };
+        s32 floor;
+
+        dir.vy = 0x4000;
+        ParticleInitEmitterMask(pos, &mask);
+        ParticleInitAngle(0x555, 0xFF, 0xFF);
+        ParticleInitLifeColor(10, 0x102040);
+        D_801100B4 = 0x80;
+        floor = pos->vy - 0x40;
+        if (D_80110088 < floor) {
+            floor = D_80110088;
+        }
+        ParticleInitDirection(&dir, 0x7FFF, 1);
+        g = ParticlePoolAllocate(20, NULL);
+        if (g != NULL) {
+            g->unk23 = 5;
+            g->wind = -0x2916;
+            g->unk1C = floor;
+            g->updateType = 10;
+            g->drawType = 0;
+            ParticleStart(g, 20);
+            g->unk26 = -10;
+        }
+        ParticleInitLifeColor(10, 0xA152A);
+        g = ParticlePoolAllocate(20, NULL);
+        if (g != NULL) {
+            g->unk23 = 5;
+            g->wind = -0x2916;
+            g->unk1C = floor;
+            g->updateType = 10;
+            g->drawType = 0;
+            ParticleStart(g, 20);
+            g->unk24 = 3;
+            g->unk26 = -10;
+        }
+    } else {
+        s32 floor;
+
+        ParticleInitEmitterPoint(pos);
+        floor = ParticleFindFloor(pos->vy);
+        ParticleInitAngle(0x200, 0xFF, 0xFF);
+        ParticleInitLifeColor(12, 0xEF9F9F);
+        D_801100B4 = 0x202;
+        ParticleInitDirection(&dir, 0x7FFF, 0);
+        g = ParticlePoolAllocate(16, NULL);
+        if (g != NULL) {
+            g->unk23 = 8;
+            g->wind = -0x2916;
+            g->unk1C = floor;
+            g->updateType = 4;
+            g->drawType = 0;
+            ParticleStart(g, 16);
+            g->flags |= 2;
+        }
+        if (gobj->flags0 & 2) {
+            ParticleInitAngle(0x555, 0, 0xFF);
+            ParticleInitLifeColorFade(8, 0xFFFF);
+            D_801100B4 = 2;
+            ParticleInitDirection(&dir, 0xFFFF, 1);
+            flash = ParticlePoolAllocate((rand() & 0xF) + 15, NULL);
+            if (flash != NULL) {
+                flash->unk23 = 3;
+                flash->wind = -0x148B;
+                flash->unk1C = floor;
+                flash->updateType = 10;
+                flash->drawType = 0;
+                ParticleStart(flash, (rand() & 0xF) + 15);
+            }
+        }
+    }
+    return g;
+}
+
+SDATA_LOCAL(D_801100F0)
+SDATA_LOCAL(D_801100F4)
+SDATA_LOCAL(D_801100F8)
+SDATA_LOCAL(D_801100FC)
+SDATA_LOCAL(D_80110100)
+SDATA_LOCAL(D_80110104)
+SDATA_LOCAL(D_80110108)
+SDATA_LOCAL(D_8011010C)
+SDATA_LOCAL(D_80110110)
+SDATA_LOCAL(D_80110114)
+
+/* Glass texture mapping, set up by the pane functions */
+extern s16 D_801100F0; /* tpage */
+extern s16 D_801100F4; /* clut */
+extern s16 D_801100F8; /* texture VRAM x */
+extern s16 D_801100FC; /* texture VRAM y */
+extern s16 D_80110100; /* texture width */
+extern s16 D_80110104; /* texture height */
+extern s16 D_80110108; /* pane origin x */
+extern s16 D_8011010C; /* pane origin y */
+extern s16 D_80110110; /* pane width */
+extern s16 D_80110114; /* pane height */
+
+/* Texture coordinate of one POLY_FT3 vertex plus the clut/tpage halfword that follows it */
+typedef struct GlassUV {
+    /* 0x00 */ u8 u;
+    /* 0x01 */ u8 v;
+    /* 0x02 */ u16 attr;
+} GlassUV;
+
+/* Textured triangle as built by the display code (POLY_FT3 behind an 8-byte header) */
+typedef struct GlassPoly {
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ GlassUV uv0; /* attr: clut */
+    /* 0x18 */ u8 unk18[4];
+    /* 0x1C */ GlassUV uv1; /* attr: tpage */
+    /* 0x20 */ u8 unk20[4];
+    /* 0x24 */ GlassUV uv2;
+} GlassPoly;
+
+#ifdef NON_MATCHING
+/* register allocation/scheduling of the six divisions differs */
+void particleGlassTexture(GlassPoly *poly, s32 x0, s32 y0, s32 x1, s32 y1, s32 x2, s32 y2) {
+    GlassUV *uv;
+    s32 page;
+    s32 u;
+    s32 v;
+
+    u = (x0 - D_80110108) * D_80110100 / D_80110110;
+    v = (y0 - D_8011010C) * D_80110104 / D_80110114;
+    uv = &poly->uv0;
+    page = D_801100F0 & 0x1F;
+    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = D_801100FC + D_80110104 - v;
+    uv->attr = D_801100F4;
+    u = (x1 - D_80110108) * D_80110100 / D_80110110;
+    v = (y1 - D_8011010C) * D_80110104 / D_80110114;
+    uv = &poly->uv1;
+    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = D_801100FC + D_80110104 - v;
+    uv->attr = D_801100F0;
+    u = (x2 - D_80110108) * D_80110100 / D_80110110;
+    v = (y2 - D_8011010C) * D_80110104 / D_80110114;
+    uv = &poly->uv2;
+    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = D_801100FC + D_80110104 - v;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", particleGlassTexture);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleBuildGlass);
+/* View of a Particle used as a glass shard */
+typedef struct GlassShard {
+    /* 0x00 */ VECTOR32 pos; /* centre */
+    /* 0x10 */ u8 unk10[0x18];
+    /* 0x28 */ GlassPoly poly;
+    /* 0x50 */ s16 corner[3][3]; /* per corner: angle, radius, offset along the pane normal */
+    /* 0x62 */ s16 spin;
+} GlassShard;
+
+int ratan2(int y, int x);
+int SquareRoot0(int a);
+
+void ParticleBuildGlass(GlassShard *shard, VECTOR32 *a, VECTOR32 *b, VECTOR32 *c, s32 plane, s32 textured) {
+    s32 tx, ty, tz;
+    s32 cx, cy, cz;
+    s32 x0, y0, z0;
+    s32 x1, y1, z1;
+    s32 x2, y2, z2;
+    s32 scale;
+
+    tx = (a->vx + (b->vx >> 1) + c->vx) >> 1;
+    ty = (a->vy + (b->vy >> 1) + c->vy) >> 1;
+    tz = (a->vz + (b->vz >> 1) + c->vz) >> 1;
+    shard->pos.vx = cx = (a->vx + (b->vx >> 1) + tx) >> 1;
+    shard->pos.vy = cy = (a->vy + (b->vy >> 1) + ty) >> 1;
+    shard->pos.vz = cz = (a->vz + (b->vz >> 1) + tz) >> 1;
+    x0 = a->vx - cx;
+    y0 = a->vy - cy;
+    z0 = a->vz - cz;
+    x1 = x0 + b->vx;
+    y1 = y0 + b->vy;
+    z1 = z0 + b->vz;
+    scale = (rand() & 0xF) + 8;
+    x2 = (tx - cx) * scale >> 3;
+    y2 = (ty - cy) * scale >> 3;
+    z2 = (tz - cz) * scale >> 3;
+    if (plane == 3) {
+        if (textured) {
+            particleGlassTexture(&shard->poly, cx + x0, cy + y0, cx + x1, cy + y1, cx + x2, cy + y2);
+        }
+        shard->corner[0][0] = ratan2(y0, x0);
+        shard->corner[0][1] = SquareRoot0(y0 * y0 + x0 * x0);
+        shard->corner[0][2] = z0;
+        shard->corner[1][0] = ratan2(y1, x1);
+        shard->corner[1][1] = SquareRoot0(y1 * y1 + x1 * x1);
+        shard->corner[1][2] = z1;
+        shard->corner[2][0] = ratan2(y2, x2);
+        shard->corner[2][1] = SquareRoot0(y2 * y2 + x2 * x2);
+        shard->corner[2][2] = z2;
+    } else if (plane == 6) {
+        if (textured) {
+            particleGlassTexture(&shard->poly, cz + z0, cy + y0, cz + z1, cy + y1, cz + z2, cy + y2);
+        }
+        shard->corner[0][0] = ratan2(y0, z0);
+        shard->corner[0][1] = SquareRoot0(y0 * y0 + z0 * z0);
+        shard->corner[0][2] = x0;
+        shard->corner[1][0] = ratan2(y1, z1);
+        shard->corner[1][1] = SquareRoot0(y1 * y1 + z1 * z1);
+        shard->corner[1][2] = x1;
+        shard->corner[2][0] = ratan2(y2, z2);
+        shard->corner[2][1] = SquareRoot0(y2 * y2 + z2 * z2);
+        shard->corner[2][2] = x2;
+    }
+    shard->spin = 0;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/particle", func_80052D90);
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneWall);
+u16 GetTPage(int tp, int abr, int x, int y);
+void ParticleInitEmitterXZPlane(VECTOR32 *min, VECTOR32 *max, VECTOR32 *size);
 
+/* glass object type that is not pushed out along its normal */
+#define GOBJ_TYPE_GLASS_FIXED 0x31
+
+#ifdef NON_MATCHING
+/* register allocation: max is spilled instead of living in fp, one fewer spill slot */
+ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR32 *max, VECTOR32 *dir) {
+    VECTOR32 center;
+    VECTOR32 size;
+    VECTOR32 push = D_80012000;
+    VECTOR32 delta;
+    VECTOR32 pos;
+    VECTOR32 edge;
+    s32 plane;
+    s32 rows;
+    s32 cols;
+    s32 textured = 0;
+    s32 stepX;
+    s32 stepY;
+    s32 stepZ;
+    s32 spin;
+    s32 dx, dy, dz;
+    s32 floor;
+    ParticleGroup *g;
+    ParticleGroup *dust;
+    Particle *p;
+    s32 i;
+    s32 n;
+    s32 r;
+    s32 s;
+    GameObjectRuntime *gobj;
+
+    if (gSysInfo.level == 0) {
+        if ((id >= 9 && id <= 18) || (id >= 0x9D && id <= 0xA0)) {
+            D_801100F8 = 0x240;
+            D_801100FC = 0xC0;
+            D_80110100 = 0xF;
+            D_80110104 = 0x3F;
+            D_801100F0 = GetTPage(1, 1, 0x240, 0xC0);
+            textured = 0x8000;
+            D_801100F4 = 0x79B0;
+        } else if ((id >= 0x21 && id <= 0x24) || (id >= 0xE9 && id <= 0xED)) {
+            D_801100F8 = 0x1B0;
+            D_801100FC = 0xC0;
+            D_80110100 = 0xF;
+            D_80110104 = 0x3F;
+            D_801100F0 = GetTPage(1, 1, 0x1B0, 0xC0);
+            textured = 0x8000;
+            D_801100F4 = 0x7A30;
+        }
+    }
+    dx = max->vx - min->vx;
+    if (dx < 0) {
+        dx = -dx;
+    }
+    dy = max->vy - min->vy;
+    if (GOBJ_TYPE(id) == GOBJ_TYPE_GLASS_FIXED) {
+        floor = dy > 0 ? min->vy : max->vy;
+    } else {
+        floor = ParticleFindFloor(dy > 0 ? min->vy : max->vy);
+    }
+    dz = max->vz - min->vz;
+    if (dz < 0) {
+        dz = -dz;
+    }
+    size.vx = func_80052D90(dx);
+    size.vy = func_80052D90(dy);
+    size.vz = func_80052D90(dz);
+    center.vx = (min->vx + max->vx) >> 1;
+    center.vy = (min->vy + max->vy) >> 1;
+    center.vz = (min->vz + max->vz) >> 1;
+    if (shooter >= 0) {
+        gobj = gameObjectsInfo[shooter].runtime;
+        pos.vx = gobj->anim->frame->pos.vx;
+        pos.vy = gobj->anim->frame->pos.vy;
+        pos.vz = gobj->anim->frame->pos.vz;
+        pos.vy = -pos.vy;
+        delta.vx = pos.vx - center.vx;
+        delta.vy = pos.vy - center.vy;
+        delta.vz = pos.vz - center.vz;
+    } else {
+        delta = *dir;
+    }
+    if (dz < dx) {
+        plane = 3;
+        if (GOBJ_TYPE(id) != GOBJ_TYPE_GLASS_FIXED) {
+            push.vz = delta.vz > 0 ? -0x4000 : 0x4000;
+        }
+        if (textured) {
+            D_80110110 = dx;
+            D_80110114 = dy;
+            D_80110108 = min->vx;
+            D_8011010C = min->vy;
+        }
+    } else {
+        plane = 6;
+        if (GOBJ_TYPE(id) != GOBJ_TYPE_GLASS_FIXED) {
+            push.vx = delta.vx > 0 ? -0x4000 : 0x4000;
+        }
+        if (textured) {
+            D_80110110 = dz;
+            D_80110114 = dy;
+            D_80110108 = min->vz;
+            D_8011010C = min->vy;
+        }
+    }
+    rows = (rand() & 1) + 2;
+    cols = rows - (rand() & 1);
+    if (cols < 2) {
+        cols = 1;
+    }
+    ParticleInitEmitterXZPlane(min, max, &size);
+    ParticleInitAngle(0x555, 0, 0);
+    ParticleInitLifeColor(1, textured == 0 ? 0xEF9F9F : 0x3F3F3F);
+    D_801100B4 = textured | 0x202;
+    ParticleInitDirection(&push, 0x1FF, 0);
+    n = (rows + cols) * 2;
+    g = ParticlePoolAllocate(n, NULL);
+    if (g != NULL) {
+        g->unk23 = 16;
+        g->wind = -0x2916;
+        g->updateType = 4;
+        g->unk1C = floor;
+        g->drawType = 1;
+        ParticleStart(g, n);
+    }
+    if (D_8011007C + 12 < 0x78) {
+        ParticleInitEmitterMask(&center, &size);
+        ParticleInitAngle(0x200, 3, 0x1F);
+        D_801100B4 = 0x282;
+        ParticleInitDirection(&push, 0, 0);
+        dust = ParticlePoolAllocate(6, NULL);
+        if (dust != NULL) {
+            dust->wind = -0x2996;
+            dust->unk1C = floor;
+            dust->updateType = 10;
+            dust->drawType = 0;
+            dust->unk23 = size.vy >> 3;
+            ParticleStart(dust, 6);
+        }
+        dust = ParticlePoolAllocate(6, NULL);
+        if (dust != NULL) {
+            dust->wind = -0x2816;
+            dust->unk1C = floor;
+            dust->updateType = 10;
+            dust->drawType = 0;
+            dust->unk23 = size.vy >> 3;
+            ParticleStart(dust, 6);
+        }
+    }
+    if (g != NULL && (i = g->head) >= 0) {
+        g->unk25 = plane;
+        spin = (rand() & 0x3F) - 0x1F;
+        pos.vy = min->vy;
+        stepY = (max->vy - min->vy) / rows;
+        for (n = 0; n < rows; n++) {
+            p = &D_80119040[i];
+            r = (rand() & 7) + 7;
+            pos.vx = min->vx;
+            pos.vz = min->vz;
+            edge.vx = 0;
+            edge.vz = 0;
+            edge.vy = r * stepY >> 4;
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            s = spin >> (r & 1);
+            p->unk64 = s;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+            p = &D_80119040[i];
+            pos.vx = max->vx;
+            pos.vz = max->vz;
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
+            pos.vy += stepY;
+            p->unk64 = s;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+        }
+        stepX = (max->vx - min->vx) / cols;
+        stepZ = (max->vz - min->vz) / cols;
+        pos.vx = min->vx;
+        pos.vz = min->vz;
+        for (n = 0; n < cols; n++) {
+            pos.vy = min->vy;
+            r = (rand() & 7) + 7;
+            p = &D_80119040[i];
+            edge.vy = 0;
+            edge.vx = r * stepX >> 4;
+            edge.vz = r * stepZ >> 4;
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            s = spin >> (r & 1);
+            p->unk64 = s;
+            pos.vy = max->vy;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+            p = &D_80119040[i];
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
+            pos.vx += stepX;
+            pos.vz += stepZ;
+            p->unk64 = s;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+        }
+    }
+    return g;
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneWall);
+#endif
+
+extern VECTOR32 D_80106428;
+/* glass object type with a textured ceiling pane */
+#define GOBJ_TYPE_GLASS_CEILING 0x56
+
+#ifdef NON_MATCHING
+/* register allocation differs throughout (abs values, spill slots) */
+ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTOR32 *max) {
+    VECTOR32 center;
+    VECTOR32 size;
+    s32 velocity;
+    PathData *path;
+    s32 textured;
+    s32 rows;
+    s32 cols;
+    s32 stepX;
+    s32 stepY;
+    s32 stepZ;
+    s32 spin;
+    s32 dx, dy, dz;
+    s32 floor;
+    ParticleGroup *g;
+    ParticleGroup *dust;
+    Particle *p;
+    s32 i;
+    s32 n;
+    s32 r;
+    s32 s;
+
+    path = NULL;
+    LevelGetPathInfo(id, &velocity, &path);
+    textured = 0;
+    if (path != NULL) {
+        floor = path->points[1].y;
+    } else {
+        floor = ParticleFindFloor(min->vy);
+    }
+    if (GOBJ_TYPE(id) == GOBJ_TYPE_GLASS_CEILING) {
+        textured = 0x8000;
+        floor = -0x1BC;
+    }
+    dx = max->vx - min->vx;
+    if (dx < 0) {
+        dx = -dx;
+    }
+    dy = max->vy - min->vy;
+    if (dy < 0) {
+        dy = -dy;
+    }
+    dz = max->vz - min->vz;
+    if (dz < 0) {
+        dz = -dz;
+    }
+    size.vx = func_80052D90(dx);
+    size.vy = func_80052D90(dy);
+    size.vz = func_80052D90(dz);
+    center.vx = (min->vx + max->vx) >> 1;
+    center.vy = (min->vy + max->vy) >> 1;
+    center.vz = (min->vz + max->vz) >> 1;
+    if (textured) {
+        D_80110110 = dx;
+        D_80110114 = dz;
+        D_80110108 = min->vx;
+        D_8011010C = min->vz;
+    }
+    rows = (rand() & 3) + 1;
+    cols = (rand() & 3) + 1;
+    ParticleInitEmitterMask(&center, &size);
+    ParticleInitAngle(0x555, 0, 0);
+    ParticleInitLifeColor(1, 0xEF9F9F);
+    D_801100B4 = textured | 0x202;
+    ParticleInitDirection(&D_80106428, 0, 0);
+    n = (rows + cols) * 2;
+    g = ParticlePoolAllocate(n, NULL);
+    if (g != NULL) {
+        g->unk23 = 16;
+        g->wind = -0x2916;
+        g->updateType = 4;
+        g->unk1C = floor;
+        g->drawType = 1;
+        ParticleStart(g, n);
+    }
+    if (D_8011007C + 12 < 0x78) {
+        ParticleInitEmitterMask(&center, &size);
+        ParticleInitAngle(0x200, 3, 0x1F);
+        D_801100B4 = 0x282;
+        dust = ParticlePoolAllocate(6, NULL);
+        if (dust != NULL) {
+            dust->wind = -0x2996;
+            dust->unk1C = floor;
+            dust->updateType = 10;
+            dust->drawType = 0;
+            dust->unk23 = size.vx >> 4;
+            ParticleStart(dust, 6);
+        }
+        dust = ParticlePoolAllocate(6, NULL);
+        if (dust != NULL) {
+            dust->wind = -0x2816;
+            dust->unk1C = floor;
+            dust->updateType = 10;
+            dust->drawType = 0;
+            dust->unk23 = size.vx >> 3;
+            ParticleStart(dust, 6);
+        }
+    }
+    if (g != NULL && (i = g->head) >= 0) {
+        VECTOR32 pos;
+        VECTOR32 edge;
+
+        g->unk25 = 3;
+        stepY = (max->vy - min->vy) / rows;
+        pos.vx = min->vx;
+        spin = (rand() & 0x3F) - 0x1F;
+        pos.vy = min->vy;
+        stepX = (max->vx - min->vx) / rows;
+        for (n = 0; n < rows; n++) {
+            p = &D_80119040[i];
+            pos.vz = min->vz;
+            r = (rand() & 7) + 7;
+            edge.vz = 0;
+            edge.vx = r * stepX >> 4;
+            edge.vy = r * stepY >> 4;
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, 3, textured);
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            s = spin >> (r & 1);
+            p->unk64 = s;
+            pos.vz = max->vz;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+            p = &D_80119040[i];
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, 3, textured);
+            pos.vx += stepX;
+            pos.vy += stepY;
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            p->unk64 = s;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+        }
+        stepY = (max->vy - min->vy) / cols;
+        stepZ = (max->vz - min->vz) / cols;
+        pos.vy = min->vy;
+        pos.vz = min->vz;
+        for (n = 0; n < cols; n++) {
+            p = &D_80119040[i];
+            pos.vx = min->vx;
+            r = (rand() & 7) + 7;
+            edge.vx = 0;
+            edge.vy = r * stepY >> 4;
+            edge.vz = r * stepZ >> 4;
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, 6, textured);
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            s = spin >> (r & 1);
+            p->unk64 = s;
+            pos.vx = max->vx;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+            p = &D_80119040[i];
+            ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, 6, textured);
+            pos.vy += stepY;
+            pos.vz += stepZ;
+            p->vel.vy = ((rand() & 0xF) + 1) << 11;
+            p->unk64 = s;
+            i = p->next;
+            if (i < 0) {
+                return g;
+            }
+        }
+    }
+    return g;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneCeiling);
+#endif
 
 void ParticleStartRain(void) {
     VECTOR32 mask = D_80012050;
