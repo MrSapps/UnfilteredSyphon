@@ -2,6 +2,20 @@
 #define COMMON_H
 
 /*
+ * _PSYQ is predefined by the original ccpsx driver (Psy-Q 4.3, cc1psx + aspsx).
+ * aspsx understands none of the GAS-only constructs below (.include, .pushsection,
+ * .macro, maspsx markers), so under ccpsx they compile away: INCLUDE_ASM functions
+ * are expected to come from separately assembled objects, and SDATA_LOCAL is not
+ * needed once a TU defines its small data itself (docs/data_migration.md).
+ */
+#ifdef _PSYQ
+#define INCLUDE_ASM(FOLDER, NAME)
+#define INCLUDE_RODATA(FOLDER, NAME)
+#define INCLUDE_PART1(FOLDER, NAME)
+#define SDATA_LOCAL(sym)
+#else /* !_PSYQ */
+
+/*
  * cc1 2.7.2 with -G8 emits every function after all file-scope asm, so a plain
  * __asm__ INCLUDE_ASM would land out of order. Wrap each include in a dummy
  * function that maspsx strips again (see tools/maspsx/README.md).
@@ -52,6 +66,7 @@
 #endif
 
 #include "include_asm.h"
+#endif /* _PSYQ */
 
 typedef signed char s8;
 typedef unsigned char u8;

@@ -1,9 +1,9 @@
 #include "common.h"
 #include "game.h"
 
-/* egsmisc.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FF38)
-SDATA_LOCAL(D_8010FF3C)
+/* This TU's data is defined below in original order (docs/data_migration.md):
+ * .sdata D_8010FF38, D_8010FF3C; .bss D_80122C90.
+ * Keep the line count: ASSERT bakes __LINE__ into .text. */
 
 typedef struct EGSListNode {
     /* 0x00 */ void *data;
@@ -13,9 +13,9 @@ typedef struct EGSListNode {
 
 #define EGS_LIST_POOL_SIZE 800
 
-extern EGSListNode D_80122C90[EGS_LIST_POOL_SIZE]; /* node pool */
-extern EGSListNode *D_8010FF38;                    /* free-node list */
-extern u16 D_8010FF3C;                             /* nodes in use */
+static EGSListNode D_80122C90[EGS_LIST_POOL_SIZE]; /* node pool */
+static EGSListNode *D_8010FF38 = NULL;             /* free-node list */
+static u16 D_8010FF3C = 0;                         /* nodes in use */
 
 /* Collision box: min corner, then max corner (4 words each) */
 typedef struct EGSBox {

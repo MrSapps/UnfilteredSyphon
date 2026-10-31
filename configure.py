@@ -61,7 +61,10 @@ CC1 = f"{TOOLS}/compilers/gcc-2.7.2-psx/cc1"
 CPPFLAGS = "-P -undef -D__GNUC__=2 -Dmips -D__psx__ -DINCLUDE_ASM_USE_MACRO_INC=1 -Iinclude -Isrc"
 # -G is per module: the main exe uses $gp small data (-G8), overlays can't reach it (-G0).
 CFLAGS = "-quiet -O2 -G$gsize -mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -funsigned-char"
-MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G$gsize --expand-div"
+# --use-comm-section: uninitialised globals stay `.comm` so they resolve to the splat
+# .sbss/.bss definitions (psylink places commons after all objects, in hash order),
+# instead of maspsx allocating a private copy in the object (docs/data_migration.md).
+MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G$gsize --expand-div --use-comm-section"
 
 
 def write_main_ext_syms():

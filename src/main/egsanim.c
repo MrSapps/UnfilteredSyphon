@@ -1,11 +1,11 @@
 #include "common.h"
 #include "game.h"
 
-/* egsanim.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FF08)
-SDATA_LOCAL(masterAnimCount)
-SDATA_LOCAL(D_80110220)
-SDATA_LOCAL(D_80110224)
+/*
+ * This TU's data is defined below in original order (docs/data_migration.md):
+ * .data hmdMin, hmdMax; .sdata D_8010FF08, masterAnimCount; .sbss D_80110220/4.
+ * Keep the line count: ASSERT bakes __LINE__ into .text.
+ */
 
 #define MASTER_HMD 0x400000         /* model is an HMD; register it with the display */
 #define MASTER_NO_BOX 0x1000000     /* do not initialise the bounding box */
@@ -64,12 +64,12 @@ typedef struct EGSModelHeader {
     /* 0x10 */ s16 max[3];
 } EGSModelHeader;
 
-extern s16 D_8010FF08;       /* max number of master anims */
-extern s16 masterAnimCount;
-extern void **D_80110220;    /* model of each master anim */
-extern MasterAnim **D_80110224;
-extern EGSVec4 hmdMin;
-extern EGSVec4 hmdMax;
+static s16 D_8010FF08 = 200; /* max number of master anims */
+s16 masterAnimCount = -1;
+static void **D_80110220;    /* model of each master anim */
+static MasterAnim **D_80110224;
+EGSVec4 hmdMin = { -48, -100, -32, 0 };
+EGSVec4 hmdMax = { 48, 100, 128, 0 };
 
 void *EGSMemMalloc(u32 size);
 void EGSDisplayRegisterHMD(void *model);
@@ -282,4 +282,5 @@ s32 EGSAnimHMDLinkModel(EGSAnim *anim, void *model) {
     return 15;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/egsanim", gEGSMathIdentityMatrix);
+/* gEGSMathIdentityMatrix (0x8001378C) used to be included here; it is the start
+ * of egsmath.c's .rdata, assembled from a splat segment until egsmath is migrated. */

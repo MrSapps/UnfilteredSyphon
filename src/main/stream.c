@@ -2,20 +2,20 @@
 #include "game.h"
 #include "system.h"
 
-/* stream.c's small data, still assembled from asm */
-SDATA_LOCAL(gCurrentStreamReq)
-SDATA_LOCAL(gStreamReqListRun)
-SDATA_LOCAL(gStreamReqListPause)
-SDATA_LOCAL(gTerrainStreamPause)
-SDATA_LOCAL(gHogHeader)
-SDATA_LOCAL(gHogPos)
-SDATA_LOCAL(D_8010FA14)
-SDATA_LOCAL(D_8010FA18)
-SDATA_LOCAL(D_8010FA1C)
-SDATA_LOCAL(D_8010FA28)
-SDATA_LOCAL(D_8010FA2C)
-SDATA_LOCAL(D_8010FA30)
-SDATA_LOCAL(D_8010FA34)
+/* This TU's data, defined in original order (docs/data_migration.md). .sdata: */
+int cdInt = 0;
+EGSListNode *gCurrentStreamReq = (EGSListNode *)0xCACACACA;
+u8 gTerrainStreamPause = 0;
+static s32 D_8010FA14 = -1; /* sector of the last read started */
+static s32 D_8010FA18 = 0;  /* stalled tick counter */
+static s32 D_8010FA1C = 2;  /* system state at the last check */
+/* -G8 also puts the short string literals in .sdata, in order of first use:
+ * "WAIT %d", "CDERR", "CD DATA", "V", "T", "", "". */
+
+/* .data */
+s32 cdError[5] = { 0 }; /* status text shown while streaming */
+
+
 
 /* CD position / file descriptor (libcd) */
 typedef struct CdlLOC {
@@ -49,24 +49,24 @@ typedef struct StreamReq {
 #define CDL_SETLOC 2
 #define CDL_DISK_ERROR 5
 
-extern StreamReq gStreamReqs[STREAM_REQ_MAX];
-extern EGSListNode *gCurrentStreamReq;
-extern EGSListNode *gStreamReqListRun;   /* requests issued while running the game */
-extern EGSListNode *gStreamReqListPause; /* requests issued from other system states */
-extern u8 gTerrainStreamPause;
-extern void *gHogHeader;
-extern s32 gHogPos;
-extern s32 D_8010FA14; /* sector of the last read started */
-extern s32 D_8010FA18; /* stalled tick counter */
-extern s32 D_8010FA1C; /* system state at the last check */
-extern char D_8010FA20[]; /* "WAIT %d" (.sdata) */
-extern s32 D_8010FA28[]; /* "CDERR" (.sdata) */
-extern s32 D_8010FA30[]; /* "CD DATA" (.sdata) */
-extern char D_8010FA38[]; /* "V" (.sdata) */
-extern char D_8010FA3C[]; /* "T" (.sdata) */
-extern s32 cdError[]; /* status text shown while streaming */
+/*
+ * Uninitialised globals are commons: psylink appends them after every object's
+ * .sbss/.bss (in hash order), so they are not part of this TU's sections.  Small
+ * ones (<= 8 bytes) must still be tentatively defined here for aspsx to address
+ * them through $gp.
+ */
+EGSListNode *gStreamReqListRun;   /* requests issued while running the game */
+EGSListNode *gStreamReqListPause; /* requests issued from other system states */
+void *gHogHeader;
+s32 gHogPos;
+StreamReq gStreamReqs[STREAM_REQ_MAX];
+
+/* commons defined (and $gp-addressed) elsewhere */
 extern u8 cdResult[];
 extern void *gTextureCache;
+
+
+
 
 int CdControlF(u8 com, u8 *param);
 int CdControl(u8 com, u8 *param, u8 *result);
@@ -92,7 +92,7 @@ void FlushStreamReqList(EGSListNode **list);
 #define STREAM_LIST() (gSystemState == 0 ? &gStreamReqListRun : &gStreamReqListPause)
 #define STREAM_LIST_HEAD() (gSystemState != 0 ? gStreamReqListPause : gStreamReqListRun)
 
-INCLUDE_RODATA("asm/main/nonmatchings/stream", D_80012380);
+static const s32 D_80012380[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 void InitStreamRequests(void) {
     s32 i;
@@ -269,7 +269,7 @@ void CheckStreamRequests(u8 noStart) {
         if (gPlayerRadioFlag) {
             return;
         }
-        sprintf((char *)cdError, D_8010FA20, (D_8010FA18 >> 3) + 1);
+        sprintf((char *)cdError, "WAIT %d", (D_8010FA18 >> 3) + 1);
         if (++D_8010FA18 == 61) {
             SysStopXA();
             D_8010FA18 = 0;
@@ -315,7 +315,7 @@ void CheckStreamRequests(u8 noStart) {
             return;
         }
         if (syncResult == CDL_DISK_ERROR) {
-            __builtin_memcpy(cdError, D_8010FA28, 6); /* strcpy(cdError, "CDERR") */
+            __builtin_strcpy((char *)cdError, "CDERR");
             CdReset(0);
         }
         if (gCurrentStreamReq != NULL && ((StreamReq *)gCurrentStreamReq->data)->sync == 0) {
@@ -334,9 +334,9 @@ void CheckStreamRequests(u8 noStart) {
         }
         req = gCurrentStreamReq->data;
         if (req->callback == DataStreamCallback) {
-            __builtin_memcpy(cdError, D_8010FA30, 8); /* strcpy(cdError, "CD DATA") */
+            __builtin_strcpy((char *)cdError, "CD DATA");
         } else {
-            sprintf((char *)cdError, "CD %s%ld", req->callback == VramSwap ? D_8010FA38 : D_8010FA3C,
+            sprintf((char *)cdError, "CD %s%ld", req->callback == VramSwap ? "V" : "T",
                     req->arg & 0xFFF);
         }
         CdIntToPos(req->sector, &loc);
@@ -394,3 +394,8 @@ void FlushStreamRequests(s32 tag) {
         node = next;
     }
 }
+
+/* Two unreferenced 1-byte .sdata items follow "T" (orig 0x8010FA40/44) before
+ * text.c's data; that they are stream.c's (and statics) is a guess. */
+static char D_8010FA40[] = "";
+static char D_8010FA44[] = "";

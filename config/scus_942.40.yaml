@@ -88,6 +88,7 @@ segments:
       - [0x3F50, .rodata, egshmd]
       - [0x3F5C, .rodata, egsdev]
       - [0x3F80, .rodata, egsanim]
+      - [0x3F8C, rodata, egsmath_rdata]   # egsmath.c's .rdata head (gEGSMathIdentityMatrix)
       - [0x3FAC, .rodata, egsmath]
       - [0x3FFC, .rodata, egsdebug]
       - [0x403C, .rodata, egstex]
@@ -189,9 +190,27 @@ segments:
       - [0xEC894, asm, lib_card]
       - [0xECC94, asm, lib_pad2]
       - [0xED0E4, data, data]
+      - [0xF72D8, .data, stream]
+      - [0xF72EC, data, data_F72EC]
+      - [0xF8364, .data, egsanim]
+      - [0xF8384, data, data_F8384]
       - [0xFFE00, sdata, sdata]
+      - [0x100208, .sdata, stream]
+      - [0x100248, sdata, sdata_100248]
+      - [0x100708, .sdata, egsanim]
+      - [0x10070C, sdata, sdata_10070C]
+      - [0x100710, .sdata, egsdebug]
+      - [0x100720, .sdata, egstex]
+      - [0x100728, sdata, sdata_100728]
+      - [0x100738, .sdata, egsmisc]
+      - [0x100740, sdata, sdata_100740]
       - { start: 0x100768, type: sbss, vram: 0x8010FF68, name: sbss }
+      - { type: .sbss, vram: 0x80110220, name: egsanim }
+      - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
       - { type: bss, vram: 0x801104A0, name: bss }
+      - { type: .bss, vram: 0x80122A38, name: egstex }
+      - { type: .bss, vram: 0x80122C90, name: egsmisc }
+      - { type: bss, vram: 0x80125210, name: bss_80125210 }
 
   - name: bss_pad
     type: pad

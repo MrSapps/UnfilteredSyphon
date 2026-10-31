@@ -1,8 +1,6 @@
 #include "common.h"
 #include "game.h"
-
-SDATA_LOCAL(D_8010FF20)
-SDATA_LOCAL(D_8010FF24)
+/* Data below in original order: .sdata D_8010FF20/24, .bss D_80122A38 (keep line count: __LINE__) */
 
 /* libgs / libgpu types */
 typedef struct {
@@ -50,9 +48,11 @@ typedef struct {
     /* 0x28 */ s32 unk28;
 } EGSTexture;
 
-extern VramSlot *D_8010FF20; /* list of used VRAM slots */
-extern s16 D_8010FF24;       /* number of slots allocated from the pool */
-extern VramSlot D_80122A38[];
+#define VRAM_SLOT_MAX 50
+
+static VramSlot *D_8010FF20 = NULL; /* .sdata: list of used VRAM slots */
+static s16 D_8010FF24 = 0;          /* .sdata: number of slots allocated from the pool */
+static VramSlot D_80122A38[VRAM_SLOT_MAX]; /* .bss */
 typedef struct {
     s16 x, y;
 } ScreenPos;
@@ -100,7 +100,7 @@ s32 EGSTextureCreateAnimated(EGSTexture *tex, RECT *pos) {
             } else if (slot->next == NULL) {
                 newSlot = &D_80122A38[D_8010FF24++];
 #line 158
-                ASSERT(D_8010FF24 < 50);
+                ASSERT(D_8010FF24 < VRAM_SLOT_MAX);
                 if (newSlot != NULL) {
                     newSlot->x = pos->x;
                     newSlot->y = pos->y;
@@ -117,7 +117,7 @@ s32 EGSTextureCreateAnimated(EGSTexture *tex, RECT *pos) {
     } else {
         newSlot = &D_80122A38[D_8010FF24++];
 #line 182
-        ASSERT(D_8010FF24 < 50);
+        ASSERT(D_8010FF24 < VRAM_SLOT_MAX);
         if (newSlot != NULL) {
             newSlot->x = pos->x;
             newSlot->y = pos->y;

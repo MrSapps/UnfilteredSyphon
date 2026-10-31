@@ -1,11 +1,8 @@
 #include "common.h"
 
-SDATA_LOCAL(D_8010FF10)
-SDATA_LOCAL(D_8010FF14)
-
-extern u8 D_8010FF10;             /* debug output level */
-extern void (*D_8010FF14)(void);  /* assert callback */
-extern char D_8010FF18[];         /* "\t%s\n" (.sdata) */
+/* .sdata (explicitly zero-initialised: cc1 2.7.2 keeps "= 0" out of .sbss) */
+static u8 D_8010FF10 = 0;               /* debug output level */
+static void (*D_8010FF14)(void) = NULL; /* assert callback */
 
 void printf();
 
@@ -35,7 +32,7 @@ void EGSDebugAssertCallback(void (*callback)(void)) {
 void DoAssertPrint(char *msg) {
     printf("Assertion Failed in file %s on line %d:\n");
     if (msg != NULL) {
-        printf(D_8010FF18, msg);
+        printf("\t%s\n", msg); /* -G8: this 5-byte literal lands in .sdata */
     }
 }
 
@@ -46,7 +43,7 @@ int EGSDebugAssert(u8 halt, char *msg, char *file, int line) {
             __asm__ volatile("");
             printf("Assertion Failed in file %s on line %d:\n", file, line);
             if (msg != NULL) {
-                printf(D_8010FF18, msg);
+                printf("\t%s\n", msg); /* -G8: this 5-byte literal lands in .sdata */
             }
             printf("Program Halted!\n");
         }
@@ -60,7 +57,7 @@ int EGSDebugAssert(u8 halt, char *msg, char *file, int line) {
         __asm__ volatile("");
         printf("Assertion Failed in file %s on line %d:\n", file, line);
         if (msg != NULL) {
-            printf(D_8010FF18, msg);
+            printf("\t%s\n", msg); /* -G8: this 5-byte literal lands in .sdata */
         }
     }
 }
