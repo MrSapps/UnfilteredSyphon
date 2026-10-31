@@ -71,12 +71,12 @@ typedef struct Particle {
 #define PARTICLE_DRAW_NONE 5
 
 /*
- * .sbss (0x80110030..0x80110118). Every slot is 4 bytes apart whatever its size: the
- * original assembler gave each .lcomm word alignment (aspsx 2.56 does this, 2.77 packs
- * by size; docs/data_migration.md). The modern build runs maspsx with the 2.7x packed
- * layout, so it gets explicit padding statics instead.
+ * .sbss (0x80110030..0x80110118): every slot is 4 apart whatever its size. The original
+ * assembler word-aligned each .lcomm (as aspsx 2.56 does); 2.77 and maspsx pack by size.
+ * The u8/s16 slots must stay scalars (cc1 reloads array elements and struct members), so
+ * padding statics fill the gaps; define LCOMM_WORD for a word-aligning aspsx (2.56).
  */
-#ifdef _PSYQ
+#ifdef LCOMM_WORD
 #define SBSS_PAD1(n)
 #define SBSS_PAD2(n)
 #define SBSS_PAD3(n)
@@ -153,8 +153,8 @@ u8 particleFireWaveFlag;
 #line 147
 
 
-extern VECTOR32 D_80012000; /* {0, 0, 0} */
-extern VECTOR32 D_80012010; /* {0, 0x1000, 0} */
+static const VECTOR32 D_80012000; /* {0, 0, 0}: defined below */
+static const VECTOR32 D_80012010; /* {0, 0x1000, 0} */
 extern VECTOR32 D_80012030; /* {7, 7, 7} */
 extern VECTOR32 D_80012050; /* {0x3FF, 0x1FF, 0x3FF} */
 
@@ -1396,9 +1396,9 @@ void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleTracer);
 #endif
 
-INCLUDE_RODATA("asm/main/nonmatchings/particle", D_80012000);
+static const VECTOR32 D_80012000 = { 0, 0, 0, 0 };
 
-INCLUDE_RODATA("asm/main/nonmatchings/particle", D_80012010);
+static const VECTOR32 D_80012010 = { 0, 0x1000, 0, 0 };
 
 #define BONE_LEFT_FOOT 1
 #define BONE_RIGHT_FOOT 7

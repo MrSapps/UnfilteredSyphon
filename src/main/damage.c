@@ -4,12 +4,12 @@
 #include "gobj.h"
 #include "egsmath.h"
 
-/* damage.c's small data, still assembled from asm */
-/* (the rest of this TU's data is defined in C, docs/data_migration.md; the two u8 at
- * 0x80110180/4 sit 4 bytes apart, which no aspsx .lcomm layout gives, and npc.c
- * uses them too, so they stay in the splat .sbss blob for now) */
-SDATA_LOCAL(D_80110180)
-SDATA_LOCAL(D_80110184)
+/* damage.c's data is all defined in C (docs/data_migration.md). The two u8 at
+ * 0x80110180/4 sit 4 bytes apart: the original's assembler word-aligned every .lcomm,
+ * aspsx 2.77 packs them by size, so they are declared as 4-byte arrays. npc.c's last
+ * function (func_80066714) uses them too: it is most likely the start of damage.c
+ * (the vars are not in siphon.map, so they were static).
+ */
 
 typedef void (*DamageCallback)(s16 id, s16 by);
 
@@ -20,8 +20,9 @@ static s32 D_80110178; /* cos 65 deg: front/back limits */
 static s32 D_8011017C;
 #ifndef _PSYQ
 /* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes one of its own arrays from these
- * folded addresses, so the labels have to stay visible to it */
-__asm__(".globl D_80110170\n.globl D_80110178\n");
+ * folded addresses, so the labels have to stay visible to it; npc.c's
+ * func_80066714 (see above) reaches D_80110180/4 through SDATA_LOCAL */
+__asm__(".globl D_80110170\n.globl D_80110178\n.globl D_80110180\n.globl D_80110184\n");
 #endif
 /* .data; the unreferenced list before the body bones is taken as this file's (it is
  * a bone list like the others) */
@@ -67,8 +68,8 @@ void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist
 static DamageCallback D_8010F980 = NULL; /* .sdata: damaged callback */
 static DamageCallback D_8010F984 = NULL; /* destroyed callback */
 static u8 D_8010F988 = 1; /* bone angle limits not yet computed */
-extern u8 D_80110180; /* first pending damage packet, DAMAGE_PACKET_NONE for none */
-extern u8 D_80110184;
+static u8 D_80110180[4]; /* [0]: first pending damage packet, DAMAGE_PACKET_NONE for none */
+static u8 D_80110184[4]; /* [0]: next damage packet to try */
 extern void *gBodyArmorHitMsg;
 extern void *D_801077F4; /* flak jacket hit message for level 4 */
 
@@ -201,7 +202,7 @@ void DamagePacketUpdate(void) {
     s32 i;
     s32 prev = DAMAGE_PACKET_NONE;
 
-    for (i = D_80110180; i != DAMAGE_PACKET_NONE; i = packet->next) {
+    for (i = D_80110180[0]; i != DAMAGE_PACKET_NONE; i = packet->next) {
         packet = &D_8011E8E8[i];
         if (--packet->delay == 0) {
             pos.vx = packet->x;
@@ -657,8 +658,8 @@ DamageCallback DamageSetDestroyedCallback(DamageCallback cb) {
 void DamageInit(void) {
     D_8010F980 = NULL;
     D_8010F984 = NULL;
-    D_80110184 = 0;
-    D_80110180 = 0x10;
+    D_80110184[0] = 0;
+    D_80110180[0] = 0x10;
 }
 
 void DamageShowFlakJacketMsg(id)

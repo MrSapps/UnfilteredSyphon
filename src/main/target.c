@@ -18,6 +18,7 @@ static u8 D_8010F821 = 0; /* target release pending */
 static u8 D_8010F822 = 0; /* re-acquire requested while already in target mode */
 static s32 D_8010F824 = 0;
 /* .sbss */
+static s32 D_8010FFD8; /* player: last "moving" bit (func_80031E10) */
 static u16 D_8010FFDC; /* "no target" status message id */
 /* .data: targeting profiles for kinds 1..3, 0x36 bytes each */
 static s16 D_801055DC[3][0x1B] = {
@@ -184,6 +185,314 @@ int func_800333F8(GameObjectRuntime *rt);
 void func_800323C4(TargetInfo *target);
 void TextRemoveString(u16 str);
 static u8 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, VECTOR32 *normal);
+
+/*
+ * Target scoring actions (target->actions[], set by TargetInitGobj) and the reset.
+ * They follow sniper.c's code, but target.c's .sbss starts with D_8010FFD8, which
+ * func_80031E10 uses, and psylink starts every .sbss contribution 8-aligned.
+ */
+/* Targeting profile (TargetInfo.profile) */
+typedef struct SniperTargetProfile {
+    /* 0x00 */ s16 range;
+    /* 0x02 */ u8 unk02[6];
+    /* 0x08 */ u16 aimStep;
+    /* 0x0A */ s16 aimMax;
+    /* 0x0C */ s16 aimTime;
+    /* 0x0E */ u8 unk0E[6];
+    /* 0x14 */ s16 holdStep;
+    /* 0x16 */ s16 holdMax;
+    /* 0x18 */ u8 unk18[2];
+    /* 0x1A */ s16 moveMax;
+    /* 0x1C */ u8 unk1C[4];
+    /* 0x20 */ u16 unk20;
+    /* 0x22 */ u16 unk22;
+    /* 0x24 */ u8 unk24[4];
+    /* 0x28 */ u16 moveIdle;
+    /* 0x2A */ u8 unk2A[2];
+    /* 0x2C */ u16 unk2C;
+} SniperTargetProfile;
+
+/* The parts of TargetInfo used here */
+typedef struct SniperTarget {
+    /* 0x00 */ s16 targetId;
+    /* 0x02 */ u8 unk02[2];
+    /* 0x04 */ u32 flags;
+    /* 0x08 */ u8 unk08[0x28];
+    /* 0x30 */ SniperTargetProfile *profile;
+    /* 0x34 */ s16 rangeScore;
+    /* 0x36 */ s16 facing;     /* how directly the target faces us (NPC aimers) */
+    /* 0x38 */ s16 angleScore; /* player: bonus for aiming straight at the target */
+    /* 0x3A */ u8 unk3A[2];
+    /* 0x3C */ s16 aim;
+    /* 0x3E */ u8 unk3E[2];
+    /* 0x40 */ s16 hold;
+    /* 0x42 */ s16 move;
+    /* 0x44 */ s16 unk44;
+    /* 0x46 */ u8 unk46[2];
+    /* 0x48 */ s16 unk48;
+    /* 0x4A */ u8 unk4A[0xE];
+    /* 0x58 */ s16 unk58;
+    /* 0x5A */ u8 unk5A[0x4A];
+    /* 0xA4 */ s32 moveTick;
+    /* 0xA8 */ u8 unkA8[0x14];
+    /* 0xBC */ s16 aimId;
+    /* 0xBE */ u8 unkBE[2];
+    /* 0xC0 */ u32 aimTick;
+    /* 0xC4 */ u32 aimPrevTick;
+    /* 0xC8 */ u8 aimCount; /* signed */
+    /* 0xC9 */ u8 unkC9[3];
+    /* 0xCC */ s32 startTick;
+} SniperTarget;
+
+typedef struct SniperNPC {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ u32 flags;
+    /* 0x24 */ u8 unk24[4];
+    /* 0x28 */ s16 dist;
+} SniperNPC;
+
+/* MoveInfo as used here */
+typedef struct SniperMove {
+    /* 0x00 */ VECTOR32 pos;
+    /* 0x10 */ VECTOR32 unk10;
+    /* 0x20 */ VECTOR32 head;
+} SniperMove;
+
+typedef struct SniperFrame {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+} SniperFrame;
+
+typedef struct SniperAnimFrame {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ SniperFrame *frame;
+} SniperAnimFrame;
+
+/* GameObjectInfo +0x24 as read here */
+typedef struct ActObjInfo {
+    /* 0x00 */ u8 unk00[0x24];
+    /* 0x24 */ union {
+        u8 weapon; /* explicit weapon, 0 for none */
+        u32 flags; /* 0x3000: default weapon kind */
+    } w;
+    /* 0x28 */ u8 unk28[0x24];
+} ActObjInfo; /* size 0x4C */
+#define ACT_INFO_W(id) (((ActObjInfo *)&gameObjectsInfo[id])->w)
+#define ACT_WEAPON(id)                                                                       \
+    ((id) != gPlayerOffset                                                                   \
+         ? (ACT_INFO_W(id).weapon ? ACT_INFO_W(id).weapon                                    \
+            : (ACT_INFO_W(id).flags & 0x3000) == 0x1000 ? 19                                 \
+            : (ACT_INFO_W(id).flags & 0x3000) == 0x2000 ? 20                                 \
+                                                        : 0)                                 \
+         : gCurrentWeapon)
+
+extern u8 gPlayerRadioFlag;
+void NPCPickAimer(s16 id, s32 angle);
+void EGSGeometry_GetFuzzyXZDistancePoint2Point(void *a, void *b, s32 *dist);
+
+void func_80031AEC(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    GameObjectRuntime *other = gameObjectsInfo[target->targetId].runtime;
+    s32 dist;
+
+    if (rt->npcState == 2 && other->id == gPlayerOffset) {
+        dist = ((SniperNPC *)rt->npc)->dist;
+    } else if (other->npcState == 2 && rt->id == gPlayerOffset) {
+        dist = ((SniperNPC *)other->npc)->dist;
+    } else {
+        EGSGeometry_GetFuzzyXZDistancePoint2Point(rt->move, other->move, &dist);
+    }
+    target->rangeScore = (target->profile->range - dist) >> 5;
+}
+
+void func_80031BDC(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    GameObjectRuntime *other = gameObjectsInfo[target->targetId].runtime;
+    if (rt->id == gPlayerOffset) {
+        if ((rt->cas->flags & 0x100002) == 0x100002) {
+            target->unk48 = target->profile->unk2C;
+        }
+    } else if (other->cas->active == 2) {
+        target->unk48 = target->profile->unk2C;
+    }
+}
+
+static inline u32 TargetMoving(SniperTarget *target) {
+    return target->flags & 2;
+}
+
+void func_80031C70(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    s32 moving = 0;
+    u32 time;
+
+    if (rt->id == gPlayerOffset) {
+        moving = TargetMoving(target) != 0;
+    } else if ((target->flags & 2) && (((SniperNPC *)rt->npc)->flags & 0x100)) {
+        moving = 1;
+    }
+    if (moving) {
+        if (rt->id != gPlayerOffset) {
+            if (target->moveTick == 0) {
+                target->moveTick = gExeTick;
+            }
+            time = (u32)(gExeTick - target->moveTick) >> 2;
+            if (time > 100) {
+                time = 100;
+            }
+            if (GOBJ_TYPE(rt->id) != 2) {
+                target->move = *(s16 *)(gLevData + 0x4C) * time;
+            } else {
+                target->move = time * 10;
+            }
+            if (target->profile->moveMax < target->move) {
+                target->move = target->profile->moveMax;
+            }
+        }
+    } else {
+        target->move = target->profile->moveIdle;
+        target->moveTick = 0;
+    }
+}
+
+void func_80031E10(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    GameObjectRuntime *other = gameObjectsInfo[target->targetId].runtime;
+    u32 flags;
+    u32 bit;
+    u32 time;
+
+    if (rt->id == gPlayerOffset) {
+        flags = rt->cas->flags;
+        bit = (flags & 0x100000) != 0;
+        if (!(flags & 2) || bit != D_8010FFD8 || (flags & 0x1001400)) {
+            D_8010FFD8 = bit;
+            target->startTick = gExeTick;
+        }
+        time = (u32)(gExeTick - target->startTick) >> 2;
+        if (time > 100) {
+            time = 100;
+        }
+        target->hold = target->profile->holdStep * time;
+        if (target->profile->holdMax < target->hold) {
+            target->hold = target->profile->holdMax;
+        }
+    } else {
+        u32 otherFlags = other->cas->flags;
+
+        if (otherFlags & 0x400) {
+            target->unk44 = target->profile->unk22;
+        } else if (otherFlags & 8) {
+            target->unk44 = target->profile->unk20;
+        }
+    }
+}
+
+void func_80031F6C(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    GameObjectRuntime *other = gameObjectsInfo[target->targetId].runtime;
+    VECTOR32 otherPos;
+    VECTOR32 myPos;
+    VECTOR32 diff;
+    VECTOR32 fwd;
+    SniperFrame *frame;
+    s32 heading;
+    s32 bearing;
+    s32 angle;
+    s32 score = 0;
+
+    frame = ((SniperAnimFrame *)rt->anim)->frame;
+    myPos = ((SniperMove *)rt->move)->pos;
+    otherPos = ((SniperMove *)other->move)->pos;
+    fwd.vx = frame->m[0][2];
+    fwd.vy = frame->m[1][2];
+    fwd.vz = frame->m[2][2];
+    fwd.vy = -fwd.vy;
+    heading = ratan2(fwd.vz, fwd.vx);
+    diff.vz = otherPos.vz - myPos.vz;
+    diff.vx = otherPos.vx - myPos.vx;
+    diff.vy = otherPos.vy - myPos.vy;
+    bearing = ratan2(diff.vz, diff.vx);
+    angle = heading - bearing;
+    if (angle < 0) {
+        angle += 0x1000;
+    }
+    if (angle > 0x800) {
+        angle = 0x1000 - angle;
+    }
+    if (rt->npcState == 2) {
+        NPCPickAimer(rt->id, angle);
+    }
+    if (rt->id == gPlayerOffset) {
+        if (angle < 0x71) {
+            score = (0x71 - angle) >> 1;
+        } else if (angle > 0x400) {
+            score = (0x400 - angle) >> 5;
+        }
+        if (WEAPON_KIND(ACT_WEAPON(rt->id)) == 2 && angle > 0x4B0) {
+            score = -3000;
+        }
+        target->angleScore = score;
+    } else if (gPlayerRadioFlag && other->id == gPlayerOffset) {
+        target->facing = -5000;
+    } else if (other->cas->flags & 8) {
+        VECTOR32 b;
+        VECTOR32 a;
+        VECTOR32 d;
+
+        a = ((SniperMove *)other->move)->head;
+        b = ((SniperMove *)rt->move)->head;
+        d.vz = a.vz - b.vz;
+        d.vx = a.vx - b.vx;
+        d.vy = a.vy - b.vy;
+        angle = bearing - ratan2(d.vz, d.vx);
+        if (angle < 0) {
+            angle += 0x1000;
+        }
+        if (angle > 0x800) {
+            angle = 0x1000 - angle;
+        }
+        if (angle > 0x400) {
+            angle = 0x800 - angle;
+        }
+        score = -((angle * 120) >> 11);
+        target->facing = score;
+    } else {
+        target->facing = 0;
+    }
+}
+
+void func_80032304(GameObjectRuntime *rt) {
+    SniperTarget *target = (SniperTarget *)rt->target;
+    SniperTargetProfile *profile = target->profile;
+    s32 time = profile->aimTime;
+
+    if (target->aimId == target->targetId && (u32)(gExeTick - target->aimTick) <= time &&
+        target->aimTick - target->aimPrevTick <= time) {
+        target->aim = (s16)profile->aimStep * (s8)target->aimCount;
+        if (target->profile->aimMax < target->aim) {
+            target->aim = target->profile->aimMax;
+        }
+        return;
+    }
+    target->aimId = -1;
+    target->aimCount = 0;
+    target->aimPrevTick = 0;
+    target->aimTick = 0;
+    target->aim = 0;
+}
+
+void func_800323C4(TargetInfo *info) {
+    SniperTarget *target = (SniperTarget *)info;
+
+    target->startTick = gExeTick;
+    target->aimId = -1;
+    target->aimCount = 0;
+    target->aimPrevTick = 0;
+    target->aimTick = 0;
+    target->unk58 = 0;
+}
 
 /* Recompute the chance (target->unk58) that a gobj hits its target. */
 void TargetCalcProb(s32 id) {

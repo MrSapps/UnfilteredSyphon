@@ -490,7 +490,7 @@ count:
 __asm__(
         ".set D_8010521D, D_8010521C+0x1\n"
         ".set D_80105220, D_8010521C+0x4\n"
-        ".set D_80115670, D_80115634+0x3C\n");
+        ".set D_80115670, D_80115638+0x38\n");
 #endif
 INCLUDE_ASM("asm/main/nonmatchings/cas", CASInit);
 #endif
@@ -522,19 +522,15 @@ typedef struct CASHipMotion {
     s8 x, y, z, pad;
 } CASHipMotion;
 
-/* .bss: one object, since aspsx would 16-align a separate .lcomm for the flags at +0x3C */
-static struct {
-    CASHipMotion hip[15]; /* generated hip motion (default anim) */
+/* .bss: one object, since aspsx would 16-align a separate .lcomm for the flags at +0x38.
+ * It starts at 0x80115638 (psylink starts each .bss contribution 8-aligned; 0x80115634
+ * is the previous object's padding, reached as hip[frame - 1] with frame >= 1). */
+typedef struct CASHipTable {
+    CASHipMotion hip[14]; /* generated hip motion (default anim), frames 1..14 */
     u8 queued[0x68];      /* per-action "already queued this frame" flags */
-} D_80115634;
-#ifdef _PSYQ
-#define D_80115638 (&D_80115634.hip[1]) /* FIXME: the original's code addresses a separate symbol */
-#else
-/* cc1 only gives the original's per-store addressing for a symbol of its own: alias it */
-extern CASHipMotion D_80115638[14];
-__asm__(".set D_80115638, D_80115634+0x4\n");
-#endif
-#define D_80115670 (D_80115634.queued)
+} CASHipTable;
+static CASHipTable D_80115638;
+#define D_80115670 (D_80115638.queued)
 
 typedef struct CASModelExt {
     /* 0x000 */ u8 unk000[0x164];
@@ -600,13 +596,13 @@ CASHipMotion *CASGetHipMotion(s32 id) {
                     if (D_8010F7C4 != 0) {
                         for (i = 0; i < 14; i++) {
                             t = (i + 1) * 4096;
-                            D_80115638[i].x = rcos(t / 14) / 4096;
-                            D_80115638[i].y = 0x62 - rcos(t / 7) / 2048;
-                            D_80115638[i].z = 0x19 - rcos(t / 7) / 1024;
+                            D_80115638.hip[i].x = rcos(t / 14) / 4096;
+                            D_80115638.hip[i].y = 0x62 - rcos(t / 7) / 2048;
+                            D_80115638.hip[i].z = 0x19 - rcos(t / 7) / 1024;
                         }
                         D_8010F7C4 = 0;
                     }
-                    return &D_80115634.hip[frame];
+                    return &D_80115638.hip[frame - 1];
                 }
             }
             if (frame == 1 && ha->unk2C == 0) {

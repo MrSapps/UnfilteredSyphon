@@ -59,26 +59,22 @@ typedef struct Controller {
 #define PAD_START 11
 
 /*
- * .sbss/.bss stay in the splat blobs for now: every item is 4-aligned and 4-padded
- * (vibration u8[2] at 0x80110200, u8 at ...204, s16 at ...208/...20C; 0x1E0-byte
- * gControllers at 0x80122684), which no .lcomm layout of aspsx 2.77 reproduces
- * (it aligns each .lcomm to its size rounded up to a power of two, max 16).
+ * .sbss/.bss: every item is 4-aligned and 4-padded. The original's assembler
+ * word-aligned every .lcomm; aspsx 2.77 (and maspsx) align by size, so the small
+ * ones are padded to a word here and the .bss is laid out as one block (below).
  */
-SDATA_LOCAL(D_80110200)
-SDATA_LOCAL(D_80110204)
-SDATA_LOCAL(D_80110208)
-SDATA_LOCAL(D_8011020C)
-SDATA_LOCAL(D_80110214)
-SDATA_LOCAL(D_80110218)
-SDATA_LOCAL(D_8011021C)
-extern u8 D_80110200[];        /* vibration motor levels */
-extern u8 D_80110204;           /* controllers started */
-extern s16 D_80110208;          /* screen width */
-extern s16 D_8011020C;          /* screen height */
-extern volatile s32 D_80110214; /* system tick, counted in the VSync IRQ */
-extern Callback *D_80110218;    /* active callbacks */
-extern u8 D_8011021C;
-extern u8 D_80122678[];         /* crash screen DR_MODE */
+static u8 D_80110200[4];        /* vibration motor levels ([2] used) */
+static u8 D_80110204[4];        /* [0]: controllers started */
+#define D_80110204 (D_80110204[0])
+static s16 D_80110208[2];       /* [0]: screen width */
+#define D_80110208 (D_80110208[0])
+static s16 D_8011020C[2];       /* [0]: screen height */
+#define D_8011020C (D_8011020C[0])
+static s32 D_80110210;          /* unreferenced */
+static volatile s32 D_80110214; /* system tick, counted in the VSync IRQ */
+static Callback *D_80110218;    /* active callbacks */
+static u8 D_8011021C;
+extern u8 D_80122678[];         /* .bss block: crash screen DR_MODE, then: */
 extern Controller gControllers[8];
 extern u8 D_80122864[2][0x22];  /* raw PadInitDirect buffers, one per port */
 extern s32 D_801228A8[100];     /* frame times */
@@ -164,6 +160,17 @@ Callback *FindFreeCallback(void) {
     }
     return NULL;
 }
+
+/* .bss, laid out by hand: a separate .lcomm per array would be 16-aligned */
+#ifdef _PSYQ
+__asm__("\t.bss\nD_80122678:\t.space\t12\ngControllers:\t.space\t480\n"
+        "D_80122864:\t.space\t68\nD_801228A8:\t.space\t400\n\t.text");
+#else
+static u8 D_80122678[0x3C0];
+__asm__(".set gControllers, D_80122678+0xC\n"
+        ".set D_80122864, D_80122678+0x1EC\n"
+        ".set D_801228A8, D_80122678+0x230\n");
+#endif
 
 void EGSDeviceRender(void) {
     volatile s32 *tick;

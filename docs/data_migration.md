@@ -95,10 +95,21 @@ so a TU's data has to come from that TU's object.
   The modern build still runs maspsx with `--aspsx-version=2.79` (power-of-two
   layout). Until maspsx is switched to word `.lcomm` alignment (`LcommAlignment.WORD`;
   maspsx maps every version below 2.8 to `NONE`, which is wrong for 2.56), a TU with such
-  slots pads them for the modern build only. particle.c does this with
-  `SBSS_PAD1/2/3(name)` macros that expand to nothing under `_PSYQ`. The other cases
-  (damage 0x80110180/4, egsdev `.sbss`/`.bss`, cobj's object at 0x8011EBAC) are probably
-  solvable the same way, but nobody has tried yet.
+  slots needs a C form that gives the word layout under 2.77/maspsx too
+  (`psyq_check_tu.py` uses 2.77). What works (2026-10-31):
+  * **Padding statics** (particle.c `SBSS_PAD1/2/3`, now in both builds; define
+    `LCOMM_WORD` to drop them for a word-aligning aspsx). The slot keeps its scalar type.
+    A scalar matters: cc1 2.7.2 keeps a non-aggregate static in a register across
+    stores through pointers, but reloads an array element or struct member after each
+    one (particle's `ParticleTaserGetDestination` re-reads `D_801100E4` otherwise).
+  * **Word-sized arrays** behind a `#define x (x[0])` (egsdev `D_80110204`, `D_80110208`,
+    damage `D_80110180/4`), where no such reload difference shows up.
+  * **One block for `.bss` arrays.** A struct whose first member is at offset 0
+    (cas.c `D_80115638`), or, when the other symbols are indexed in loops, a hand-laid
+    block: under `_PSYQ`, `__asm__("\t.bss\nsym:\t.space\tN\n...\t.text")` placed
+    after a function (aspsx has no equates, `.set x,y` or `x = y`), and in the modern
+    build a static array plus `.set` aliases (egsdev `D_80122678`/`gControllers`/...).
+  cobj's object at 0x8011EBAC has not been tried yet.
 * **Blob pieces start where the linker puts them.** An object's section is only
   4-aligned in the final image, so the blob piece after a dotted entry starts at the
   C section's end (damage `.bss` ends at 0x8011EB04, the next piece is
@@ -134,9 +145,15 @@ so a TU's data has to come from that TU's object.
   `gGabeAnimFiles`). cc1 shares identical literals within a file, so a table that
   points at an earlier literal (weapon's `""`) needs that literal as a named array.
 * **An array at an offset inside a migrated object.** Where C indexed a splat label
-  inside another object (cas.c's `D_80115638` = hip table + 4), neither
-  `&s.hip[1]` nor `s.hip[i + 1]` gives the original's per-store `sym($reg)`
-  addressing; cas.c keeps `extern` + `.set` for the modern build (FIXME under `_PSYQ`).
+  inside another object, neither `&s.a[1]` nor `s.a[i + 1]` gives the original's
+  per-store `sym($reg)` addressing. Check the boundary first: cas.c's "hip table + 4"
+  was really the start of cas's `.bss` (0x80115638), with 0x80115634 only reached as
+  `hip[frame - 1]` (see the 8-alignment rule below).
+* **`.sbss`/`.bss` contributions start 8-aligned** (docs/psyq_build.md, psylink).
+  `gen_psylink.py` warns when a C object's `.sbss`/`.bss` yaml start isn't. Both cases
+  found were wrong boundaries: target's `.sbss` starts at 0x8010FFD8 because
+  func_80031AEC..func_800323C4 (the target scoring actions, previously in sniper.c)
+  are target.c's; cas's `.bss` starts at 0x80115638.
   Plain field symbols are different: joystick.c's `D_801056CC` etc. became
   `#define D_801056CC (D_801056C8.mode)` with identical code.
 * **Don't retype another TU's extern to reach a migrated struct.** movement.c reads
@@ -250,12 +267,12 @@ has its own `_PSYQ` variant of the one GAS macro it used.
 | egsmem   | .sdata                              | OK          | data OK (EGSMemInit asm) |
 | egsfile  | .sdata .bss                         | OK          | data OK (EGSFileOpenFog asm) |
 | egshog   | .rdata .text .sdata                 | OK          | OK |
-| egsdev   | .rdata .data .sdata (not .sbss/.bss) | OK         | data OK (EmergencyPrintNum asm) |
+| egsdev   | .rdata .data .sdata .sbss .bss      | OK          | OK |
 | egshmd   | .data .sdata + gInfraredColor common | OK         | data OK (2 asm functions) |
 | collision| .rdata .bss                         | OK          | data OK (2 asm functions) |
 | shadow   | .rdata + mShadowRequestList common  | OK          | .rdata short until its asm functions are C |
 | save     | .rdata .sdata .bss                  | OK          | data OK (SaveRestoreContinue asm) |
-| damage   | .rdata .data .sdata .sbss .bss (not 0x80110180/4) | OK | data OK (2 asm functions) |
+| damage   | .rdata .data .sdata .sbss .bss      | OK          | OK (npc.c's last function func_80066714 uses its static 0x80110180/4: probably damage.c's) |
 | main     | .sdata                              | OK          | data OK (asm MainLoop) |
 | system   | .data .sdata .sbss .bss + commons   | OK          | data OK (asm functions) |
 | game     | .rdata .text .data .sdata .bss      | OK          | OK with a `_PSYQ` scratch.h (see below) |
@@ -265,13 +282,13 @@ has its own `_PSYQ` variant of the one GAS macro it used.
 | playcas  | .rdata .text .data                  | OK          | OK |
 | sprite   | .rdata .text .data .sdata (.bss still in the blob) | OK | OK |
 | movement | .sdata                              | OK          | data OK (asm functions) |
-| cas      | .rdata .data .sdata .sbss .bss      | OK          | data OK (asm functions) |
-| object   | .rdata .data .sdata .sbss           | OK          | data + .rdata OK (asm functions) |
-| sniper   | .rdata .data .sdata .sbss .bss (not 0x80115754-60) | OK | data OK (SniperShoot asm) |
-| target   | .rdata .data .sdata .sbss           | OK          | data + .rdata OK (TargetViewConeCheck asm) |
-| joystick | .rdata .data .sdata .sbss (not 0x8010FFE4) | OK    | data + .rdata OK (asm functions) |
-| weapon   | .rdata .data .sdata .sbss (.bss still in the blob) | OK | data + .rdata OK (asm functions) |
-| player   | .rdata .data .sdata .sbss + commons (.bss still in the blob) | OK | data OK; .rdata short by PLAYERObjDispatch's jump table (asm) |
+| cas      | .rdata .data .sdata .sbss .bss      | OK          | OK |
+| object   | .rdata .data .sdata .sbss           | OK          | OK |
+| sniper   | .rdata .data .sdata .sbss .bss (not 0x80115754-60) | OK | OK |
+| target   | .rdata .data .sdata .sbss           | OK          | OK |
+| joystick | .rdata .data .sdata .sbss (not 0x8010FFE4) | OK    | OK |
+| weapon   | .rdata .data .sdata .sbss (.bss still in the blob) | OK | OK |
+| player   | .rdata .data .sdata .sbss + commons (.bss still in the blob) | OK | OK |
 
 path and los have no data of their own (los only reaches commons).
 
@@ -288,3 +305,4 @@ game.c matches in every section.
 | snddrv   | .data .sdata .sbss .bss + 2 commons (0x8010FD20 left in the blob) | OK | data OK; 5 asm functions |
 | egsdisp  | .data .sdata .bss + 13 commons (gLRTick at 0x8010FDA0 left in the blob) | OK | data OK; gHADoneCallback (egshmd's .sdata) gets a tentative definition so it stays $gp |
 | strings  | .rdata .data .sdata .bss (message table rebuilt from C initialisers) | OK | .rdata .data .sdata .bss OK (aspsx 2.56 and 2.77); StringContactMeiXingMsg asm |
+| particle | .rdata .data .sdata .sbss .bss + 5 commons (3 INCLUDE_RODATA blobs left) | OK | OK (aspsx doesn't auto-align `.word`: a blob after the 13-byte `__FILE__` landed unaligned, so D_80012000/10 are C consts) |

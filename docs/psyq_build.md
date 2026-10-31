@@ -88,13 +88,16 @@ How it works:
 
 Status as of 2026-10-31:
 
-* **Main exe.** `psyq_check_tu.py` reports 27 of the 51 main TUs OK in every section:
+* **Main exe.** `psyq_check_tu.py` reports 37 of the 51 main TUs OK in every section:
   main system game level camera physics path playcas sprite los movement collision
   gtegeo animate stream save shadow egshmd egsanim egsframe egsdebug egstex egsmem
-  egsmisc egsfile egshog egsgeom. 18 of these still contain INCLUDE_ASM functions.
-* **Linked.** With all 27 passed to `gen_psylink.py --libs` as `--obj` objects,
+  egsmisc egsfile egshog egsgeom cas object target egsdev damage particle sniper
+  player joystick weapon. Many of these still contain INCLUDE_ASM functions.
+* **Linked.** With all 37 passed to `gen_psylink.py --libs` as `--obj` objects,
   `psyq_link.sh` still gives 16x OK.
-* **The other 24 main TUs.** None of them fails because of the asm path:
+* **aspsx doesn't auto-align `.word`** (GNU as does). An INCLUDE_RODATA blob after
+  data of odd size (a `__FILE__` string) lands unaligned; define it in C instead.
+* **The other main TUs.** None of them fails because of the asm path:
   * Some fail to assemble ("Assembler does not have AT register available"). Their asm
     makes gp-relative accesses to small data the TU does not define.
   * The rest have a longer `.text`. Their C code goes through `SDATA_LOCAL` externs,

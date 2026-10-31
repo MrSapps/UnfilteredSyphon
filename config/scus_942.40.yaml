@@ -118,7 +118,7 @@ segments:
       - [0x19A74, c, cas]
       - [0x1BAB4, c, object]
       - [0x20BB8, c, sniper]
-      - [0x22BEC, c, target]
+      - [0x222EC, c, target]
       - [0x25B28, c, joystick]
       - [0x2A5EC, c, sprite]
       - [0x2B180, c, los]
@@ -273,26 +273,26 @@ segments:
       - { type: sbss, vram: 0x8010FF94, name: sbss_8010FF94 }
       - { type: .sbss, vram: 0x8010FF98, name: object }
       - { type: .sbss, vram: 0x8010FFB8, name: sniper }
-      - { type: .sbss, vram: 0x8010FFDC, name: target }
+      - { type: .sbss, vram: 0x8010FFD8, name: target }
       - { type: .sbss, vram: 0x8010FFE0, name: joystick }
       - { type: sbss, vram: 0x8010FFE4, name: sbss_8010FFE4 }
       - { type: .sbss, vram: 0x80110028, name: weapon }
       - { type: .sbss, vram: 0x80110030, name: particle }
       - { type: .sbss, vram: 0x80110118, name: npc }
       - { type: .sbss, vram: 0x80110170, name: damage }
-      - { type: sbss, vram: 0x80110180, name: sbss_80110180 }
       - { type: .sbss, vram: 0x80110188, name: sound }
       - { type: sbss, vram: 0x801101A8, name: sbss_801101A8 }
       - { type: .sbss, vram: 0x801101B8, name: pickup }
       - { type: sbss, vram: 0x801101CC, name: sbss_801101CC }
       - { type: .sbss, vram: 0x801101D0, name: snddrv }
       - { type: sbss, vram: 0x801101FC, name: sbss_801101FC }
+      - { type: .sbss, vram: 0x80110200, name: egsdev }
       - { type: .sbss, vram: 0x80110220, name: egsanim }
       - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
       - { type: .bss, vram: 0x801104A0, name: system }
       - { type: .bss, vram: 0x80111EB8, name: game }
       - { type: bss, vram: 0x80112D40, name: bss_80112D40 }
-      - { type: .bss, vram: 0x80115634, name: cas }
+      - { type: .bss, vram: 0x80115638, name: cas }
       - { type: .bss, vram: 0x801156D8, name: sniper }
       - { type: bss, vram: 0x80115754, name: bss_80115754 }
       - { type: .bss, vram: 0x80118FC0, name: particle }
@@ -310,7 +310,7 @@ segments:
       - { type: bss, vram: 0x801221E4, name: bss_801221E4 }
       - { type: .bss, vram: 0x801221E8, name: snddrv }
       - { type: .bss, vram: 0x801225C8, name: egsdisp }
-      - { type: bss, vram: 0x80122678, name: bss_80122678 }
+      - { type: .bss, vram: 0x80122678, name: egsdev }
       - { type: .bss, vram: 0x80122A38, name: egstex }
       - { type: .bss, vram: 0x80122C90, name: egsmisc }
       - { type: .bss, vram: 0x80125210, name: egsfile }
