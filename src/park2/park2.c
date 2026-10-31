@@ -661,10 +661,7 @@ static void func_80141F5C(void) {
 }
 
 #ifdef NON_MATCHING
-/*
- * Same length and logic; the original materialises the light array base before
- * the index (lui/addiu, then n * 0x2C) when taking &D_801447C4[n] / &D_801448CC[n].
- */
+/* one delay slot: the original moves the light-on call's pos argument into the ps->on branch slot (jal slot stays empty) */
 static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
     PointSource *ps;
     s32 n;
@@ -675,7 +672,9 @@ static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
         if (mFlameHandle[n] != 0) {
             ParticleFireFade(mFlameHandle[n]);
         } else {
-            ps = &D_801447C4[n];
+            PointSource *lights = D_801447C4;
+
+            ps = lights + n;
             if (ps->on == 0) {
                 EGSDisplayPointSourceOn(ps, pos);
             }
@@ -693,7 +692,9 @@ static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
     }
     n = seg >> 4;
     if ((seg & 0xF) == 3) {
-        ps = &D_801448CC[n];
+        PointSource *lights = D_801448CC;
+
+        ps = lights + n;
         if (ps->on != 0) {
             EGSDisplayPointSourceOff(ps);
         }

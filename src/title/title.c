@@ -863,7 +863,7 @@ static void func_80142D5C(s32 yes) {
 }
 
 #ifdef NON_MATCHING
-/* loads of the black colour are not hoisted out of the loop */
+/* the original hoists the three black.r/g/b byte loads above the in-loop copy of D_80141704 (loop invariant motion) */
 /* Main menu: X pressed. */
 static void func_80142D8C(void) {
     s32 i;
@@ -873,7 +873,7 @@ static void func_80142D8C(void) {
     EGSDisplayTextOverMovies(0);
     InterfaceSetMode(7);
     for (i = 0; i < 2; i++) {
-        TitleColor black = { 0, 0, 0, 0 };
+        TitleColor black = D_80141704;
 
         SpriteSetRGB(&mTitleScreenSprite[i], black.r, black.g, black.b);
     }
@@ -1046,8 +1046,6 @@ static void func_8014335C(s32 item) {
 INCLUDE_ASM("asm/title/nonmatchings/title", func_8014335C);
 #endif
 
-#ifdef NON_MATCHING
-/* flag load scheduled before the selection stores (base reg not CSEd) */
 /* Main menu shown: title movie behind it. */
 static void func_801434B0(void) {
     MovieInfo movie = { "\\SOL\\TITLE", 320, 240 };
@@ -1055,24 +1053,20 @@ static void func_801434B0(void) {
     InterfaceSetMode(0);
     InterfaceForceOff();
     InterfaceAnimate();
-    RECT_WH(mTitleSelection[0]) = 0;
+    RECT_XY(mTitleSelection[0]) = RECT_WH(mTitleSelection[0]) = 0;
+    mTitleSelection[0].x = 1;
     {
-        TitleRect *sel = &mTitleSelection[0];
+        EGSSprite *sprites = mTitleScreenSprite;
 
-        RECT_XY(*sel) = 0;
-        sel->x = 1;
-    }
-    if (mTitleScreenSprite[0].unk28 == 0) {
-        EGSDisplayAddSprite(gTextCamera, &mTitleScreenSprite[0]);
-        EGSDisplayAddSprite(gTextCamera, &mTitleScreenSprite[1]);
+        if (sprites[0].unk28 == 0) {
+            EGSDisplayAddSprite(gTextCamera, &sprites[0]);
+            EGSDisplayAddSprite(gTextCamera, &sprites[1]);
+        }
     }
     SysPlayMovie(&movie);
     MovieSetLoopFlag(1);
     EGSDisplayTextOverMovies(1);
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", func_801434B0);
-#endif
 
 /* Message box / save prompt shown. */
 static void func_801435A8(void) {

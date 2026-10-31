@@ -115,7 +115,7 @@ s32 func_80137A50(void) {
 }
 
 #ifdef NON_MATCHING
-/* register allocation (hdr/y swapped) and MIN result stores */
+/* hdr/y swap s3/s4, and the rect->w/h MIN/MAX nests branch and store differently */
 /* Work out the on-screen rect and carve the slice and decode buffers out of the work buffer. */
 s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDecode, s32 trueColor,
                   MovieRect *rect, MovieRect *slice, u8 **slices, s32 *sliceSize, u8 **decode, s32 *decodeSize) {
@@ -149,7 +149,8 @@ s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDeco
         bufSize -= *sliceSize * 4;
         buf += *sliceSize * 4;
         if (bufSize < 0) {
-            goto fail;
+            MovieClose();
+            return 0x1F;
         }
     }
     *decodeSize = hdr->sectors * 1710;
@@ -158,22 +159,19 @@ s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDeco
         bufSize -= *decodeSize * 4;
         buf += *decodeSize * 4;
         if (bufSize < 0) {
-            goto fail;
+            MovieClose();
+            return 0x1F;
         }
     }
     return 0;
-fail:
-    MovieClose();
-    return 0x1F;
 }
 #else
 INCLUDE_ASM("asm/movie/nonmatchings/movie", func_80137A98);
 #endif
 
-#ifdef NON_MATCHING
-/* 5 insns short: StGetNext retry loop shape */
 /* Wait for the next frame from the CD ring buffer and check it is in sequence. */
 s32 func_80137D80(u32 **addr, StHeader **hdr) {
+    u32 limit = 300000;
     u32 tries;
     s32 ret;
     u32 frame;
@@ -181,19 +179,23 @@ s32 func_80137D80(u32 **addr, StHeader **hdr) {
     if (D_8013BBD0 == D_8013BBCC && !D_8013BBC1) {
         D_8013BBC4 = 1;
     }
-    frame = 0;
-    if (!D_8013BBC4) {
+    if (D_8013BBC4) {
+        frame = 0;
+    } else {
         ret = 1;
         tries = 0;
-        while (tries++ < 300000 && (ret = StGetNext(addr, hdr)) == 1) {
-        }
+        do {
+        } while (tries++ < limit && (ret = StGetNext(addr, hdr)) == 1);
         if (ret == 1 || (*hdr)->type != 0x8001 || (*hdr)->sector != 0) {
             D_8013BBC4 = 1;
         }
-        frame = 0;
-        if (!D_8013BBC4) {
+        if (D_8013BBC4) {
+            frame = 0;
+        } else {
             if (!D_8013BBC1) {
-                if (D_8013BBCC < (*hdr)->frame || D_8013BBD0 >= (*hdr)->frame) {
+                u32 f = (*hdr)->frame;
+
+                if (D_8013BBCC < f || D_8013BBD0 >= f) {
                     D_8013BBC4 = 1;
                 }
             } else if (D_8013BB8C > 0) {
@@ -201,8 +203,9 @@ s32 func_80137D80(u32 **addr, StHeader **hdr) {
             } else {
                 D_8013BBCC = ((u32 *)D_8013BB80)[1] / ((*hdr)->sectors << 11);
             }
-            frame = 0;
-            if (!D_8013BBC4) {
+            if (D_8013BBC4) {
+                frame = 0;
+            } else {
                 frame = (*hdr)->frame;
             }
         }
@@ -210,9 +213,6 @@ s32 func_80137D80(u32 **addr, StHeader **hdr) {
     D_8013BBD0 = frame;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", func_80137D80);
-#endif
 
 s32 func_80137F80(u32 *frame, u32 *size) {
     if (D_8013CBA4 < DecDCTBufSize(frame)) {
@@ -473,8 +473,6 @@ fail:
     return err;
 }
 
-#ifdef NON_MATCHING
-/* gcc peels the first loop iteration (i and the flag are known); the original keeps i = 0 and the flag in registers */
 s32 MovieWaitTillFinishDrawFrame(void) {
     u32 i = 0;
 
@@ -484,17 +482,14 @@ s32 MovieWaitTillFinishDrawFrame(void) {
     if (D_8013BBC3) {
         return 0;
     }
-    while (i++ <= 1000000 && !D_8013BBC3) {
-    }
+    do {
+    } while (i++ <= 1000000 && !D_8013BBC3);
     if (!D_8013BBC3) {
         D_8013BBC3 = 1;
         return 0x27;
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", MovieWaitTillFinishDrawFrame);
-#endif
 
 s32 MoviePause(void) {
     if (!gMovieOpenFlag) {
@@ -533,8 +528,6 @@ s32 MovieClose(void) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* gcc peels the first loop iteration (i and the flag are known); the original keeps i = 0 and the flag in registers */
 s32 EGSMovieWaitTillFinishDrawFrame(void) {
     u32 i = 0;
 
@@ -544,14 +537,11 @@ s32 EGSMovieWaitTillFinishDrawFrame(void) {
     if (D_8013BBC3) {
         return 0;
     }
-    while (i++ <= 1000000 && !D_8013BBC3) {
-    }
+    do {
+    } while (i++ <= 1000000 && !D_8013BBC3);
     if (!D_8013BBC3) {
         D_8013BBC3 = 1;
         return 0x27;
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", EGSMovieWaitTillFinishDrawFrame);
-#endif

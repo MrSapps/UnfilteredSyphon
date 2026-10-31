@@ -328,11 +328,7 @@ static void func_80141720(s32 near, s32 far, s32 a, s32 b, s32 c);
 static void func_80141A28(s32 train);
 static void func_80141B3C(void);
 static void func_80141BC8(void);
-#ifdef NON_MATCHING
 static SubwayRuntime *func_80141C44(s32 train, SubwayRuntime *obj);
-#else
-SubwayRuntime *func_80141C44(s32 train, SubwayRuntime *obj);
-#endif
 static s32 func_80141DB8(void);
 static s16 func_80141F04(s32 id);
 static void func_80141FC4(s16 id, s16 by);
@@ -492,8 +488,6 @@ static void func_80141BC8(void) {
 }
 
 /* Closest active car of a train to an object. */
-#ifdef NON_MATCHING
-/* Same code; the loop entry test comes out as beqz instead of blez (count known non-negative). */
 static SubwayRuntime *func_80141C44(s32 train, SubwayRuntime *obj) {
     VECTOR32 pos;
     VECTOR32 carPos;
@@ -505,9 +499,9 @@ static SubwayRuntime *func_80141C44(s32 train, SubwayRuntime *obj) {
     u8 count;
 
     bestDist = 0x7FFFFFFF;
+    best = NULL;
     count = D_80145854[train];
     pos = obj->move->pos;
-    best = NULL;
     for (i = 0; i < count; i++) {
         car = RT(D_8014583C[train][i]);
         if (car->flags0 & 0x40) {
@@ -524,9 +518,6 @@ static SubwayRuntime *func_80141C44(s32 train, SubwayRuntime *obj) {
     }
     return best;
 }
-#else
-INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80141C44);
-#endif
 
 /* Train whose head car is level with the player. */
 static s32 func_80141DB8(void) {
@@ -637,12 +628,11 @@ static void func_801420D8(SubwayRuntime *rt, s16 by) {
 #define INFO_FLAGS(info) (*(u32 *)&(info)->flags24)
 
 #ifdef NON_MATCHING
-/* Same code; $v0/$v1 swapped computing the attacker's gameObjectsInfo entry. */
+/* attacker id lands in $v0 (original $v1) computing its gameObjectsInfo entry; the weapon 6..7 range test is sltiu (original slti) */
 static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
     VECTOR32 pos;
     SubwayRuntime *rt;
     SubwayRuntime *attacker;
-    GameObjectInfo *info;
     s16 type;
     s16 ref;
     u16 weapon;
@@ -668,10 +658,9 @@ static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
             if (by != gPlayerOffset) {
                 attacker = RT(by);
                 if (rt->npcState == 2) {
-                    info = &gameObjectsInfo[attacker->id];
-                    weapon = *(u8 *)&info->flags24;
-                    if (*(u8 *)&info->flags24 == 0) {
-                        bits = INFO_FLAGS(info) & 0x3000;
+                    weapon = *(u8 *)&gameObjectsInfo[attacker->id].flags24;
+                    if (*(u8 *)&gameObjectsInfo[attacker->id].flags24 == 0) {
+                        bits = INFO_FLAGS(&gameObjectsInfo[attacker->id]) & 0x3000;
                         if (bits != 0x1000) {
                             weapon = bits == 0x2000 ? 0x14 : 0;
                         } else {
@@ -1426,7 +1415,7 @@ void iSubway3Init(s32 mode) {
      (v).vy = -(v).vy)
 
 #ifdef NON_MATCHING
-/* Same length; train sound flag / headlight address registers differ (headlight address CSE'd). */
+/* &D_801456F0 is CSE'd into $s0 for the two flashlight calls (the original rematerialises it each time; ours is 1 insn shorter) and the train-sound flag address/value swap v0/v1 */
 void TRAINObjDispatch(SysMsg *msg) {
     VECTOR32 player;
     VECTOR32 car;
@@ -1438,7 +1427,7 @@ void TRAINObjDispatch(SysMsg *msg) {
     GameObjectHealth *health;
     s32 dy;
     s32 dist;
-    s16 health;
+    s16 hp;
     s16 type;
 
     rt = RT(msg->to);
@@ -1564,9 +1553,9 @@ void TRAINObjDispatch(SysMsg *msg) {
         break;
     case 26:
         health = ((SubwayRuntime *)gObjPlayer)->healthInfo;
-        health = health->health;
-        if (health > 0) {
-            DamageGOBJ(-1, rt->id, gPlayerOffset, health->armor + health, 0x5F);
+        hp = health->health;
+        if (hp > 0) {
+            DamageGOBJ(-1, rt->id, gPlayerOffset, health->armor + hp, 0x5F);
         }
         break;
     case 18:

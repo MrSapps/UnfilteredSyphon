@@ -395,8 +395,9 @@ typedef struct InitModelInfo {
     /* 0x10 */ s32 xmodel;
 } InitModelInfo;
 
-#ifdef NON_MATCHING
-/* &gameObjectsModelInfo[idx] addu operands reversed (base+off instead of off+base) */
+/* offset + base in that order: the original adds the scaled index first */
+#define GOBJ_MODEL_AT(i) ((GameObjectModelInfo *)((i) * sizeof(GameObjectModelInfo) + (u32)gameObjectsModelInfo))
+
 /* Creates the model ("gobj" anim) of a placed object; hmd is the HMD block for animated models, or 0. */
 void LevelCreateGOBJ(s16 id, s32 hmd) {
     GOBJ_MATRIX mat;
@@ -413,7 +414,7 @@ void LevelCreateGOBJ(s16 id, s32 hmd) {
     char c;
 
     idx = gameObjectsInfo[id].modelIndex;
-    mi = &gameObjectsModelInfo[idx];
+    mi = GOBJ_MODEL_AT(idx);
     rt = (InitRuntime *)gameObjectsInfo[id].runtime;
     if (mi->model[0] == 0) {
         rt->anim = NULL;
@@ -425,8 +426,9 @@ void LevelCreateGOBJ(s16 id, s32 hmd) {
         c = mi->model[strlen(mi->model) - 3];
         if (c == 'H') {
             if (hmd == 0) {
-                mi = &gameObjectsModelInfo[idx];
-                mi->model[strlen(mi->model) - 4] = 0;
+                GameObjectModelInfo *m = GOBJ_MODEL_AT(idx);
+
+                m->model[strlen(m->model) - 4] = 0;
                 strcat(gameObjectsModelInfo[idx].model, ".HAN");
                 EGSHogGetBlockByName(gPermHogFile, gameObjectsModelInfo[idx].model, &han);
                 EGSAnimHMDCreate(model, han, 0, 0, &anim, 0);
@@ -464,33 +466,28 @@ void LevelCreateGOBJ(s16 id, s32 hmd) {
     }
     rt->healthInfo = (GameObjectHealth *)gameObjectsInfo[rt->id].unk38;
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", LevelCreateGOBJ);
-#endif
 
 void EGSDisplayRegisterInfraredModel(s32 model);
 
 /* Finds each model in the permanent hog: tries <name>.GMD, then .HMD, then .EMD. */
-#define FIND_MODEL(name, model)                                                          \
-    mi = &MODELS[i];                                                                     \
-    if (*mi->name != 0) {                                                                \
-        mi->name[strlen(mi->name) - 4] = 0;                                              \
-        strcat(MODELS[i].name, ".GMD");                                                  \
-        if (EGSHogGetBlockByName(gPermHogFile, MODELS[i].name, &MODELS[i].model) != 0) { \
-            mi = &MODELS[i];                                                             \
-            mi->name[strlen(mi->name) - 4] = 0;                                          \
-            strcat(MODELS[i].name, ".HMD");                                              \
+#define FIND_MODEL(name, model)                                                              \
+    mi = MODEL_AT(i);                                                                        \
+    if (*mi->name != 0) {                                                                    \
+        mi->name[strlen(mi->name) - 4] = 0;                                                  \
+        strcat(MODELS[i].name, ".GMD");                                                      \
+        if (EGSHogGetBlockByName(gPermHogFile, MODELS[i].name, &MODELS[i].model) != 0) {     \
+            InitModelInfo *m = MODEL_AT(i);                                                  \
+            m->name[strlen(m->name) - 4] = 0;                                                \
+            strcat(MODELS[i].name, ".HMD");                                                  \
             if (EGSHogGetBlockByName(gPermHogFile, MODELS[i].name, &MODELS[i].model) != 0) { \
-                mi = &MODELS[i];                                                         \
-                mi->name[strlen(mi->name) - 4] = 0;                                      \
-                strcat(MODELS[i].name, ".EMD");                                          \
-                EGSHogGetBlockByName(gPermHogFile, MODELS[i].name, &MODELS[i].model);    \
-            }                                                                            \
-        }                                                                                \
+                InitModelInfo *m = MODEL_AT(i);                                              \
+                m->name[strlen(m->name) - 4] = 0;                                            \
+                strcat(MODELS[i].name, ".EMD");                                              \
+                EGSHogGetBlockByName(gPermHogFile, MODELS[i].name, &MODELS[i].model);        \
+            }                                                                                \
+        }                                                                                    \
     }
 
-#ifdef NON_MATCHING
-/* &gameObjectsModelInfo[i] addu operands reversed (base+off instead of off+base) */
 /* Looks up the level's models and resets the level specific NPCs. */
 static void func_801466C8(void) {
     s32 ir;
@@ -511,6 +508,8 @@ static void func_801466C8(void) {
         EGSDisplayRegisterInfraredModel(ir);
     }
 #define MODELS ((InitModelInfo *)gameObjectsModelInfo)
+/* offset + base in that order: the original adds the scaled index first */
+#define MODEL_AT(i) ((InitModelInfo *)((i) * sizeof(InitModelInfo) + (u32)gameObjectsModelInfo))
     for (i = 0; i < gLevelUniqueGameObjCount; i++) {
         FIND_MODEL(name, model);
         FIND_MODEL(xname, xmodel);
@@ -520,9 +519,6 @@ static void func_801466C8(void) {
         SysPostMessage(2, 5, 0xFFFE, i, 0, 0, 0, 0);
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", func_801466C8);
-#endif
 
 /* Allocates the runtime ("gobj") of every visible placed object. */
 /* named: the asm func_80146C6C uses them too */
@@ -566,13 +562,12 @@ static void func_80146B14(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* &hog is rematerialised from sp instead of kept in s3 */
 /* Loads every texture of a common hog (\COMMON\INTRFACE or \COMMON\SPFX). */
 static void func_80146C6C(char *name) {
     char unused[32];
     EGSTex tex;
     EGSHog hog;
+    EGSHog *h;
     s32 count;
     s32 i;
 
@@ -581,25 +576,26 @@ static void func_80146C6C(char *name) {
     } else {
         hog.data = gSPFXHog;
     }
-    count = EGSHogGetBlockCount(&hog);
-    for (i = 0; i < count; i++) {
-        if (EGSHogGetBlock(&hog, i, &tex) != 0) {
-            EGSDebugAssert(1, 0, D_80145D14, 0x306);
-        }
-        EGSTextureCreate(&tex);
-        EGSTextureLoad(&tex);
+    h = &hog;
+    count = EGSHogGetBlockCount(h);
+    i = 0;
+    if (count > 0) {
+        do {
+            if (EGSHogGetBlock(h, i, &tex) != 0) {
+                EGSDebugAssert(1, 0, D_80145D14, 0x306);
+            }
+            EGSTextureCreate(&tex);
+            EGSTextureLoad(&tex);
+        } while (++i < count);
     }
     if (strcmp(name, D_80145D20) == 0) {
-        SpriteSetupInterface(&hog);
+        SpriteSetupInterface(h);
     } else if (strcmp(name, D_80145D34) == 0) {
-        SetupMultiTextures(&hog, 5, gMultiTextures);
-        SpriteCreateFootFx(&hog);
+        SetupMultiTextures(h, 5, gMultiTextures);
+        SpriteCreateFootFx(h);
         ObjectTextureAnimationsHack();
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", func_80146C6C);
-#endif
 
 /* Per-tick callback while the level loads: animates the interface and the "loading" text. */
 void LevelLoadCallback(void) {
@@ -1213,20 +1209,21 @@ void COMPUTERObjInit(InitRuntime *rt, s32 type) {
 }
 
 #ifdef NON_MATCHING
-/* gameObjectsInfo is hoisted out of the loop instead of reloaded at the bottom */
+/* 3 insns short: the (s16)id sign extension is CSE'd around the loop (id<<16 kept in a register); the original keeps only the raw id and re-extends */
 /* Finds the camera an object is linked to through at most two pass-through objects. */
 static void func_801482D4(InitRuntime *rt) {
+    GameObjectInfo *info = gameObjectsInfo;
     GameObjectRuntime *runtime;
     s32 id;
     s32 type;
     s32 depth;
 
     rt->unk04 = -1;
-    id = gameObjectsInfo[rt->id].refId;
+    id = info[rt->id].refId;
     depth = 1;
     while ((s16)id != -1) {
-        runtime = gameObjectsInfo[(s16)id].runtime;
-        type = GOBJ_TYPE((s16)id);
+        runtime = info[(s16)id].runtime;
+        type = (s16)id != GOBJ_ID_666 ? gameObjectsModelInfo[info[(s16)id].modelIndex].type : GOBJ_ID_666;
         if (type == 0x22) {
             rt->unk04 = (s16)id;
             return;
@@ -1238,7 +1235,8 @@ static void func_801482D4(InitRuntime *rt) {
         if (++depth >= 3) {
             return;
         }
-        id = gameObjectsInfo[(s16)id].refId;
+        info = gameObjectsInfo;
+        id = info[(s16)id].refId;
     }
 }
 #else

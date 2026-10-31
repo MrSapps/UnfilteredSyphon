@@ -86,6 +86,8 @@ typedef struct ObjInfoXform {
     /* 0x25 */ u8 unk25[0x27];
 } ObjInfoXform; /* size 0x4C */
 #define OBJ_XFORM(id) (&((ObjInfoXform *)gameObjectsInfo)[id])
+/* the same entry with the scaled index added first */
+#define OBJ_XFORM_AT(id) ((ObjInfoXform *)((id) * sizeof(ObjInfoXform) + (u32)gameObjectsInfo))
 
 /* Player world position as kept by the anim hierarchy */
 typedef struct PlayerFrame {
@@ -509,16 +511,12 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_8014196C);
 #endif
 
 #ifdef NON_MATCHING
-/*
- * Register allocation of the gameObjectsInfo entry pointer and scheduling of
- * the radar-radius stores differ.
- */
+/* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758 */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;
     Vec4 pos;
     s32 dist;
-    ObjInfoXform *info;
     GameObjectHealth *health;
     s32 h;
     s32 i;
@@ -529,13 +527,18 @@ static void func_80141C64(void) {
     D_80145670.vy = PLAYER_XFORM()->y;
     D_80145670.vz = PLAYER_XFORM()->z;
     D_80145670.vy = -D_80145670.vy;
-    info = OBJ_XFORM(D_8014561C->id);
-    pos.vx = info->t[0];
-    pos.vy = info->t[1];
-    pos.vz = info->t[2];
+    {
+        ObjInfoXform *info = OBJ_XFORM_AT(D_8014561C->id);
+
+        pos.vx = info->t[0];
+        pos.vy = info->t[1];
+        pos.vz = info->t[2];
+    }
     if (!D_80145798) {
+        ObjInfoXform *info;
+
         chopperPos = pos;
-        info = OBJ_XFORM(D_8014561C->id);
+        info = OBJ_XFORM_AT(D_8014561C->id);
         D_80145680.vx = info->m[0][2];
         D_80145680.vy = info->m[1][2];
         D_80145680.vz = info->m[2][2];
@@ -554,8 +557,8 @@ static void func_80141C64(void) {
     D_80145744 = pos.vy - 0x2D0;
     D_8014573C = pos.vy - 0x5A0;
     D_80145740 = pos.vy - 0x870;
-    r = D_8014574C;
     D_8014572C = pos.vy;
+    r = D_8014574C;
     D_80145730 = pos.vy - 0x680;
     D_80145758 = r >> 4;
     D_80145734 = pos.vy + 0x3C;
