@@ -270,6 +270,8 @@ typedef struct NPCGrenadeThrow {
     /* 0x0 */ u8 ready;
     /* 0x1 */ u8 pad[3];
     /* 0x4 */ s32 weapon;
+    /* 0x8 */ s32 unk8;
+    /* 0xC */ VECTOR32 *pos; /* the thrown grenade */
 } NPCGrenadeThrow;
 extern NPCGrenadeThrow *D_8011030C;
 
@@ -280,8 +282,7 @@ typedef struct NPCScriptStep {
     /* 0x04 */ s16 unk04;
     /* 0x06 */ u16 moveMode;
     /* 0x08 */ s16 shoot;
-    /* 0x0A */ u8 unk0A[0xA];
-} NPCScriptStep;
+} NPCScriptStep; /* size 0xA */
 extern NPCScriptStep look[];
 extern NPCScriptStep disarmBomb[];
 extern NPCScriptStep kneelStandShoot[];
@@ -374,6 +375,7 @@ void NPCSoundFromPC(s32 kind, s32 radius);
 void NPCSound(s32 kind, VECTOR32 *pos, s32 radius, s32 id);
 void ParticleNPCFireHide(s16 id);
 s32 NPCPointIQ(); /* (Gobj *obj, PathPoint *path), some callers leave out the path */
+extern VECTOR32 D_8011D1E0;       /* NPCPointIQ goal midpoint */
 void NPCKneel(Gobj *obj);
 void NPCStand(Gobj *obj);
 void NPCNavigateActionPath(Gobj *obj);
@@ -382,7 +384,12 @@ s32 getPointActionLink(PathPoint *points, Gobj *obj);
 s32 NPCGetGrenadeLink(Gobj *obj);
 s32 rcos(s32 a);
 s32 rsin(s32 a);
-void MovementGobjRegisterCharacterMovement(Gobj *obj, s32 arg1, s32 arg2);
+void MovementGobjRegisterCharacterMovement(Gobj *obj, VECTOR32 *dir, s32 mode);
+void ParticleBreath(s16 id);
+extern s32 particleBreathFlag;
+extern VECTOR32 D_8011D210;       /* NPCIQEveryFrame movement direction */
+/* TargetInfo+0x64: aim point (gameobj.h has it inside unk62[]) */
+#define TARGET_AIM(t) ((VECTOR32 *)((u8 *)(t) + 0x64))
 void EGSGeometryFIX_VectorGetAngleFromXZPlane(VECTOR32 *dir, VECTOR32 *angles);
 s32 ratan2(s32 y, s32 x);
 int rand(void);
@@ -1277,7 +1284,182 @@ void npcGrenadeLanded(s32 which) {
 INCLUDE_ASM("asm/main/nonmatchings/npc", npcGrenadeLanded);
 #endif
 
+#ifdef NON_MATCHING
+/* draft: structure right, 17 insns long; abs/loop register allocation differs */
+s32 NPCPointIQ(obj, path)
+Gobj *obj;
+PathPoint *path;
+{
+    VECTOR32 pt;
+    s32 dist;
+    s32 best;
+    s32 d2;
+    VECTOR32 away;
+    VECTOR32 to;
+    NPC *npc = NPC_OF(obj);
+    VECTOR32 *goal = &npc->lastSeenPos;
+    s32 range = 0;
+    s32 skipKind = -1;
+    u8 next;
+    u8 cur;
+    PathPoint *curPt;
+    PathPoint *p;
+    s32 i;
+    s32 j;
+    s32 link;
+    s32 link2;
+    s32 start;
+    u8 name;
+
+    if (npcGrenadeLandedCheck) {
+        if (npcGrenadeLandedCheck & 1) {
+            EGSGeometry_GetFuzzyDistancePoint2Point(&mGrenadeGobj[0]->move->pos, &D_8011E8B8, &dist);
+            if (dist < 0xA00) {
+                goal = &mGrenadeGobj[0]->move->pos;
+                range = 0x780;
+            }
+        } else if (npcGrenadeLandedCheck & 2) {
+            EGSGeometry_GetFuzzyDistancePoint2Point(D_8011030C->pos, &D_8011E8B8, &dist);
+            if (dist < 0x500) {
+                goal = D_8011030C->pos;
+                range = 0x3C0;
+            }
+        }
+    } else if (npcAlertByScream) {
+        EGSGeometry_GetFuzzyDistancePoint2Point(&grenadePos, &D_8011E8B8, &dist);
+        if (dist < 0x3C0) {
+            range = 32000;
+            goal = &grenadePos;
+        }
+    }
+    if (range == 0) {
+        name = npc->nameMsgId;
+        if (name < 10) {
+            range = 32000;
+        } else if (npc->flags & 1) {
+            if (gSysInfo.level == 13) {
+                return path[npc->curPoint].links[0];
+            }
+            if (obj->target->targetId >= 0) {
+                goal = &gameObjectsInfo[obj->target->targetId].runtime->move->pos;
+                range = 32;
+            } else {
+                range = 32000;
+            }
+        } else {
+            range = 32;
+            if (npc->awareness != 1 && gameObjectsInfo[gPlayerOffset].runtime->healthInfo->health > 0) {
+                range = (100 - name) << 5;
+            }
+        }
+    } else {
+        D_8011D1E0.vx = (goal->vx + D_8011E8A8.vx) >> 1;
+        D_8011D1E0.vy = goal->vy;
+        D_8011D1E0.vz = (goal->vz + D_8011E8A8.vz) >> 1;
+        goal = &D_8011D1E0;
+    }
+    next = npc->curPoint;
+    curPt = &path[next];
+    pt.vx = curPt->x;
+    pt.vy = curPt->y;
+    pt.vz = curPt->z;
+    EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &best);
+    best = best - range >= 0 ? best - range : -(best - range);
+    cur = next;
+    if (((curPt->flags & 0xF00) >> 8) == 7) {
+        skipKind = 7;
+    }
+    for (i = 0; i < 3; i++) {
+        link = curPt->links[i];
+        p = &path[link];
+        if (link >= 0 && link != cur && ((p->flags & 0xF00) >> 8) != 1 && ((p->flags & 0xF00) >> 8) != skipKind) {
+            pt.vx = p->x;
+            pt.vy = p->y;
+            pt.vz = p->z;
+            EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &dist);
+            dist = dist - range >= 0 ? dist - range : -(dist - range);
+            for (j = 0; j < 3; j++) {
+                link2 = p->links[j];
+                if (link2 >= 0 && link2 != cur && link2 != link && link2 != 1 && link2 != skipKind) {
+                    pt.vx = path[link2].x;
+                    pt.vy = path[link2].y;
+                    pt.vz = path[link2].z;
+                    EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &d2);
+                    d2 = d2 - range >= 0 ? d2 - range : -(d2 - range);
+                    if (d2 < dist) {
+                        dist = d2;
+                    }
+                }
+            }
+            if (dist < best) {
+                next = link;
+                best = dist;
+                npc->flags &= ~0x40000;
+            }
+        }
+    }
+    if (next == cur) {
+        if (GOBJ_TYPE(obj->id) == 0x65 && obj->healthInfo->health < obj->healthInfo->armor && obj->id != gPlayerOffset
+            && !(GOBJ_INFO_FLAGS(&gameObjectsInfo[obj->id]) & 0x4000)
+            && *(u8 *)&gameObjectsInfo[obj->id].flags24 == 0
+            && (GOBJ_INFO_FLAGS(&gameObjectsInfo[obj->id]) & 0x3000) != 0x1000
+            && (GOBJ_INFO_FLAGS(&gameObjectsInfo[obj->id]) & 0x3000) != 0x2000 && !(npc->flags & 0x8000000)) {
+            CASRequestAction(obj->id, 0x55);
+        }
+    }
+    if (next == cur || next == npc->nextPoint) {
+        if (npc->flags & 2) {
+            DamageGOBJ(-1, -1, obj->id, 0x7FFF, 0x4C);
+            return next;
+        }
+        if (npc->awareness == 1) {
+            start = rand() & 3;
+            for (i = 0; i < 3; i++) {
+                j = start + i;
+                if (j >= 3) {
+                    j -= 3;
+                }
+                link = path[cur].links[j];
+                if (link >= 0 && link != cur && ((path[link].flags & 0xF00) >> 8) != 1
+                    && ((path[link].flags & 0xF00) >> 8) != 7) {
+                    next = link;
+                    npc->flags |= 0x40000;
+                }
+            }
+            if (next == cur || next == npc->nextPoint) {
+                NPCSetAwarenessLevel(obj, 2, 1, 0);
+            }
+            return next;
+        }
+        if (npc->awareness == 2 && range <= 0x3C0 && !(obj->target->flags & 2)) {
+            away.vx = goal->vx - D_8011E8B8.vx;
+            away.vy = goal->vy - D_8011E8B8.vy;
+            away.vz = goal->vz - D_8011E8B8.vz;
+            for (i = 0; i < 3; i++) {
+                link = path[cur].links[i];
+                p = &path[link];
+                if (link >= 0 && link != cur && ((p->flags & 0xF00) >> 8) != 1
+                    && ((p->flags & 0xF00) >> 8) != skipKind) {
+                    pt.vx = p->x;
+                    pt.vy = p->y;
+                    pt.vz = p->z;
+                    to.vx = goal->vx - pt.vx;
+                    to.vy = goal->vy - pt.vy;
+                    to.vz = goal->vz - pt.vz;
+                    if (to.vx * away.vx + to.vz * away.vz < 0) {
+                        next = link;
+                        npc->flags |= 0x40000;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return next;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/npc", NPCPointIQ);
+#endif
 
 s32 NPCPickNextPoint(Gobj *obj, PathPoint *path, s32 cur) {
     NPC *npc = NPC_OF(obj);
@@ -1794,24 +1976,20 @@ void NPCHazmatDone(Gobj *obj) {
     SysPlayXA((rand() & 4) + 0x219 + (obj->id & 3), (s32)obj, 0);
 }
 
-#ifdef NON_MATCHING
-/* link+row addu operand order for the linked point */
 s32 NPCGetGrenadeLink(Gobj *obj) {
     s32 found = -1;
     s32 i;
     s32 link;
-    PathPoint *pt;
     s32 dist;
     NPC *npc = NPC_OF(obj);
 
     for (i = 0; i < 3; i++) {
         link = ((s8 *)D_80110134[npc->curPoint].links)[i];
         if (link >= 0) {
-            pt = link + D_80110134;
-            if (((pt->flags & 0xF00) >> 8) == 1) {
-                grenadePos.vx = pt->x;
-                grenadePos.vy = pt->y;
-                grenadePos.vz = pt->z;
+            if ((((link + D_80110134)->flags & 0xF00) >> 8) == 1) {
+                grenadePos.vx = (link + D_80110134)->x;
+                grenadePos.vy = (link + D_80110134)->y;
+                grenadePos.vz = (link + D_80110134)->z;
                 EGSGeometry_GetFuzzyDistancePoint2Point(&D_8011E8A8, &grenadePos, &dist);
                 if (dist < 0x300) {
                     found = link;
@@ -1822,9 +2000,6 @@ s32 NPCGetGrenadeLink(Gobj *obj) {
     }
     return found;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCGetGrenadeLink);
-#endif
 
 void NPCThrowGrenade(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
@@ -2370,7 +2545,253 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
     return ret;
 }
 
+#ifdef NON_MATCHING
+/* draft: right shape (912 vs 906 insns); script-step loads and flag-update scheduling differ */
+void NPCIQEveryFrame(Gobj *obj) {
+    NPC *npc = NPC_OF(obj);
+    u8 mode = npc->unk46;
+    VECTOR32 pt;
+    VECTOR32 pos;
+    VECTOR32 off;
+    u8 step;
+    s16 kind;
+    s32 flags;
+    u32 k;
+    VECTOR32 *dir;
+    Gobj *t;
+
+    if (npc->awareness != 0 && !((gExeTick + obj->id) & 0x1F)) {
+        NPCSound(5, &obj->move->pos, 0x3C0, obj->id);
+    }
+    if (npc->flags & 0x400) {
+        step = npc->unk42;
+        kind = npc->script[step].kind;
+        pointActionMoveMode = npc->script[step].moveMode;
+        if (npc->unk2C == 0x7FFF) {
+            doPointAction(obj, npc->script[step].kind);
+        } else {
+            npc->unk2C--;
+        }
+        if (npc->unk2C <= 0) {
+            step++;
+            if (kind == 0) {
+                npc->unk2C = 0;
+                npc->unk42 = 0;
+                npc->flags &= ~0x400;
+                npc->flags = ((npc->flags | 0x800) & ~0x80000) & ~0x2000;
+            } else {
+                npc->unk2C = npc->script[step].duration;
+                if (npc->script[step].unk04 != 0) {
+                    npc->unk2C += npc->script[step].unk04 & rand();
+                }
+                if (npc->script[step].shoot != 0) {
+                    npc->flags |= 0x80000;
+                } else {
+                    npc->flags &= ~0x80000;
+                }
+                if (npc->flags & 0x80000) {
+                    npc->unk41 = 0;
+                }
+                doPointAction(obj, npc->script[step].kind);
+                npc->unk42 = step;
+            }
+        }
+        D_8011D210 = npc->dir;
+        mode = pointActionMoveMode;
+    }
+    if (gSysInfo.level == 18 && obj->id == gLevelSpecificNpcID2) {
+        if (D_8011E8A8.vy < -900 || npc->awareness == 0) {
+            npc->lastSeenPos.vx = 0x1ED4;
+            npc->lastSeenPos.vy = -0x3F7;
+            npc->lastSeenPos.vz = -0x2BE7;
+            obj->target->targetId = -1;
+            TARGET_AIM(obj->target)->vx = npc->lastSeenPos.vx - 0x10 + ((rand() & 0x1F) << 5);
+            TARGET_AIM(obj->target)->vy = npc->lastSeenPos.vy;
+            TARGET_AIM(obj->target)->vz = npc->lastSeenPos.vz - 0x10 + ((rand() & 0x1F) << 5);
+            obj->target->unk58 = 200;
+            if (--npc->unk2C <= 0) {
+                npc->unk38 = 0;
+                NPCTakeShot(obj, 0x140);
+                npc->unk38 = 0xA0;
+                npc->unk2C = 10;
+            }
+            npc->unk41 = 0;
+            obj->target->targetId = gPlayerOffset;
+            if (npc->awareness != 0) {
+                NPC_OF(obj)->flags |= 0x1000000;
+                npc->awareness = 0;
+            }
+            obj->target->threat = 0x1000;
+        } else if (npc->unk41 == 0) {
+            if (npc->unk2C <= 0) {
+                npc->unk38 = 0;
+                obj->target->threat = 0x1000;
+                npc->unk41 = (rand() & 1) + 3 + (rand() & 1);
+                npc->unk2C = 60;
+            } else {
+                npc->unk2C--;
+                npc->unk38 = 100;
+                obj->target->threat = npc->unk2C < 16 ? 0x1000 : 0xE65;
+            }
+        }
+        D_80110138 = obj->id;
+    }
+    flags = npc->flags;
+    if (!(flags & 0x400)) {
+        if (D_80110134 == NULL) {
+            mode = 5;
+        } else {
+            if ((flags & 0x800000) || (NPC_OF(obj)->flags & 0x1000000) || (flags & 0x10000)) {
+                mode = 5;
+            } else if (!(flags & 0x800)) {
+                pt.vx = D_80110134[npc->curPoint].x;
+                pt.vy = D_80110134[npc->curPoint].y;
+                pt.vz = D_80110134[npc->curPoint].z;
+                off.vx = FIX_TO_INT(NPC_MOVE(obj)->unk50.vx);
+                off.vy = FIX_TO_INT(NPC_MOVE(obj)->unk50.vy);
+                off.vz = FIX_TO_INT(NPC_MOVE(obj)->unk50.vz);
+                pos.vx = NPC_MOVE(obj)->unk40.vx + off.vx;
+                pos.vy = NPC_MOVE(obj)->unk40.vy + off.vy;
+                D_8011D210.vx = pt.vx - pos.vx;
+                D_8011D210.vy = 0;
+                pos.vz = NPC_MOVE(obj)->unk40.vz + off.vz;
+                D_8011D210.vz = pt.vz - pos.vz;
+                if (npc->dir.vx * D_8011D210.vx + npc->dir.vz * D_8011D210.vz <= 0) {
+                    npc->flags &= ~0x4000000;
+                    if (!(npc->flags & 0x40000) && npc->awareness != 1) {
+                        initPointAction(D_80110134, obj, 0);
+                    } else {
+                        initPointAction(D_80110134, obj, 6);
+                    }
+                } else {
+                    if (flags & 0x4000000) {
+                        NPCRethinkNextPoint(obj);
+                        npc->flags &= ~0x4000000;
+                    }
+                    k = (D_80110134[npc->curPoint].flags & 0xF00) >> 8;
+                    if (k == (D_80110134[npc->nextPoint].flags & 0xF00) >> 8) {
+                        if (npc->awareness == 0) {
+                            if (k == 3) {
+                                mode = 7;
+                            }
+                        } else if (k == 2) {
+                            npcRequestKneelRelease(obj);
+                            mode = 6;
+                        }
+                    }
+                }
+            }
+            if (mode != 5 && (npc->flags & 0x800)) {
+                if (!(npc->unk45 & 0x1F)) {
+                    pt.vx = D_80110134[npc->curPoint].x;
+                    pt.vy = D_80110134[npc->curPoint].y;
+                    pt.vz = D_80110134[npc->curPoint].z;
+                    npc->unk4B = (u8)D_80110134[npc->curPoint].flags >> 4;
+                    if (NPCPickNextPoint(obj, D_80110134, npc->curPoint)) {
+                        pos.vx = D_80110134[npc->curPoint].x;
+                        pos.vy = D_80110134[npc->curPoint].y;
+                        pos.vz = D_80110134[npc->curPoint].z;
+                        NPC_MOVE(obj)->pathCtrl->active = 1;
+                        NPC_MOVE(obj)->pathCtrl->from = pt;
+                        NPC_MOVE(obj)->pathCtrl->to = pos;
+                        npc->dir.vy = 0;
+                        npc->dir.vx = pos.vx - D_8011E8B8.vx;
+                        npc->dir.vz = pos.vz - D_8011E8B8.vz;
+                        npc->unk2E = pt.vy;
+                        obj->move->unk12C = pt.vy;
+                        GTEMath_VectorNormal(&npc->dir, &npc->dir);
+                        D_8011D210 = npc->dir;
+                        npc->flags &= ~0x800;
+                        if (npc->awareness != 0) {
+                            k = (D_80110134[npc->curPoint].flags & 0xF00) >> 8;
+                            if (k == (D_80110134[npc->nextPoint].flags & 0xF00) >> 8) {
+                                npc->unk41 = 0;
+                                switch (k) {
+                                case 4:
+                                    npcRequestKneel(obj);
+                                    break;
+                                case 5:
+                                    EGSGeometryFIX_VectorGetAngleFromXZPlane(&npc->dir, &MOVE_ROT(obj->move));
+                                    mode = 7;
+                                    MOVE_ROT(obj->move).vy = ratan2(npc->dir.vx, npc->dir.vz);
+                                    MOVE_ROT(obj->move).vz = 0;
+                                    CASRequestAction(obj->id, 0x2E);
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        initPointAction(D_80110134, obj, 0);
+                        mode = 5;
+                        npc->unk45++;
+                    }
+                } else {
+                    mode = 5;
+                    npc->unk45++;
+                }
+            }
+        }
+    }
+    if (npc->flags & 0x10000) {
+        NPCFaceDirection(obj, &npc->dir);
+    } else if (mode == 5) {
+        dir = NULL;
+        if (npc->awareness == 2 && !(npc->flags & 0x2000) && !(obj->cas->flags & 0x20000000)
+            && (obj->target->flags & 8)) {
+            if (obj->target->targetId < 0) {
+                if (gSysInfo.level == 0) {
+                    D_8011D210.vx = 0xDE7 - D_8011E8B8.vx;
+                    D_8011D210.vz = 0x1BE7 - D_8011E8B8.vz;
+                } else {
+                    D_8011D210.vx = 0;
+                    D_8011D210.vz = 0;
+                }
+                D_8011D210.vy = 0;
+            } else {
+                if (obj->target->targetId != gPlayerOffset) {
+                    t = gameObjectsInfo[obj->target->targetId].runtime;
+                    D_8011D210.vx = t->move->pos.vx - D_8011E8B8.vx;
+                    D_8011D210.vy = t->move->pos.vy - D_8011E8B8.vy;
+                    D_8011D210.vz = t->move->pos.vz - D_8011E8B8.vz;
+                } else {
+                    D_8011D210.vx = npc->lastSeenPos.vx - D_8011E8B8.vx;
+                    D_8011D210.vy = npc->lastSeenPos.vy - D_8011E8B8.vy;
+                    D_8011D210.vz = npc->lastSeenPos.vz - D_8011E8B8.vz;
+                }
+                D_8011D210.vy = 0;
+                GTEMath_VectorNormal(&D_8011D210, &D_8011D210);
+            }
+            dir = &D_8011D210;
+        }
+        MovementGobjRegisterCharacterMovement(obj, dir, 5);
+        if (npc->awareness == 2 && !(npc->flags & 0x400) && npc->casAction == 0) {
+            NPCRandomActions(obj);
+        }
+    } else {
+        npc->unk4A = 0;
+        pt.vx = obj->anim->frame->m[0][2];
+        pt.vy = obj->anim->frame->m[1][2];
+        pt.vz = obj->anim->frame->m[2][2];
+        pt.vy = -pt.vy;
+        if (mode == 7 && (obj->cas->flags & 2) && !(npc->flags & 0x400) && NPC_OF(obj)->casAction == 0) {
+            CASRequestAction(obj->id, 0x47);
+            npc->casAction = 0x47;
+        }
+        D_8011D210.vy = 0;
+        GTEMath_VectorNormal(&D_8011D210, &D_8011D210);
+        MovementGobjRegisterCharacterMovement(obj, &D_8011D210, mode);
+        if (!(obj->target->flags & 8) && obj->target->targetId == gPlayerOffset && npc->unk28 < 0x3C0) {
+            NPCSetLOSFirstSeen(obj, 1, 0);
+        }
+    }
+    CASRequestAction(obj->id, 4);
+    if (particleBreathFlag && !((gExeTick + obj->id * 4) & 0x1F)) {
+        ParticleBreath(obj->id);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/npc", NPCIQEveryFrame);
+#endif
 
 void NPCGenDispatch(SysMsg *msg) {
     s32 id = msg->to;
@@ -3603,7 +4024,383 @@ s32 NPCLosToPCProcess(s32 self, s32 pc) {
     return seen;
 }
 
+/* _LOSPoint2Point query, see gtegeo.c */
+typedef struct NPCLosP2P {
+    /* 0x00 */ VECTOR32 *from;
+    /* 0x04 */ VECTOR32 *to;
+    /* 0x08 */ s32 unk08;
+    /* 0x0C */ Gobj *gobj;
+    /* 0x10 */ s32 unk10[3];
+    /* 0x1C */ u8 *hit;
+    /* 0x20 */ s32 unk20;
+    /* 0x24 */ s32 unk24;
+    /* 0x28 */ s32 unk28;
+    /* 0x2C */ s32 unk2C;
+    /* 0x30 */ s32 unk30;
+} NPCLosP2P;
+
+/* _LOSPointAlongDirection query, see gtegeo.c */
+typedef struct NPCLosRay {
+    /* 0x00 */ VECTOR32 *from;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ s32 unk08;
+    /* 0x0C */ s32 unk0C;
+    /* 0x10 */ VECTOR32 *dir;
+    /* 0x14 */ s32 unk14;
+    /* 0x18 */ s32 length;
+    /* 0x1C */ u8 *hit;
+    /* 0x20 */ VECTOR32 *point;
+    /* 0x24 */ VECTOR32 *normal;
+    /* 0x28 */ s32 unk28;
+    /* 0x2C */ u8 *hitWindow;
+    /* 0x30 */ NPCLosP2P *window;
+} NPCLosRay;
+
+extern s32 D_8010F974; /* NPCLosCheck: npcList resume index */
+extern s32 D_8010F978; /* NPCLosCheck: phase (-1 camera, 0 target, 1 dead) */
+void _LOSPoint2Point(NPCLosP2P *q);
+void _LOSPointAlongDirection(NPCLosRay *q);
+s16 LOSGetSortOrder(void);
+s32 HMDLOSLoop(GameObjectAnim *anim);
+void func_801442B4(void *threat, u8 *inSight);
+void NPCLosUpdateOtherStuff(s32 id);
+
+#ifdef NON_MATCHING
+/* draft: structure follows the m2c output; not yet matched */
+void NPCLosCheck(void) {
+    VECTOR32 dir;
+    VECTOR32 from;
+    u8 inSight;
+    VECTOR32 a;
+    VECTOR32 b;
+    s32 dist;
+    NPCLosP2P p2p;
+    u8 hitP2P;
+    NPCLosRay ray;
+    u8 hit;
+    u8 hitWindow;
+    s32 d2;
+    Gobj *player;
+    s32 tries;
+    s32 done = 0;
+    s32 id;
+    s32 i;
+    Gobj *obj;
+    Gobj *self;
+    Gobj *aim;
+    TargetInfo *target;
+    s32 forced;
+    s32 hitId;
+    u32 n;
+    LOSHit *h;
+    LOSHit *last;
+    s32 type;
+
+    tries = 2;
+    if ((u32)gExeTick < 5) {
+        return;
+    }
+    player = gameObjectsInfo[gPlayerOffset].runtime;
+    for (;;) {
+        id = -1;
+        i = D_8010F974;
+        getNPCIndex = D_8010F974;
+        NPC_SCAN_IDS(id, i)
+        if (id < 0) {
+            getNPCIndex = 0;
+            if (--tries == 0) {
+                D_8010F974 = 0;
+                goto update;
+            }
+            if (++D_8010F978 > 0) {
+                D_8010F978 = -1;
+            }
+            id = gPlayerOffset;
+            if (id == gPlayerOffset) {
+                id = NPCGetFirstID();
+                if (id < 0) {
+                    getNPCIndex = 0;
+                    goto update;
+                }
+            }
+        }
+        obj = gameObjectsInfo[id].runtime;
+        D_8010F974 = getNPCIndex;
+        if (GOBJ_TYPE(obj->id) == 3) {
+            func_801442B4(&obj->target->threat, &inSight);
+            if (((obj->target->flags >> 3) & 1) != inSight) {
+                if (inSight) {
+                    InterfaceAddNPC(obj->id);
+                } else if (obj->npc != NULL) {
+                    InterfaceRemoveNPC(obj->id);
+                }
+                obj->target->flags = (obj->target->flags & ~8) | ((inSight & 1) << 3);
+            }
+            if (!inSight) {
+                player->target->targetId = -1;
+            }
+            D_8010F974 = getNPCIndex;
+            return;
+        }
+        if (!EGSDisplayHMDInActiveSector(obj->anim)) {
+            obj->target->flags &= ~2;
+            goto update;
+        }
+        if (obj->healthInfo->health <= 0 && D_8010F978 > 0) {
+            if (id != gPlayerOffset) {
+                b = gameObjectsInfo[gPlayerOffset].runtime->move->unk10C;
+                a.vx = obj->anim->frame->pos.vx;
+                a.vy = obj->anim->frame->pos.vy;
+                a.vz = obj->anim->frame->pos.vz;
+                a.vy = -a.vy;
+                EGSGeometry_GetFuzzyDistancePoint2Point(&a, &b, &dist);
+                NPC_OF(obj)->unk28 = dist;
+            }
+        } else if (D_8010F978 < 0) {
+            self = gameObjectsInfo[id].runtime;
+            b = self->move->unk10C;
+            b.vy += 0x20;
+            a.vx = ((EGSFrame *)*gCamera)->pos.vx;
+            a.vy = ((EGSFrame *)*gCamera)->pos.vy;
+            done = 1;
+            a.vz = ((EGSFrame *)*gCamera)->pos.vz;
+            p2p.from = &a;
+            p2p.to = &b;
+            a.vy = -a.vy;
+            p2p.unk08 = 0;
+            p2p.gobj = self;
+            p2p.hit = &hitP2P;
+            p2p.unk20 = 0;
+            p2p.unk24 = 0;
+            p2p.unk28 = 0;
+            p2p.unk2C = 0;
+            p2p.unk30 = 0;
+            _LOSPoint2Point(&p2p);
+            *(s16 *)&self->anim->unk14[2] = self->cas->active != 8 ? LOSGetSortOrder() : -1;
+            if (hitP2P == 0 && *(u32 *)&losHitsSorted[0]->unk00[4] < 0x80) {
+                self->anim->unk00[0xB] &= ~0x40;
+                if (self->healthInfo->health == -1) {
+                    self->anim->unk00[0xB] &= ~0x20;
+                }
+            } else {
+                self->anim->unk00[0xB] |= 0x40;
+                if (hitP2P && id != gPlayerOffset && (self->anim->unk00[8] & 0x40) && self->healthInfo->health > 0) {
+                    NPCSetLOSFirstSeen(self, 1, 1);
+                } else if (self->healthInfo->health <= 0) {
+                    self->anim->unk00[0xB] |= 0x20;
+                }
+            }
+        } else if (D_8010F978 == 0) {
+            last = NULL;
+            hitWindow = 0;
+            hit = 0;
+            self = gameObjectsInfo[id].runtime;
+            target = self->target;
+            forced = 0;
+            if (id != gPlayerOffset) {
+                if (target->targetId != gPlayerOffset && id != gObjPlayer->target->targetId
+                    && (NPC_OF(self)->flags & 0x10000000)) {
+                    type = GOBJ_TYPE(id);
+                    if (type != GOBJ_TYPE_COP && type != 0x4C && type != 0x5C) {
+                        forced = 1;
+                    }
+                }
+                if (!(NPC_OF(self)->flags & 0x10000000)) {
+                    NPC_OF(self)->flags |= 0x10000000;
+                } else {
+                    NPC_OF(self)->flags &= ~0x10000000;
+                }
+            }
+            if (forced) {
+                from.vx = (*self->anim->frames)->pos.vx;
+                from.vy = -(*self->anim->frames)->pos.vy - 8;
+                from.vz = (*self->anim->frames)->pos.vz;
+                dir.vx = (*gObjPlayer->anim->frames)->pos.vx - from.vx;
+                dir.vy = -(*gObjPlayer->anim->frames)->pos.vy - 8 - from.vy;
+                dir.vz = (*gObjPlayer->anim->frames)->pos.vz - from.vz;
+                ray.from = &from;
+                ray.dir = &dir;
+                ray.length = 0x1900;
+                ray.unk08 = 0;
+                ray.unk0C = 0;
+                ray.hit = &hit;
+                ray.point = NULL;
+                ray.normal = NULL;
+                ray.unk28 = 0;
+                ray.hitWindow = NULL;
+                ray.window = NULL;
+                _LOSPointAlongDirection(&ray);
+                done = 1;
+                if (!hit) {
+                    hit = NPCLosToPCProcess(id, gPlayerOffset);
+                }
+                target->flags = (target->flags & ~0x10) | ((hit & 1) << 4);
+                goto update;
+            }
+            aim = NULL;
+            if (target->targetId >= 0) {
+                aim = gameObjectsInfo[target->targetId].runtime;
+                if (aim != NULL
+                    && ((aim->anim->frames != NULL && self->anim->frames != NULL)
+                        || ((NPC_OF(self)->flags & 0x20000000) && aim->id == gameObjectsInfo[self->id].refId))) {
+                    if (aim->id == gPlayerOffset && D_8011E8C8.pad) {
+                        dir.vx = D_8011E8C8.vx;
+                        dir.vy = D_8011E8C8.vy;
+                        dir.vz = D_8011E8C8.vz;
+                    } else if (aim->npcState == 1 || aim->npcState == 2) {
+                        dir.vx = (*aim->anim->frames)->pos.vx;
+                        dir.vy = -(*aim->anim->frames)->pos.vy - 8;
+                        dir.vz = (*aim->anim->frames)->pos.vz;
+                    } else {
+                        dir.vx = aim->anim->frame->pos.vx;
+                        dir.vy = -aim->anim->frame->pos.vy;
+                        dir.vz = aim->anim->frame->pos.vz;
+                    }
+                    from.vx = (*self->anim->frames)->pos.vx;
+                    from.vy = -(*self->anim->frames)->pos.vy - 8;
+                    from.vz = (*self->anim->frames)->pos.vz;
+                    done = 1;
+                    dir.vx -= from.vx;
+                    dir.vy -= from.vy;
+                    dir.vz -= from.vz;
+                }
+            }
+            if (!done) {
+                done = 1;
+                if (self->npcState == 1 || self->npcState == 2) {
+                    from.vx = (*self->anim->frames)->pos.vx;
+                    from.vy = -(*self->anim->frames)->pos.vy - 8;
+                    from.vz = (*self->anim->frames)->pos.vz;
+                } else {
+                    from.vx = self->anim->frame->pos.vx;
+                    from.vy = -self->anim->frame->pos.vy;
+                    from.vz = self->anim->frame->pos.vz;
+                }
+                if (self->id == gPlayerOffset && (self->cas->flags & 0x2000000)) {
+                    dir.vx = ((EGSFrame *)*gCamera)->m[0][2];
+                    dir.vy = 0;
+                    dir.vz = ((EGSFrame *)*gCamera)->m[2][2];
+                } else {
+                    dir.vx = self->anim->frame->m[0][2];
+                    dir.vy = -self->anim->frame->m[1][2];
+                    dir.vz = self->anim->frame->m[2][2];
+                }
+                aim = NULL;
+            }
+            ray.from = &from;
+            ray.dir = &dir;
+            ray.length = 0x1900;
+            ray.hit = &hit;
+            ray.point = TARGET_AIM(target);
+            ray.normal = (VECTOR32 *)((u8 *)target + 0x84);
+            ray.hitWindow = &hitWindow;
+            ray.unk08 = 0;
+            ray.unk0C = 0;
+            ray.unk28 = 0;
+            ray.window = &p2p;
+            _LOSPointAlongDirection(&ray);
+            last = NULL;
+            for (n = 0; n < losSortedCount; n++) {
+                h = losHitsSorted[n];
+                hitId = LOSHitGobjId(h);
+                if (hitId == id) {
+                    continue;
+                }
+                last = h;
+                if (hitId >= 0) {
+                    if (aim != NULL && hitId == aim->id) {
+                        if (gameObjectsInfo[hitId].runtime->npcState == 1 || gameObjectsInfo[hitId].runtime->npcState == 2) {
+                            HMDLOSLoop(gameObjectsInfo[hitId].runtime->anim);
+                        }
+                        *TARGET_AIM(target) = *(VECTOR32 *)((u8 *)last + 0x20);
+                        *(VECTOR32 *)((u8 *)target + 0x84) = *(VECTOR32 *)((u8 *)last + 0x10);
+                        hit = 1;
+                        last = n + 1 < losSortedCount ? losHitsSorted[n + 1] : NULL;
+                        break;
+                    }
+                    if (gameObjectsInfo[hitId].runtime->npcState == 2 && !HMDLOSLoop(gameObjectsInfo[hitId].runtime->anim)) {
+                        continue;
+                    }
+                } else if (h->type == 2) {
+                    continue;
+                }
+                hit = 0;
+                break;
+            }
+            if (last != NULL) {
+                *(VECTOR32 *)((u8 *)target + 0x74) = *(VECTOR32 *)((u8 *)last + 0x20);
+                *(VECTOR32 *)((u8 *)target + 0x94) = *(VECTOR32 *)((u8 *)last + 0x10);
+                target->unk60 = ((s16 *)*(void **)((u8 *)last + 0x4C))[1] & 0x3F;
+                *(s16 *)target->unk5C = last->type == 1 ? last->owner->id & 0x3FF : -1;
+            } else {
+                GTEMath_VectorNormal(&dir, &dir);
+                ((VECTOR32 *)((u8 *)target + 0x94))->vx = dir.vx;
+                ((VECTOR32 *)((u8 *)target + 0x94))->vy = dir.vy;
+                ((VECTOR32 *)((u8 *)target + 0x94))->vz = dir.vz;
+                ((VECTOR32 *)((u8 *)target + 0x74))->vx = from.vx + dir.vx;
+                ((VECTOR32 *)((u8 *)target + 0x74))->vy = from.vy + dir.vy;
+                *(s16 *)target->unk5C = -1;
+                target->unk60 = 0x19;
+                ((VECTOR32 *)((u8 *)target + 0x74))->vz = from.vz + dir.vz;
+            }
+            if (aim->id == gPlayerOffset && D_8011E8C8.pad && !hit) {
+                EGSGeometry_GetFuzzyDistancePoint2Point(&from, TARGET_AIM(target), &d2);
+                if (NPC_OF(self)->unk28 < d2) {
+                    hit = 1;
+                }
+            }
+            target->flags = (target->flags & ~2) | ((hit & 1) << 1);
+            target->unk5A = aim->id;
+            if (hitWindow && (u8)(s32)p2p.to == 2) {
+                target->unk5E = ((s16 *)p2p.from)[1];
+            } else {
+                target->unk5E = -1;
+            }
+            if (aim->id == gPlayerOffset) {
+                if (hit && (self->anim->unk00[8] & 0x40)) {
+                    NPCSetLOSFirstSeen(self, 1, 1);
+                }
+                if (!hit) {
+                    hit = NPCLosToPCProcess(id, gPlayerOffset);
+                }
+                target->flags = (target->flags & ~0x10) | ((hit & 1) << 4);
+            } else if (self->id == gPlayerOffset) {
+                if (hit && *(s16 *)target->unk5C >= 0) {
+                    Gobj *seen = gameObjectsInfo[*(s16 *)target->unk5C].runtime;
+
+                    if (seen->npcState == 2) {
+                        if (NPC_OF(aim)->awareness != 0) {
+                            npcRequestKneel(aim);
+                        }
+                        if (NPC_OF(seen)->awareness != 0) {
+                            npcRequestKneelRelease(seen);
+                        }
+                    }
+                }
+                if (aim != NULL) {
+                    if (!hit) {
+                        hit = NPCLosToPCProcess(gPlayerOffset, id);
+                    }
+                    aim->target->flags = (aim->target->flags & ~0x10) | ((hit & 1) << 4);
+                }
+            }
+        }
+        if (done) {
+            break;
+        }
+    }
+update:
+    if (id >= 0) {
+        NPCLosUpdateOtherStuff(id);
+        if (npcAlertByScream) {
+            npcAlertByScream--;
+        }
+    }
+    NPCDoShootingSchedule();
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/npc", NPCLosCheck);
+#endif
 
 void NPCInitSlot(Gobj *obj, s32 slot) {
     VECTOR32 from;
