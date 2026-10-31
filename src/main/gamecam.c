@@ -1268,7 +1268,24 @@ void GameCameraInit(void) {
     CameraAccessMoveInfo(gCamera, 1, 8, 3);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", GameCameraActivate);
+void GameCameraActivate(on, primary)
+    u8 on;
+    Gobj *primary;
+{
+    if (on) {
+        if (!primary) {
+            if (!D_80113B2C.primary) {
+                return;
+            }
+        } else {
+            D_80113B2C.primary = primary;
+        }
+        if (D_80113B2C.mode == -1) {
+            GameCameraSetModeDefault(1, primary, 1);
+        }
+    }
+    CameraActivate(gCamera, on);
+}
 
 void GameCameraDisplay(u8 on) {
     CameraDisplay(gCamera, on);

@@ -257,9 +257,20 @@ typedef struct IfacePoly24 {
     /* 0x10 */ u8 unk10[0x14];
 } IfacePoly24;
 
+/* Gouraud quad (EGS display link + POLY_G4). */
 typedef struct IfacePoly30 {
     /* 0x00 */ s32 link;
-    /* 0x04 */ u8 unk04[0x2C];
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ u32 tag;
+    /* 0x0C */ s32 c0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ s32 c1;
+    /* 0x18 */ s32 xy1;
+    /* 0x1C */ s32 c2;
+    /* 0x20 */ s32 xy2;
+    /* 0x24 */ s32 c3;
+    /* 0x28 */ s32 xy3;
+    /* 0x2C */ s32 unk2C;
 } IfacePoly30;
 
 /* Weapon icon sprite ranges, indexed by IfaceWeaponInfo.sprite. */
@@ -282,7 +293,7 @@ typedef struct IfacePolyG3 {
     /* 0x20 */ s32 xy2;
 } IfacePolyG3;
 
-extern IfacePoly24 D_80117C70[2];       /* radar */
+extern IfacePoly4 D_80117C70[2];        /* radar frame */
 extern IfacePoly24 D_80117CB8[2];
 extern IfacePolyG3 D_80117D00;
 extern IfaceLine D_80117D24[5];
@@ -318,8 +329,8 @@ extern s16 mTargetCursorPosition;
 extern s16 D_8011031A;
 extern s16 D_8011031C;
 extern s32 D_801185C4;
-extern IfacePoly24 D_80117A30[6];
-extern IfacePoly24 D_80117B08;
+extern IfacePoly4 D_80117A30[6];  /* radar NPC boxes */
+extern IfacePoly4 D_80117B08;     /* radar target box */
 extern const s32 D_80011C18[];          /* menu background vertices, (y << 16) | x */
 extern const u8 D_80011D10[7][4];       /* menu background quads (indices into D_80011C18) */
 s32 SquareRoot0(s32 x);
@@ -570,7 +581,7 @@ void func_8003C4F8(s32 slot, s32 level) {
     s32 k;
 
     D_80117C58[slot] = level;
-    blip = &D_80117A30[slot];
+    blip = (IfacePoly24 *)&D_80117A30[slot];
     if (level < 0) {
         level = 0xFA6464;
     } else if (level < 0x553) {
@@ -617,7 +628,177 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003C4F8);
 
 INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D3C);
 
+static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
+    pt->p.vx += d->p.vx;
+    pt->p.vy += d->p.vy;
+}
+
+/* Offsets a packed screen point to the radar centre. */
+static inline s32 iRadarXY(s32 xy) {
+    IfacePointW pt;
+    IfacePointW center;
+
+    center.w = 0x50FF67;
+    pt.w = xy;
+    iPointAdd(&pt, &center);
+    {
+        u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
+    }
+    return pt.w;
+}
+
+int rsin(int a);
+
+#ifdef NON_MATCHING
+/* corner loop and switch match; the threat-arrow block hoists all four +-24/+-20 constants into s-registers (original keeps only 24 in s5) and the frame is 0x60 instead of 0x78 */
+/* Radar blip for NPC slot at radar-space pos (vx, vy): corner box, target box, threat arrow. */
+void func_8003C724(s32 slot, VECTOR32 *pos) {
+    s32 w;
+    s32 h;
+    s32 x;
+    s32 y;
+    s32 n;
+    s32 i;
+    s32 d;
+    s32 cx;
+    s32 cy;
+    s32 xy;
+
+    if (D_80105F30[0] >= 12) {
+        w = 24;
+        h = 20;
+    } else {
+        w = D_80105F30[0] * 2;
+        h = D_80105F30[0] * 20 / 12;
+    }
+    x = pos->vx;
+    y = pos->vy;
+    if (x > w) {
+        x = w;
+    } else if (x < -w) {
+        x = -w;
+    }
+    if (y > h) {
+        y = h;
+    } else if (y < -h) {
+        y = -h;
+    }
+    n = 4;
+    if (gObjPlayer->target->targetId == D_80117B2C[slot] && gTargetModeFlag) {
+        n = 8;
+    }
+    for (i = 0; i < n; i++) {
+        d = 1;
+        if (i >= 4) {
+            d = 2;
+        }
+        if (i & 1) {
+            cx = x + d;
+            if (w < cx) {
+                cx = w;
+            }
+        } else if (x - d < -w) {
+            cx = -w;
+        } else {
+            cx = x - d;
+        }
+        if (i & 2) {
+            cy = y + d;
+            if (h < cy) {
+                cy = h;
+            }
+        } else if (y - d < -h) {
+            cy = -h;
+        } else {
+            cy = y - d;
+        }
+        xy = iRadarXY(XY(cx, cy));
+        switch (i) {
+        case 0:
+            D_80117A30[slot].xy[0] = xy;
+            break;
+        case 1:
+            D_80117A30[slot].xy[1] = xy;
+            break;
+        case 2:
+            D_80117A30[slot].xy[2] = xy;
+            break;
+        case 3:
+            D_80117A30[slot].xy[3] = xy;
+            break;
+        case 4:
+            D_80117B08.xy[0] = xy;
+            break;
+        case 5:
+            D_80117B08.xy[1] = xy;
+            break;
+        case 6:
+            D_80117B08.xy[2] = xy;
+            break;
+        case 7:
+            D_80117B08.xy[3] = xy;
+            break;
+        }
+    }
+    if (D_80117C58[slot] >= 0xE66) {
+        IfacePoint p[3];
+        IfacePoint *pp;
+        s32 angle;
+        s32 a;
+        s32 s;
+        s32 c;
+        s32 kx;
+        s32 ky;
+
+        angle = ratan2(y, x);
+        D_80117B38[slot].xy0 = iRadarXY(0);
+        for (pp = p; pp < &p[2]; pp++) {
+            if (pp != p) {
+                a = angle - 0xAA;
+            } else {
+                a = angle + 0xAA;
+            }
+            s = rsin(a);
+            c = rcos(a);
+            if (s == 0) {
+                pp->vy = 0;
+                pp->vx = c > 0 ? 24 : -24;
+            } else if (c == 0) {
+                pp->vx = 0;
+                pp->vy = s > 0 ? 20 : -20;
+            } else {
+                kx = 0x18000 / c;
+                ky = 0x14000 / s;
+                if (kx < 0) {
+                    kx = -kx;
+                }
+                if (ky < 0) {
+                    ky = -ky;
+                }
+                if (kx < ky) {
+                    pp->vy = FIX12(s * 31);
+                    pp->vx = c > 0 ? 24 : -24;
+                } else {
+                    pp->vx = FIX12(c * 31);
+                    pp->vy = s > 0 ? 20 : -20;
+                }
+            }
+        }
+        if (p[0].vx == p[1].vx || p[0].vy == p[1].vy) {
+            p[2].vx = (p[0].vx + p[1].vx) / 2;
+            p[2].vy = (p[0].vy + p[1].vy) / 2;
+        } else {
+            p[2].vx = ABS(p[0].vx) < ABS(p[1].vx) ? p[1].vx : p[0].vx;
+            p[2].vy = ABS(p[0].vy) < ABS(p[1].vy) ? p[1].vy : p[0].vy;
+        }
+        D_80117B38[slot].xy1 = iRadarXY(XY(p[0].vx, p[0].vy));
+        D_80117B38[slot].xy2 = iRadarXY(XY(p[1].vx, p[1].vy));
+        D_80117B38[slot].xy3 = iRadarXY(XY(p[2].vx, p[2].vy));
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003C724);
+#endif
 
 void iInterfaceRadarRemove(void) {
     s32 i;
@@ -630,7 +811,7 @@ void iInterfaceRadarRemove(void) {
     for (i = 0; i < 5; i++) {
         EGSDisplayDeletePoly(gInterfaceWindow, &D_80117D24[i]);
     }
-    for (i = 0, blip = D_80117B38, p = D_80117A30; i < 6; i++, p++) {
+    for (i = 0, blip = D_80117B38, p = (IfacePoly24 *)D_80117A30; i < 6; i++, p++) {
         if (p->link) {
             EGSDisplayDeletePoly(gInterfaceWindow, p);
         }
@@ -706,7 +887,7 @@ void func_8003D0E8(s32 polyColor, s32 lineColor, s32 textColor) {
 
     polyColor &= 0xFFFFFF;
     for (i = 0; i < 2; i++) {
-        D_80117C70[i].color = polyColor | 0x28000000;
+        D_80117C70[i].color.word = polyColor | 0x28000000;
         SET_SEMI_TRANS(&D_80117C70[i].tag);
     }
     lineColor &= 0xFFFFFF;
@@ -882,25 +1063,6 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003DF74);
 #endif
 
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003E13C);
-
-static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
-    pt->p.vx += d->p.vx;
-    pt->p.vy += d->p.vy;
-}
-
-/* Offsets a packed screen point to the radar centre. */
-static inline s32 iRadarXY(s32 xy) {
-    IfacePointW pt;
-    IfacePointW center;
-
-    center.w = 0x50FF67;
-    pt.w = xy;
-    iPointAdd(&pt, &center);
-    {
-        u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
-    }
-    return pt.w;
-}
 
 /* Radar: the player's arrow (rotated into view space by m) and the compass letters. */
 void func_8003E894(GOBJ_MATRIX *m) {
@@ -1814,7 +1976,115 @@ IfaceLine *func_80041378(IfaceLine *lines, s32 count, s32 color, s32 trans) {
     return lines;
 }
 
+extern const u8 D_80011C10[];        /* per mode: keeps the target cursor */
+extern const IfacePoint D_80011BE0[]; /* weapon-select bar origins, [0] unused here */
+void TextMoveString(u16 str, s32 x, s32 y);
+
+/* n * lvl / 12; inlined, so a constant n stays a mult. */
+static inline s32 iLevelScale(s32 n, s32 lvl) {
+    return n * lvl / 12;
+}
+
+#ifdef NON_MATCHING
+/* the D_80117D24 line pointer stays in s0 from the line-0 stores to the loop (original reloads the base just before it), which shifts w/h/lvl registers */
+/* Radar view (mode 1): one zoom step of the radar frame, weapon icons and text. */
+u8 func_8004146C(u8 active) {
+    s32 *level;
+    s32 lvl;
+    s32 w;
+    s32 h;
+    s32 i;
+    s32 len;
+    s32 x;
+    s32 y;
+    IfaceLine *line;
+
+    if (D_80011C10[D_8010F8AC] == 0 && !active) {
+        iDeleteTargetCursor();
+        return 0;
+    }
+    level = &D_80105F30[0];
+    if (!func_80040F08(active, level)) {
+        return 0;
+    }
+    lvl = *level;
+    if (!active) {
+        if (lvl < 0) {
+            if (D_8010F887) {
+                iInterfaceRadarRemove();
+            }
+            for (i = 0, line = D_80117D9C; i < 4; i++, line++) {
+                if (line->link) {
+                    EGSDisplayDeletePoly(gInterfaceWindow, line);
+                }
+            }
+            return 0;
+        }
+        iDeleteTargetCursor();
+    } else if (lvl == 0) {
+        if (D_8010F887) {
+            iInterfaceRadarAdd();
+        }
+        func_80041378(D_80117D9C, 4, 0xE77E6B, 1);
+    }
+
+    w = lvl * 2;
+    h = lvl * 20 / 12;
+    D_80117C70[0].xy[0] = iRadarXY(XY(-w, -h));
+    D_80117C70[0].xy[1] = iRadarXY(XY(w, -h));
+    D_80117C70[0].xy[2] = iRadarXY(XY(-w, h));
+    D_80117C70[0].xy[3] = iRadarXY(XY(w, h));
+    D_80117D00.xy1 = iRadarXY(XY(-w, -h));
+    D_80117D00.xy2 = iRadarXY(XY(w, -h));
+    line = D_80117D24;
+    line->xy0 = iRadarXY(XY(-w, 0));
+    line->xy1 = iRadarXY(XY(w - 1, 0));
+
+    w = lvl * 18 / 12 * lvl / 12;
+    h = lvl * 15 / 12 * lvl / 12;
+    D_80117C70[1].xy[0] = iRadarXY(XY(-w, -h));
+    D_80117C70[1].xy[1] = iRadarXY(XY(w, -h));
+    D_80117C70[1].xy[2] = iRadarXY(XY(-w, h));
+    D_80117C70[1].xy[3] = iRadarXY(XY(w, h));
+
+    h -= 7;
+    if (h < 0) {
+        h = 0;
+    }
+    w = h ? 9 : 0;
+    for (i = 1, line++; i < 5; i++, line++) {
+        line->xy0 = iRadarXY(XY((i & 1) ? w : -w, (i & 1) ? h : -h));
+        line->xy1 = iRadarXY(XY((i & 2) ? w : -w, (i & 2) ? -h : h));
+    }
+
+    line = D_80117D9C;
+    line->xy0 = XY(-182, -94);
+    line->xy1 = XY(-182, lvl * 30 / 12 - 94);
+    for (i = 1, line++; i < 4; i++, line++) {
+        len = D_80011BE0[i].vx + 178;
+        len = len * lvl / 12 * 4 - len * 3;
+        if (len > 0) {
+            line->xy0 = XY(-181, D_80011BE0[i].vy);
+            line->xy1 = XY(len - 182, D_80011BE0[i].vy);
+        } else {
+            line->xy0 = line->xy1 = 0x04000400;
+        }
+    }
+
+    x = 404 - iLevelScale(271, lvl);
+    y = 91;
+    for (i = 0; i < 23; i++) {
+        SpriteSetMultiXY(&D_80117514[i], x, y);
+    }
+    TextMoveString(D_8010F890, x - 15, y + 3);
+    if (D_8010F892 != 0xFFFF) {
+        TextMoveString(D_8010F892, -153, 130 - lvl * 80 / 12);
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8004146C);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80041BCC);
 
@@ -1822,12 +2092,158 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_80042DA4);
 
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80043B04);
 
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_80044AC0);
+extern char *gStringSnifferSpareText;
+extern char *D_80107828;
+extern char *D_8010782C;
+u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
+void TextSetWindowMini(u8 window, s32 on);
+void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
+void TextSetWindowJustification(u8 window, s32 just);
+void TextRemoveWindow(u8 window);
+void EGSDisplayInfraredOn(void *camera, s32 mode);
+void EGSDisplayInfraredOff(void *camera, s32 mode);
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+static inline s32 iMax(s32 a, s32 b) {
+    return a < b ? b : a;
+}
+
+/* Infrared view (mode 5): one zoom step of the line frame. */
+u8 func_80044AC0(u8 active) {
+    s32 *level = &D_80105F30[4];
+    s32 lvl;
+    s32 i;
+    s32 y;
+    s32 x;
+    s32 bx;
+    s32 by;
+    s32 by2;
+    s32 ox;
+    s32 oy;
+    s32 ix;
+    s32 iy;
+
+    if (!func_80040F08(active, level)) {
+        return 0;
+    }
+    lvl = *level;
+    if (!active) {
+        if (gSpareTextWindow != 0xFF) {
+            TextRemoveWindow(gSpareTextWindow);
+            gSpareTextWindow = 0xFF;
+        }
+    } else if (lvl >= 9 && gSpareTextWindow == 0xFF) {
+        gSpareTextWindow = TextAddWindow(-132, 36, 100, 100);
+        TextSetWindowMini(gSpareTextWindow, 1);
+        TextSetWindowColor(gSpareTextWindow, 0x7F, 0x52, 0x27);
+        TextSetWindowJustification(gSpareTextWindow, 1);
+        TextAddString(gSpareTextWindow, gStringSnifferSpareText, 45, 0);
+        TextAddString(gSpareTextWindow, D_80107828, 45, 0);
+        TextAddString(gSpareTextWindow, D_8010782C, 30, 0);
+    }
+    if (lvl == 0) {
+        if (active) {
+            EGSDisplayInfraredOn(*gCamera, 1);
+            func_8003D0E8(0x1E5080, 0x4DAEFF, 0x20D0D0);
+            SysStatePush(6);
+            for (i = 0; i < 28; i++) {
+                EGSDisplayBuildLineF(&D_80118264[i], 0x4DAEFF, 0, 0);
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[i]);
+            }
+            D_80118264[0].xy0 = XY(0, 120);
+            D_80118264[1].xy0 = XY(0, -120);
+            D_80118264[6].xy0 = XY(192, 0);
+            D_80118264[7].xy0 = XY(-192, 0);
+        } else {
+            EGSDisplayInfraredOff(*gCamera, 1);
+            func_8003D0E8(0x503028, 0xE77E6B, 0xD0D0D0);
+            SysStatePush(6);
+            for (i = 0; i < 28; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[i]);
+            }
+        }
+    }
+
+    y = iMax(120 - lvl * 10, 26);
+    D_80118264[0].xy1 = XY(0, y);
+    D_80118264[1].xy1 = XY(0, -y);
+    D_80118264[2].xy0 = XY(-42, y);
+    D_80118264[2].xy1 = XY(42, y);
+    D_80118264[3].xy0 = XY(-42, -y);
+    D_80118264[3].xy1 = XY(42, -y);
+    D_80118264[4].xy0 = XY(-42, y);
+    D_80118264[4].xy1 = XY(-42, y + 8);
+    D_80118264[5].xy0 = XY(-42, y + 8);
+    D_80118264[5].xy1 = XY(-32, y + 8);
+
+    x = iMax(192 - lvl * 16, 36);
+    D_80118264[6].xy1 = XY(x, 0);
+    D_80118264[7].xy1 = XY(-x, 0);
+    D_80118264[8].xy0 = XY(x, 10);
+    D_80118264[8].xy1 = XY(x, -10);
+    D_80118264[9].xy0 = XY(-x, 10);
+    D_80118264[9].xy1 = XY(-x, -10);
+
+    bx = lvl * 58 / 12 - 29;
+    if (bx < 0) {
+        bx = 0;
+    }
+    by = lvl * 40 / 12 - 20;
+    if (by < 0) {
+        by = 0;
+    }
+    by2 = by - 7;
+    if (bx != 0 || by != 0) {
+        D_80118264[10].xy0 = XY(-bx, -by2);
+        D_80118264[10].xy1 = D_80118264[11].xy0 = XY(-bx, -by);
+        D_80118264[11].xy1 = D_80118264[12].xy0 = XY(bx, -by);
+        D_80118264[12].xy1 = D_80118264[13].xy0 = XY(bx, by);
+        D_80118264[13].xy1 = D_80118264[14].xy0 = XY(-bx, by);
+        D_80118264[14].xy1 = XY(-bx, by2);
+        D_80118264[15].xy0 = XY(bx, -by2);
+        D_80118264[15].xy1 = D_80118264[16].xy0 = XY(bx, -by);
+        D_80118264[16].xy1 = D_80118264[17].xy0 = XY(-bx, -by);
+        D_80118264[17].xy1 = D_80118264[18].xy0 = XY(-bx, by);
+        D_80118264[18].xy1 = D_80118264[19].xy0 = XY(bx, by);
+        D_80118264[19].xy1 = XY(bx, by2);
+    } else {
+        D_80118264[10].xy0 = D_80118264[10].xy1 = D_80118264[11].xy0 = D_80118264[11].xy1 =
+        D_80118264[12].xy0 = D_80118264[12].xy1 = D_80118264[13].xy0 = D_80118264[13].xy1 =
+        D_80118264[14].xy0 = D_80118264[14].xy1 = D_80118264[15].xy0 = D_80118264[15].xy1 =
+        D_80118264[16].xy0 = D_80118264[16].xy1 = D_80118264[17].xy0 = D_80118264[17].xy1 =
+        D_80118264[18].xy0 = D_80118264[18].xy1 = D_80118264[19].xy0 = D_80118264[19].xy1 = 0x04000400;
+    }
+
+    ox = lvl * 11;
+    oy = lvl * 41 / 12;
+    ix = ox - MIN(lvl * 32 / 12, 16);
+    if (ox - MIN(lvl * 32 / 12, 16) < 0) {
+        ix = 0;
+    }
+    iy = oy - MIN(lvl * 16 / 12, 8);
+    if (oy - MIN(lvl * 16 / 12, 8) < 0) {
+        iy = 0;
+    }
+    D_80118264[20].xy0 = D_80118264[21].xy0 = XY(-ox, -oy);
+    D_80118264[20].xy1 = XY(-ox, -iy);
+    D_80118264[21].xy1 = XY(-ix, -oy);
+    D_80118264[22].xy0 = D_80118264[23].xy0 = XY(ox, -oy);
+    D_80118264[22].xy1 = XY(ox, -iy);
+    D_80118264[23].xy1 = XY(ix, -oy);
+    D_80118264[24].xy0 = D_80118264[25].xy0 = XY(ox, oy);
+    D_80118264[24].xy1 = XY(ox, iy);
+    D_80118264[25].xy1 = XY(ix, oy);
+    D_80118264[26].xy0 = D_80118264[27].xy0 = XY(-ox, oy);
+    D_80118264[26].xy1 = XY(-ox, iy);
+    D_80118264[27].xy1 = XY(-ix, oy);
+    return 1;
+}
 
 #ifdef NON_MATCHING
-/* regalloc (s-register order); also the original keeps &D_80105F44 in s1 across the first call (see func_800453F8) */
+/* regalloc (s-register order) and the line pointer init lands after the loop entry test */
 u8 func_800451DC(u8 active) {
-    s32 *level = &D_80105F44;
+    s32 *level = &D_80105F30[5];
     s32 lvl;
     s32 i;
     s32 n;
@@ -1886,19 +2302,14 @@ u8 func_800451DC(u8 active) {
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_800451DC);
 #endif
 
-#ifdef NON_MATCHING
-/* the original keeps &D_80105F48 in s1 across the first call; GCC here rematerializes it */
 u8 func_800453F8(u8 on) {
-    s32 *level = (s32 *)&D_80105F48;
+    s32 *level = &D_80105F30[6];
 
-    if (func_80040F08(on, level) != 0) {
-        return func_801417D0(on, *level);
+    if (!func_80040F08(on, level)) {
+        return 0;
     }
-    return 0;
+    return func_801417D0(on, *level);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_800453F8);
-#endif
 
 #ifdef NON_MATCHING
 /* regalloc: old lands in a1 instead of v1, so the gInterfaceOn load is scheduled above the sb */
