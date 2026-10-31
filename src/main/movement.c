@@ -606,7 +606,7 @@ s32 func_8004966C(Gobj *gobj) {
 }
 
 #ifdef NON_MATCHING
-/* lowest-point loop: the original addresses points[] through two induction pointers */
+/* 2 insns: the loop-preheader inits of pt (sp+0x48) and the points[i] giv (sp+0x28) are scheduled in the other order */
 /*
  * Static inline in the original (inlined into iMovementUpdate1_2); global with an
  * out-of-line copy here since asm MovementGobjReset still calls it.
@@ -614,11 +614,13 @@ s32 func_8004966C(Gobj *gobj) {
 inline void func_800498A4(Gobj *gobj) {
     MovementInfo *move = MOVE(gobj);
     VECTOR32 lowest;
-    VECTOR32 box[2];
-    MovementSVector points[8];
+    struct {
+        VECTOR32 box[2];
+        MovementSVector points[8];
+    } bp;
     GOBJ_MATRIX m;
     GOBJ_MATRIX *src;
-    VECTOR32 *low = &lowest;
+    VECTOR32 *low;
     VECTOR32 *b;
     MovementSVector *pt;
     s32 t;
@@ -631,6 +633,7 @@ inline void func_800498A4(Gobj *gobj) {
     if (move->collides != 3) {
         return;
     }
+    low = &lowest;
     src = (GOBJ_MATRIX *)gobj->anim->frame;
     m.m[0][0] = src->m[0][0];
     m.m[0][1] = -src->m[0][1];
@@ -644,21 +647,20 @@ inline void func_800498A4(Gobj *gobj) {
     m.t[0] = src->t[0];
     m.t[1] = -src->t[1];
     m.t[2] = src->t[2];
-    b = box;
+    b = bp.box;
     EGSAnimGetBox(gobj->anim, 0, b);
-    t = box[0].vy;
-    box[0].vy = -box[1].vy;
-    box[1].vy = -t;
-    EGSGeometry_GetBoxPoints(b, points, &m);
-    lowest.vx = points[0].vx;
-    lowest.vy = points[0].vy;
-    lowest.vz = points[0].vz;
-    for (i = 1; i < 8; i++) {
-        if (points[i].vy < low->vy) {
-            pt = &points[i];
-            low->vx = pt->vx;
-            low->vy = pt->vy;
-            low->vz = pt->vz;
+    t = bp.box[0].vy;
+    bp.box[0].vy = -bp.box[1].vy;
+    bp.box[1].vy = -t;
+    EGSGeometry_GetBoxPoints(b, bp.points, &m);
+    lowest.vx = bp.points[0].vx;
+    lowest.vy = bp.points[0].vy;
+    lowest.vz = bp.points[0].vz;
+    for (i = 1, pt = &bp.points[1]; i < 8; i++, pt++) {
+        if (pt->vy < low->vy) {
+            low->vx = bp.points[i].vx;
+            low->vy = bp.points[i].vy;
+            low->vz = bp.points[i].vz;
         }
     }
     move->lowest = lowest;
@@ -824,7 +826,7 @@ void iMovementUpdate1_1(void) {
 }
 
 #ifdef NON_MATCHING
-/* inlines func_800498A4, which does not match yet */
+/* inlines func_800498A4; the original also hoists &bp.points into s4 and builds pt as s4+8 (a pts pointer set before the early returns does that but breaks func_800498A4) */
 void iMovementUpdate1_2(void) {
     Gobj *gobj;
     MovementInfo *move;

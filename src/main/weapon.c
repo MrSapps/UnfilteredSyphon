@@ -530,28 +530,22 @@ s32 WeaponGetNextID(s32 weapon) {
     return id;
 }
 
-#ifdef NON_MATCHING
-/* Loop setup order: the original initialises p after the hoisted loop constants. */
 WeaponAnim *iWeaponAllocateAnim(s32 owner, s32 *slotOut) {
     s32 i = D_8010F928 + 1;
     s32 reuse = -1;
-    s32 *p;
 
     if (i >= WEAPON_ANIM_MAX) {
         i = 0;
     }
-    p = &D_80118F40[i];
     while (i != D_8010F928) {
-        if (*p == -1) {
+        if (D_80118F40[i] == -1) {
             break;
         }
-        if (!(*p & 0x80000000) && reuse < 0) {
+        if (!(D_80118F40[i] & 0x80000000) && reuse < 0) {
             reuse = i;
         }
         i++;
-        p++;
         if (i >= WEAPON_ANIM_MAX) {
-            p = D_80118F40;
             i = 0;
         }
     }
@@ -568,9 +562,6 @@ WeaponAnim *iWeaponAllocateAnim(s32 owner, s32 *slotOut) {
     }
     return D_80118A8C[i];
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", iWeaponAllocateAnim);
-#endif
 
 #ifdef NON_MATCHING
 /* Scheduling only: the else branch loads gCamera (into a2) before the slot stores */
@@ -642,8 +633,6 @@ void WeaponSelect(Gobj *gobj, s32 weapon, s32 quiet) {
     GOBJINFO_WEAPON(&gameObjectsInfo[gobj->id]) = weapon;
 }
 
-#ifdef NON_MATCHING
-/* Register allocation: the original keeps one more callee-saved giv (keep spilled to the stack) and inverts the weapon-byte branch */
 /* gobj lets go of its weapon: drop it on the floor (keep) or remove it. A player/armoured NPC
  * also drops its body armour. */
 void WeaponDrop(Gobj *gobj, u8 keep) {
@@ -666,8 +655,8 @@ void WeaponDrop(Gobj *gobj, u8 keep) {
                 sector = EGSDisplayGetPointSector(&((WeaponFrame *)anim->unk0C)->x);
                 if (sector != NULL) {
                     D_80118F40[i] = sector->model->display->id;
+                    D_80118B08[i] = *(WeaponFrame *)anim->unk0C;
                     frame = &D_80118B08[i];
-                    *frame = *(WeaponFrame *)anim->unk0C;
                     D_80118B08[i].unk20 = 0;
                     anim->unk0C = (s32)frame;
                     anim->unk18 = NULL;
@@ -684,8 +673,8 @@ void WeaponDrop(Gobj *gobj, u8 keep) {
                         gobj->healthInfo->armor != 0) {
                         vest = iWeaponAllocateAnim(D_80118F40[i], &slot);
                         D_80118B08[slot] = *(WeaponFrame *)gobj->anim->frames[0xD];
-                        D_80118B08[slot].unk20 = 0;
                         D_80118B08[slot].y = frame->y;
+                        D_80118B08[slot].unk20 = 0;
                         vest->unk16 = 0x80;
                         if (gobj->id != gPlayerOffset) {
                             GOBJINFO_WORD24(&gameObjectsInfo[gobj->id]) &= ~0x4000;
@@ -703,9 +692,6 @@ void WeaponDrop(Gobj *gobj, u8 keep) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponDrop);
-#endif
 
 u8 WeaponReload(s32 weapon) {
     WeaponState *state = &gWeaponState[weapon];
@@ -1075,13 +1061,11 @@ void WeaponTaser(Gobj *gobj, u8 fire) {
 }
 
 #ifdef NON_MATCHING
-/* Loop pointer setup/strength reduction differs (one insn longer). */
+/* giv layout: the original keeps the frame pointer at the array base (fields at +0x14..) and out in s2 (one insn longer) */
 s32 WeaponGetSaveInfo(WeaponSaveInfo *out) {
     s32 i;
     s32 owner;
     WeaponFrame *frame;
-    s32 *owners;
-    WeaponAnim **anims;
     WeaponAnim *anim;
 
     for (i = 0; i < WEAPON_ANIM_MAX; i++) {
@@ -1090,21 +1074,17 @@ s32 WeaponGetSaveInfo(WeaponSaveInfo *out) {
             WeaponDrop((Gobj *)owner, 1);
         }
     }
-    for (i = 0, frame = D_80118B08, owners = D_80118F40, anims = D_80118A8C; i < WEAPON_ANIM_MAX; i++) {
-        owner = *owners;
-        anim = *anims;
+    for (i = 0, frame = D_80118B08; i < WEAPON_ANIM_MAX; i++, frame++) {
+        owner = D_80118F40[i];
+        anim = D_80118A8C[i];
         if (!(owner & 0x80000000)) {
-            out->x = frame->x;
-            out->y = frame->y;
-            out->z = frame->z;
-            out->info = anim->unk16 | ((owner & 0xFF) << 8);
+            out[i].x = frame->x;
+            out[i].y = frame->y;
+            out[i].z = frame->z;
+            out[i].info = (anim->unk16 & 0xFF) | ((owner & 0xFF) << 8);
         } else {
-            out->info = 0;
+            out[i].info = 0;
         }
-        out++;
-        frame++;
-        owners++;
-        anims++;
     }
     return 1;
 }
@@ -1182,9 +1162,6 @@ void WeaponUnlimitedAmmo(void) {
 void WeaponTorchCASAnimCB(void) {
 }
 
-#ifdef NON_MATCHING
-/* The original rematerialises the /10 magic constant (0x66666667) in each block instead of
- * keeping it in a register (2 insns longer). */
 u16 WeaponMakeRoundsString(u16 textId, s32 weapon) {
     s32 reserve = gWeaponState[weapon].reserve;
     s32 loaded = gWeaponState[weapon].loaded;
@@ -1201,11 +1178,12 @@ u16 WeaponMakeRoundsString(u16 textId, s32 weapon) {
     buf[1] = loaded % 10 + '0';
     if (reserve > 0) {
         buf[2] = '/';
-        p = &buf[3];
         if (reserve >= 100) {
             p = &buf[4];
             buf[3] = reserve / 100 + '0';
             reserve %= 100;
+        } else {
+            p = &buf[3];
         }
         p[2] = '\0';
         p[0] = reserve / 10 + '0';
@@ -1215,6 +1193,3 @@ u16 WeaponMakeRoundsString(u16 textId, s32 weapon) {
     }
     return TextReplaceString(textId, buf, loaded, reserve);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponMakeRoundsString);
-#endif

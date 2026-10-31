@@ -77,11 +77,9 @@ s32 PhysicsGobjUpdate(PhysGobj *gobj) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* Scheduling: the original stores each quotient one call later (in the
- * next jal delay slot). */
 s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
     PhysVector accel;
+    s32 *v; /* accel as an array: v[0] is a plain scalar store */
     s32 mass;
 
     if (gobj == NULL || gobj->move == NULL) {
@@ -89,9 +87,10 @@ s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
     }
     mass = gobj->move->mass;
     if (mass > 0 && mass != 0x1000) {
-        accel.vx = EGSMathFIXDiv(force->vx, mass);
-        accel.vy = EGSMathFIXDiv(force->vy, mass);
-        accel.vz = EGSMathFIXDiv(force->vz, mass);
+        v = &accel.vx;
+        v[0] = EGSMathFIXDiv(force->vx, mass);
+        v[1] = EGSMathFIXDiv(force->vy, mass);
+        v[2] = EGSMathFIXDiv(force->vz, mass);
         gobj->move->velocity.vx += accel.vx;
         gobj->move->velocity.vy += accel.vy;
         gobj->move->velocity.vz += accel.vz;
@@ -102,9 +101,6 @@ s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsGobjRegisterForce);
-#endif
 
 #ifdef NON_MATCHING
 /* Case 2 keeps the deceleration in $a1 with caller-saves (spilled to

@@ -181,20 +181,18 @@ s32 iCollisionPhysicsFaceGetFrictionForceValue(u8 *physics, s32 *out) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* Scheduling only: the original stores each EGSMathFIXDiv result after the next
- * call's first argument load (same pattern as los.c). */
 s32 iCollisionPhysicsGetKineticFrictionForce(VECTOR32 *v, s32 force, VECTOR32 *out) {
+    s32 *o = &out->vx; /* as an array: o[0] is a plain scalar access */
     s32 modulus;
 
     EGSMath_VectorModulus(v, &modulus);
     if (force < modulus) {
-        out->vx = EGSMathFIXMul(v->vx, -force);
-        out->vy = EGSMathFIXMul(v->vy, -force);
-        out->vz = EGSMathFIXMul(v->vz, -force);
-        out->vx = EGSMathFIXDiv(out->vx, modulus);
-        out->vy = EGSMathFIXDiv(out->vy, modulus);
-        out->vz = EGSMathFIXDiv(out->vz, modulus);
+        o[0] = EGSMathFIXMul(v->vx, -force);
+        o[1] = EGSMathFIXMul(v->vy, -force);
+        o[2] = EGSMathFIXMul(v->vz, -force);
+        o[0] = EGSMathFIXDiv(o[0], modulus);
+        o[1] = EGSMathFIXDiv(o[1], modulus);
+        o[2] = EGSMathFIXDiv(o[2], modulus);
     } else {
         out->vx = -v->vx;
         out->vy = -v->vy;
@@ -202,14 +200,9 @@ s32 iCollisionPhysicsGetKineticFrictionForce(VECTOR32 *v, s32 force, VECTOR32 *o
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cobj", iCollisionPhysicsGetKineticFrictionForce);
-#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/cobj", D_800122D4);
 
-#ifdef NON_MATCHING
-/* Scheduling only: the first EGSMathFIXMul result is stored in the next call's delay slot */
 /* Push out along the averaged normal of the floor-like contacts. */
 void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR32 *out) {
     VECTOR32 sum = { 0, 0, 0, 0 };
@@ -218,6 +211,7 @@ void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR3
     s32 i;
     s32 n = 0;
     s32 scale;
+    s32 *v; /* push as an array: v[0] is a plain scalar store, v[1]/v[2] are not */
 
     for (i = 0; i < count; i++) {
         if (contacts[i]->normal.vy >= phys->minNormalY) {
@@ -235,9 +229,10 @@ void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR3
         }
         for (i = 0; i < count; i++) {
             if (contacts[i]->normal.vy >= phys->minNormalY) {
-                push.vx = EGSMathFIXMul(contacts[i]->normal.vx, -scale);
-                push.vy = EGSMathFIXMul(contacts[i]->normal.vy, -scale);
-                push.vz = EGSMathFIXMul(contacts[i]->normal.vz, -scale);
+                v = &push.vx;
+                v[0] = EGSMathFIXMul(contacts[i]->normal.vx, -scale);
+                v[1] = EGSMathFIXMul(contacts[i]->normal.vy, -scale);
+                v[2] = EGSMathFIXMul(contacts[i]->normal.vz, -scale);
                 out->vx += push.vx;
                 out->vy += push.vy;
                 out->vz += push.vz;
@@ -245,9 +240,6 @@ void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR3
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cobj", func_80072E34);
-#endif
 
 s32 func_80071E04(Gobj *a, Gobj *b, VECTOR32 *rel, VECTOR32 *out);
 s32 func_800721EC(Gobj *obj, CobjPhysics *det, VECTOR32 *vel, VECTOR32 *out);

@@ -407,10 +407,9 @@ void func_80035688(void);
 void func_80035724(void);
 s32 GameSysJoystickSetMode(s32 mode);
 
-#ifdef NON_MATCHING
-/* the original addresses walkKey through the sticks base register */
 void GameSysJoystickInit(void) {
     JoyGlobals2 *g2;
+    JoyStick *st;
     s32 i;
 
     if (D_801056C8.initialized == 0) {
@@ -449,10 +448,11 @@ void GameSysJoystickInit(void) {
     D_801056F5 = 0;
     D_801056F8 = 0;
     D_80105700 = D_80105B10;
+    st = g2->sticks;
     for (i = 0; i < 4; i++) {
-        g2->sticks[i].unk00 = 0;
-        g2->sticks[i].unk04 = 0;
-        g2->sticks[i].unk08 = 0;
+        st[i].unk00 = 0;
+        st[i].unk04 = 0;
+        st[i].unk08 = 0;
     }
     D_801057F4 = D_80105B80;
     D_801057F8 = 0;
@@ -466,9 +466,6 @@ void GameSysJoystickInit(void) {
     D_80105810 = 0;
     D_80105814 = 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystickInit);
-#endif
 
 extern u8 gPlayerRadioFlag;
 extern int gSystemState;

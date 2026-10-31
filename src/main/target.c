@@ -1399,8 +1399,6 @@ static u8 func_80034D24(GameObjectRuntime *rt, VECTOR32 *eye, VECTOR32 *point, V
     return found;
 }
 
-#ifdef NON_MATCHING
-/* scheduling: the first ratan2 result is stored right after the call; the original stores it after diff.vx */
 /* Is `to` within `range` and the `fov` cone around `dir` seen from `from`?
  * 0: no, 1: inside the cone, 2: player only, close to the cone. */
 s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fov, VECTOR32 *to) {
@@ -1422,8 +1420,9 @@ s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fo
             s32 toPitch;
             s32 dPitch;
         } a;
+        s32 *yaw = &a.dirYaw; /* a plain (non-struct) store, free to sink past the diff loads */
 
-        a.dirYaw = ratan2(dir->vx, dir->vz);
+        *yaw = ratan2(dir->vx, dir->vz);
         diff.vx = to->vx - from->vx;
         diff.vy = to->vy - from->vy;
         diff.vz = to->vz - from->vz;
@@ -1459,7 +1458,4 @@ s32 TargetViewConeCheck(s32 id, VECTOR32 *from, VECTOR32 *dir, s32 range, s32 fo
     }
     return result;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/target", TargetViewConeCheck);
-#endif
 

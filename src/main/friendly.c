@@ -698,9 +698,6 @@ s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove) {
     return floorY;
 }
 
-#ifdef NON_MATCHING
-/* One instruction longer: the original computes mid right after the halving and
- * loads y0/y1 afterwards (different register allocation). */
 static void func_80087B8C(void *arg0, FaceCollect *c, FoundFace *face) {
     s32 ref;
     s32 mid;
@@ -711,11 +708,10 @@ static void func_80087B8C(void *arg0, FaceCollect *c, FoundFace *face) {
     ref = c->ref.vy;
     sum = face->p0.vy + face->p1.vy;
     if (sum >= 0) {
-        sum >>= 1;
+        mid = (sum >> 1) - ref;
     } else {
-        sum = -(-sum >> 1);
+        mid = -(-sum >> 1) - ref;
     }
-    mid = sum - ref;
     if (face->p0.vy < face->p1.vy) {
         lo = face->p0.vy - ref;
         hi = face->p1.vy - ref;
@@ -728,16 +724,8 @@ static void func_80087B8C(void *arg0, FaceCollect *c, FoundFace *face) {
         face->midY = mid;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087B8C);
-#endif
 
-#ifdef NON_MATCHING
-/*
- * Same instructions modulo scheduling/registers: the original keeps the mid subtraction
- * ahead of the y0/y1 loads (as if a scheduling barrier sat there) and allocates
- * ref/mid/lo/hi to a3/t1/t0/a0. Shares its prologue with func_80087B8C.
- */
+/* Shares its prologue with func_80087B8C. */
 #define FACE_LIST_ADD(list)                     \
     if ((list).count >= 16) {                   \
         return;                                 \
@@ -755,11 +743,10 @@ static void func_80087C28(void *arg0, FaceCollect *c, FoundFace *face) {
     ref = c->ref.vy;
     sum = face->p0.vy + face->p1.vy;
     if (sum >= 0) {
-        sum >>= 1;
+        mid = (sum >> 1) - ref;
     } else {
-        sum = -(-sum >> 1);
+        mid = -(-sum >> 1) - ref;
     }
-    mid = sum - ref;
     if (face->p0.vy < face->p1.vy) {
         lo = face->p0.vy - ref;
         hi = face->p1.vy - ref;
@@ -781,9 +768,6 @@ static void func_80087C28(void *arg0, FaceCollect *c, FoundFace *face) {
         FACE_LIST_ADD(c->groups[4]);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087C28);
-#endif
 
 /* *out = a . b (4.12 fixed point). */
 static inline void FriendlyDot(s32 *a, s32 *b, s32 *out) {
