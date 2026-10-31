@@ -5,15 +5,15 @@
 #include "scratch.h"
 #include "egsmath.h"
 
-/* cobj.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F9C0)
-SDATA_LOCAL(losBlocker)
-SDATA_LOCAL(losEndPointZ)
-SDATA_LOCAL(losGCount)
-SDATA_LOCAL(losHitCount)
-SDATA_LOCAL(losInvMatrix)
-SDATA_LOCAL(losSectorHitCount)
-SDATA_LOCAL(losSortedCount)
+/* cobj.c's data (docs/data_migration.md). The two zero words after sectorCobj in
+ * .sdata are unreferenced and stay in the splat blob: their TU is unclear. */
+extern s32 sectorInfo;
+static struct CobjNode *D_8010F9C0 = NULL; /* free list */
+s32 *sectorCobj = &sectorInfo;
+/* .bss: the node pool (D_8011EB98 below; entry 0 is unused) */
+#define D_8011EBAC (&D_8011EB98[1])
+/* the line count up to the ASSERTs is kept */
+
 
 /* Entry of a collision box list (0x14 bytes). */
 typedef struct CobjNode {
@@ -73,7 +73,7 @@ typedef struct LOSHit {
     /* 0x4C */ void *window;
 } LOSHit; /* size 0x50 */
 
-extern s16 losEndPointZ;
+s16 losEndPointZ; /* common, $gp */
 
 /* Objects the camera may not look through (doors and the like). */
 static inline s32 LOSIsCameraBlocker(s32 type, s32 npcState) {
@@ -87,8 +87,8 @@ static inline s32 LOSIsCameraBlocker(s32 type, s32 npcState) {
 
 #define LOS_HIT_MAX 0x1A
 
-extern u32 losHitCount;
-extern u32 losSortedCount;
+u32 losHitCount; /* common, $gp */
+u32 losSortedCount; /* common, $gp */
 extern LOSHit losHitArray[LOS_HIT_MAX];
 extern LOSHit *losHitsSorted[LOS_HIT_MAX];
 
@@ -112,7 +112,7 @@ typedef struct CobjTerrSector {
 
 #define COBJ_NODE_MAX 150
 
-extern CobjNode D_8011EBAC[COBJ_NODE_MAX - 1]; /* node pool (entry 0 unused) */
+static CobjNode D_8011EB98[COBJ_NODE_MAX]; /* node pool (entry 0 unused) */
 extern CobjTerrSector gCobjDummySector_RotBox;
 extern CobjTerrSector gCobjDummySector_Gobj;
 extern CobjTerrSector *gTerrSector;
@@ -1202,7 +1202,7 @@ typedef struct LOSSectorHit {
 } LOSSectorHit; /* size 8 */
 
 extern LOSSectorHit losSectorHitArray[];
-extern u32 losSectorHitCount;
+u32 losSectorHitCount; /* common, $gp */
 
 void GobjLOSLoop(void *query, s32 type, u8 arg2);
 void LOSVerifyHits(void *query);
@@ -1217,7 +1217,7 @@ typedef struct CobjWeaponInfo {
 
 extern CobjWeaponInfo gWeaponInfo[];
 extern LOSAnimFaceState losAnimFace;
-extern LOSHit *losBlocker;
+LOSHit *losBlocker; /* common, $gp */
 extern u8 losRay[];
 void LOSSetupGTE(LOSMtx *mtx);
 s32 LOSRotBoxV(void *bxv, s32 z, LOSHit *hit, void *ray);
@@ -1524,7 +1524,7 @@ typedef struct LOSTerrSectorModel {
 } LOSTerrSectorModel;
 
 /* Sector visibility state for EGSDisplayLOSSectorPolys */
-extern s32 sectorInfo;
+/* sectorInfo: declared at the top */
 extern u8 D_80127F84;
 extern u8 D_80127F85;
 extern u8 D_80127F86;
@@ -1535,8 +1535,8 @@ extern s32 D_80127F90;
 extern LOSVec losEndPoint;
 extern u8 losFrame[];
 extern u8 gInvWSMatrix[];
-extern void *losInvMatrix;
-extern s16 losGCount;
+void *losInvMatrix; /* common, $gp */
+s16 losGCount; /* common, $gp */
 void GsSetProjection(s32 h);
 void EGSFrameSetPosition(void *frame, s32 arg1, LOSVec *pos);
 void EGSFrameSetOrientation(void *frame, s32 arg1, LOSVec *dir, s32 arg3);

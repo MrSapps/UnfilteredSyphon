@@ -143,6 +143,30 @@ so a TU's data has to come from that TU's object.
   gravity y/z as the scalars `D_800FE5E8/EC`. As struct members, cc1 hoists the base
   address into a register and the code changes, so those labels stay as absolute
   symbols in `config/main.syms.ld`.
+* **Word-aligned `.bss` items under the modern build.** Padding can't make maspsx's
+  power-of-two layout put a 16-byte item at an 8-aligned address (npc's three vectors
+  at 0x8011E8A8, after a 0x18-byte array). npc.c gives the modern build one bigger array
+  and names the vectors with `.set` (`#ifdef _PSYQ` keeps the real statics).
+* **maspsx adds a stray `nop` before an indexed access to a small static**
+  (`lbu $2,D_80110128($2)` right after a load into `$2`; the real aspsx 2.56/2.77 emits
+  `lui/addu/lbu` with no nop). npc.c names the storage differently for the modern build
+  and aliases the old name with `.set`, so maspsx treats it as extern.
+* **psylink's 8-aligned `.sbss`/`.bss` starts can hide a 4-byte tail.** The yaml range
+  of npc's `.sbss` is 0x58 bytes but the C object is 0x54; psylink 8-aligns damage's
+  start, GNU ld does not, so the modern build gets a 4-byte pad static.
+* **The modern link packs input sections with `SUBALIGN(4)`.** So the alignment maspsx
+  gives an object's first `.lcomm` doesn't matter, but psylink's 8-aligned starts do: a
+  4-byte gap before or after a TU's `.bss` stays a 4-byte splat piece (sound:
+  `bss_8011EB04`, `bss_8011EB3C`). A pad static can't do it in `.bss` (4 bytes is `.sbss`).
+* **A struct of two u8 in `.sdata` is word-aligned** (DATA_ALIGNMENT), so two packed
+  bytes at an odd-ish offset (snddrv 0x8010FD82/83) are two `u8` variables.
+* **Zero-filled `.data` arrays need an initialiser** (`= { 0 }`), otherwise they are
+  `.bss`/`.sbss` (pickup's vector at 0x80107840, snddrv's per-SEQ tables).
+* **A scalar pointer's string literal comes out *before* the pointer.** cc1 outputs the
+  literal while it reads the initialiser, then the variable, so `char *p = "health";`
+  gives `"health"` in `.sdata` followed by `p` (strings.c; a long literal goes to
+  `.rdata` instead, in the same order). Tables still give reverse element order.
+  Identical literals are shared.
 * **`include/scratch.h`** has a `_PSYQ` variant of `SCRATCH_CALL_DS`: aspsx has no
   `.macro` or `.set push/pop`, and without maspsx in between, a plain
   `.set noreorder`/`.set reorder` bracket gives the same bytes (checked on game.c's
@@ -256,3 +280,11 @@ don't compile under ccpsx yet: its `scratch_jal_ds` GAS `.macro` needs a `_PSYQ`
 form, e.g. `".set noreorder\n\tjal " #fn "\n\t" ds "\n\t.set reorder"`. With that,
 game.c matches in every section.
 | particle | .data .sdata .sbss .bss + 5 commons (.rdata still has the INCLUDE_RODATA blob) | OK | data OK with aspsx 2.56 (`.sbss` DIFF with 2.77); 16 asm functions |
+| npc      | .data .sdata .sbss .bss + 14 commons (.rdata still has the INCLUDE_RODATA blob) | OK | data OK with aspsx 2.56 except `.sbss` 0x54 vs 0x58: the last 4 bytes are psylink's 8-alignment before damage (modern-only pad); 16 asm functions |
+| sound    | .data .sdata .sbss .bss + mXABlock common (.rdata keeps its INCLUDE_RODATA strings) | OK | data OK with aspsx 2.56; 4 asm functions |
+| cobj     | .sdata .bss + 7 commons (0x8010F9C8/CC left in the blob, owner unclear) | OK | data OK; the "0x8011EBAC" object is node 1 of a 150-node pool at 0x8011EB98 |
+| terrain  | .sdata + 10 commons (no .data/.sbss/.bss of its own) | OK | .sdata OK; .sdata defined after the first INCLUDE_ASM (maspsx pitfall) |
+| pickup   | .data .sdata .sbss .bss + 4 commons | OK | data OK with aspsx 2.56 except `.bss` 0x8C vs 0x90 (psylink's 8-alignment before save) |
+| snddrv   | .data .sdata .sbss .bss + 2 commons (0x8010FD20 left in the blob) | OK | data OK; 5 asm functions |
+| egsdisp  | .data .sdata .bss + 13 commons (gLRTick at 0x8010FDA0 left in the blob) | OK | data OK; gHADoneCallback (egshmd's .sdata) gets a tentative definition so it stays $gp |
+| strings  | .rdata .data .sdata .bss (message table rebuilt from C initialisers) | OK | .rdata .data .sdata .bss OK (aspsx 2.56 and 2.77); StringContactMeiXingMsg asm |

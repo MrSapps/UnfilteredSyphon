@@ -207,11 +207,15 @@ segments:
       - [0xF66AC, data, data_F66AC]
       - [0xF674C, .data, weapon]
       - [0xF6AC4, .data, particle]
-      - [0xF6C38, data, data_F6C38]
+      - [0xF6C38, .data, npc]
       - [0xF71E0, .data, damage]
-      - [0xF7238, data, data_F7238]
+      - [0xF7238, .data, sound]
       - [0xF72D8, .data, stream]
       - [0xF72EC, data, data_F72EC]
+      - [0xF7F44, .data, strings]
+      - [0xF8040, .data, pickup]
+      - [0xF8050, .data, snddrv]
+      - [0xF8190, .data, egsdisp]
       - [0xF81A0, .data, egshmd]
       - [0xF8318, data, data_F8318]
       - [0xF8330, .data, egsdev]
@@ -236,13 +240,21 @@ segments:
       - [0x100138, sdata, sdata_100138]
       - [0x10013C, .sdata, movement]
       - [0x100144, .sdata, particle]
-      - [0x10014C, sdata, sdata_10014C]
+      - [0x10014C, .sdata, npc]
       - [0x100180, .sdata, damage]
-      - [0x10018C, sdata, sdata_10018C]
+      - [0x10018C, .sdata, sound]
+      - [0x1001C0, .sdata, cobj]
+      - [0x1001C8, sdata, sdata_1001C8]
+      - [0x1001D0, .sdata, terrain]
       - [0x100208, .sdata, stream]
       - [0x100248, sdata, sdata_100248]
+      - [0x1002B8, .sdata, strings]
+      - [0x1004EC, .sdata, pickup]
       - [0x10051C, .sdata, save]
       - [0x100520, sdata, sdata_100520]
+      - [0x100524, .sdata, snddrv]
+      - [0x1005A0, sdata, sdata_1005A0]
+      - [0x1005A4, .sdata, egsdisp]
       - [0x100670, .sdata, egshmd]
       - [0x1006B0, sdata, sdata_1006B0]
       - [0x1006B8, .sdata, egsdev]
@@ -266,9 +278,15 @@ segments:
       - { type: sbss, vram: 0x8010FFE4, name: sbss_8010FFE4 }
       - { type: .sbss, vram: 0x80110028, name: weapon }
       - { type: .sbss, vram: 0x80110030, name: particle }
-      - { type: sbss, vram: 0x80110118, name: sbss_80110118 }
+      - { type: .sbss, vram: 0x80110118, name: npc }
       - { type: .sbss, vram: 0x80110170, name: damage }
       - { type: sbss, vram: 0x80110180, name: sbss_80110180 }
+      - { type: .sbss, vram: 0x80110188, name: sound }
+      - { type: sbss, vram: 0x801101A8, name: sbss_801101A8 }
+      - { type: .sbss, vram: 0x801101B8, name: pickup }
+      - { type: sbss, vram: 0x801101CC, name: sbss_801101CC }
+      - { type: .sbss, vram: 0x801101D0, name: snddrv }
+      - { type: sbss, vram: 0x801101FC, name: sbss_801101FC }
       - { type: .sbss, vram: 0x80110220, name: egsanim }
       - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
       - { type: .bss, vram: 0x801104A0, name: system }
@@ -278,13 +296,21 @@ segments:
       - { type: .bss, vram: 0x801156D8, name: sniper }
       - { type: bss, vram: 0x80115754, name: bss_80115754 }
       - { type: .bss, vram: 0x80118FC0, name: particle }
-      - { type: bss, vram: 0x8011D1D0, name: bss_8011D1D0 }
+      - { type: .bss, vram: 0x8011D1D0, name: npc }
       - { type: .bss, vram: 0x8011E8D8, name: damage }
-      - { type: bss, vram: 0x8011EB04, name: bss_8011EB04 }
+      - { type: bss, vram: 0x8011EB04, name: bss_8011EB04 }   # psylink 8-aligns the next .bss
+      - { type: .bss, vram: 0x8011EB08, name: sound }
+      - { type: bss, vram: 0x8011EB3C, name: bss_8011EB3C }   # psylink 8-aligns the next .bss
       - { type: .bss, vram: 0x8011EB40, name: collision }
-      - { type: bss, vram: 0x8011EB98, name: bss_8011EB98 }
+      - { type: .bss, vram: 0x8011EB98, name: cobj }
+      - { type: bss, vram: 0x8011F750, name: bss_8011F750 }
+      - { type: .bss, vram: 0x80121918, name: strings }
+      - { type: .bss, vram: 0x80121978, name: pickup }
       - { type: .bss, vram: 0x80121A08, name: save }
       - { type: bss, vram: 0x801221E4, name: bss_801221E4 }
+      - { type: .bss, vram: 0x801221E8, name: snddrv }
+      - { type: .bss, vram: 0x801225C8, name: egsdisp }
+      - { type: bss, vram: 0x80122678, name: bss_80122678 }
       - { type: .bss, vram: 0x80122A38, name: egstex }
       - { type: .bss, vram: 0x80122C90, name: egsmisc }
       - { type: .bss, vram: 0x80125210, name: egsfile }

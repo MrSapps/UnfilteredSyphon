@@ -5,50 +5,9 @@
 #include "gobj.h"
 #include "game.h"
 
-/* npc.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F94C)
-SDATA_LOCAL(D_8010F950)
-SDATA_LOCAL(D_8010F958)
-SDATA_LOCAL(D_8011011C)
-SDATA_LOCAL(D_80110120)
-SDATA_LOCAL(D_80110124)
-SDATA_LOCAL(D_80110168)
+/* damage.c's packet list bytes, still in the damage blob (docs/data_migration.md) */
 SDATA_LOCAL(D_80110180)
 SDATA_LOCAL(D_80110184)
-SDATA_LOCAL(npcNumGenerators)
-SDATA_LOCAL(D_8010F96C)
-SDATA_LOCAL(D_80110130)
-SDATA_LOCAL(D_80110134)
-SDATA_LOCAL(D_80110138)
-SDATA_LOCAL(D_8011013C)
-SDATA_LOCAL(D_80110140)
-SDATA_LOCAL(D_80110144)
-SDATA_LOCAL(D_80110148)
-SDATA_LOCAL(D_8011014C)
-SDATA_LOCAL(D_80110150)
-SDATA_LOCAL(D_80110154)
-SDATA_LOCAL(D_80110158)
-SDATA_LOCAL(D_8011015C)
-SDATA_LOCAL(D_80110160)
-SDATA_LOCAL(D_80110164)
-SDATA_LOCAL(NPCEndActivationFlag)
-SDATA_LOCAL(NPCNumActive)
-SDATA_LOCAL(NPCNumActiveTick)
-SDATA_LOCAL(NPCNumEnemyAlive)
-SDATA_LOCAL(NPCPopRemoveID)
-SDATA_LOCAL(copKilledByPCFlag)
-SDATA_LOCAL(npcAlertByScream)
-SDATA_LOCAL(npcGrenadeLandedCheck)
-SDATA_LOCAL(npcVisibilityDistance)
-SDATA_LOCAL(pointActionMoveMode)
-SDATA_LOCAL(getNPCIndex)
-SDATA_LOCAL(gNpcAllOnRadarFlag)
-SDATA_LOCAL(D_8010F970)
-SDATA_LOCAL(D_80110118)
-SDATA_LOCAL(D_8010F960)
-SDATA_LOCAL(npcGrenadeThrowerID)
-SDATA_LOCAL(grenadeWeaponRestore)
-SDATA_LOCAL(npcPCInvisibleFlag)
 
 /* Path point (LevelGetPathInfo), 0xC bytes. */
 typedef struct PathPoint {
@@ -188,45 +147,111 @@ typedef struct DamagePacket {
 #define NPC_SLOTS 6
 #define DAMAGE_PACKETS 16
 
-extern void (*D_8010F94C)();      /* combat mode callback */
-extern void (*D_8010F950)(s16 id); /* cop deactivate callback */
-extern s32 D_8010F958;            /* NPCs may shoot */
-extern void (*D_8011011C)();      /* interact entered range callback */
-extern void (*D_80110120)();      /* interact exited range callback */
-extern void (*D_80110124)();      /* interact other callback */
-extern s32 D_80110168;            /* enabled generator count */
+/*
+ * npc.c's data. .sdata, .sbss and .bss each in address order: cc1 emits the
+ * uninitialised statics in first-declaration order, so this block comes before any
+ * other declaration of them.
+ */
+static void (*D_8010F94C)() = NULL;       /* combat mode callback */
+static void (*D_8010F950)(s16 id) = NULL; /* cop deactivate callback */
+s32 gNpcAllOnRadarFlag = 0;
+static s32 D_8010F958 = 1;                /* NPCs may shoot */
+s32 npcPCInvisibleFlag = 0;
+static s32 D_8010F960 = 0;                /* NPCGetMoveMode: 1 kneel, -1 stand */
+static char D_8010F964[8] = "s/npc.c";    /* __FILE__ (NPCObjDispatch, still asm, uses it too) */
+static s32 D_8010F96C = 0;                /* last generator NPC handed out */
+static s32 D_8010F970 = 0;                /* last NPC slot given a shot */
+static s32 D_8010F974 = 0;                /* NPCLosCheck: npcList resume index */
+static s32 D_8010F978 = -1;               /* NPCLosCheck: phase (-1 camera, 0 target, 1 dead) */
+static s32 D_8010F97C = 0;                /* unreferenced */
+
+/*
+ * .sbss: the original assembler gave every .lcomm 4 bytes (see particle.c); the modern
+ * build packs by size, so it gets explicit padding statics.
+ */
+#ifdef _PSYQ
+#define SBSS_PAD2(n)
+#define SBSS_PAD3(n)
+#else
+#define SBSS_PAD2(n) static s16 n;
+#define SBSS_PAD3(n) static u8 n; static s16 n##_2;
+#endif
+static u8 D_80110118;
+static void (*D_8011011C)();      /* interact entered range callback */
+static void (*D_80110120)();      /* interact exited range callback */
+static void (*D_80110124)();      /* interact other callback */
+#ifdef _PSYQ
+static u8 D_80110128[NPC_SLOTS];
+#else
+/* maspsx puts a stray nop before an indexed access to a small static (real aspsx does
+ * not), so the modern build names the storage differently and aliases it below */
+static u8 D_80110128_[NPC_SLOTS];
+extern u8 D_80110128[];
+#endif
+static s32 D_80110130;
+static PathPoint *D_80110134;     /* current NPC's path */
+static s16 D_80110138; SBSS_PAD2(D_80110138_pad)
+static s16 D_8011013C; SBSS_PAD2(D_8011013C_pad)
+static s16 D_80110140; SBSS_PAD2(D_80110140_pad)
+static s16 D_80110144; SBSS_PAD2(D_80110144_pad)
+static s16 D_80110148; SBSS_PAD2(D_80110148_pad) /* first generator NPC object id */
+static s16 D_8011014C; SBSS_PAD2(D_8011014C_pad)
+static s16 D_80110150; SBSS_PAD2(D_80110150_pad)
+static s16 D_80110154; SBSS_PAD2(D_80110154_pad)
+static u8 D_80110158; SBSS_PAD3(D_80110158_pad)
+static u8 D_8011015C; SBSS_PAD3(D_8011015C_pad)
+static u8 D_80110160; SBSS_PAD3(D_80110160_pad) /* cop damaged XA played */
+static u8 D_80110164; SBSS_PAD3(D_80110164_pad)
+static s32 D_80110168;            /* enabled generator count */
+#ifndef _PSYQ
+/* psylink starts damage's .sbss 8-aligned (docs/psyq_build.md); GNU ld needs the pad */
+static s32 D_8011016C_pad;
+#endif
+
+/* .bss */
+static VECTOR32 D_8011D1D0;       /* NPCGetMoveMode retreat direction */
+#define D_8011D1D4 D_8011D1D0.vy
+#define D_8011D1D8 D_8011D1D0.vz
+static VECTOR32 D_8011D1E0;       /* NPCPointIQ goal midpoint */
+static VECTOR32 D_8011D1F0;       /* getPointActionVector result */
+static VECTOR32 D_8011D200;       /* NPCFaceDirection turn step */
+static VECTOR32 D_8011D210;       /* NPCIQEveryFrame movement direction */
+static VECTOR32 D_8011D220;       /* generator spawn point */
+static VECTOR32 D_8011D230;       /* ... on screen */
+static TargetInfo D_8011D240[NPC_SLOTS];
+static MoveInfo D_8011D750[NPC_SLOTS];
+static NPCPathCtrl D_8011E1A0[NPC_SLOTS];
+#ifdef _PSYQ
+static s32 D_8011E890[NPC_SLOTS];
+static VECTOR32 D_8011E8A8;       /* player position as seen by NPCs */
+static VECTOR32 D_8011E8B8;       /* current NPC's position (y up) */
+static VECTOR32 D_8011E8C8;       /* LOS override position (pad is the active flag) */
+#else
+/* The vectors are only 8-aligned; maspsx's 2.7x layout would 16-align them, so the
+ * modern build reserves them with D_8011E890 and names them with .set below. */
+static s32 D_8011E890[NPC_SLOTS + 12];
+extern VECTOR32 D_8011E8A8;
+extern VECTOR32 D_8011E8B8;
+extern VECTOR32 D_8011E8C8;
+#endif
+
+/* commons this TU reaches through $gp */
+u8 NPCEndActivationFlag;
+u8 NPCNumActive;
+s32 NPCNumActiveTick;
+u8 NPCNumEnemyAlive;
+s16 NPCPopRemoveID;
+u8 copKilledByPCFlag;
+u8 npcAlertByScream;
+u8 npcGrenadeLandedCheck;
+s32 npcVisibilityDistance;
+s16 pointActionMoveMode;
+s16 getNPCIndex;                  /* NPCGetNextID position in npcList */
+s16 npcGrenadeThrowerID;
+u16 grenadeWeaponRestore;
+u16 npcNumGenerators;
 extern u8 D_80110180;             /* damage packet list head */
 extern u8 D_80110184;             /* next damage packet to try */
-extern u16 npcNumGenerators;
-extern s32 D_8010F96C;            /* last generator NPC handed out */
-extern s32 D_80110130;
-extern PathPoint *D_80110134;     /* current NPC's path */
-extern s16 D_80110138;
-extern s16 D_8011013C;
-extern s16 D_80110140;
-extern s16 D_80110144;
-extern s16 D_80110148;            /* first generator NPC object id */
-extern s16 D_8011014C;
-extern s16 D_80110150;
-extern s16 D_80110154;
-extern u8 D_80110158;
-extern u8 D_8011015C;
-extern u8 D_80110160;             /* cop damaged XA played */
-extern u8 D_80110164;
-extern u8 NPCEndActivationFlag;
-extern u8 NPCNumActive;
-extern s32 NPCNumActiveTick;
-extern u8 NPCNumEnemyAlive;
-extern s16 NPCPopRemoveID;
-extern u8 copKilledByPCFlag;
-extern u8 npcAlertByScream;
-extern u8 npcGrenadeLandedCheck;
-extern s32 npcVisibilityDistance;
-extern s16 pointActionMoveMode;
-extern s16 getNPCIndex;           /* NPCGetNextID position in npcList */
-extern s32 gNpcAllOnRadarFlag;
-extern s32 D_8010F970;            /* last NPC slot given a shot */
-extern s32 npcPCInvisibleFlag;
 
 /* Level data header, see level.c */
 typedef struct NPCLevelData {
@@ -254,14 +279,11 @@ extern void *gTerrSector;         /* 0x3C bytes per sector */
 extern s32 gTerrSectorCount;
 extern s16 gGabeSector;
 extern NPCGenActivation *generatorActivationList;
-extern u8 D_80110118;
 
 static inline void *TerrGetSector(s32 id) {
     return (id < gTerrSectorCount && id >= 0) ? (u8 *)gTerrSector + id * 0x3C : NULL;
 }
 extern NPCLevelData *gLevData;
-extern VECTOR32 D_8011D1F0;       /* getPointActionVector result */
-extern VECTOR32 D_8011D200;       /* NPCFaceDirection turn step */
 extern Gobj *mGrenadeGobj[];
 extern u8 gPlayerOnFireFlag;
 
@@ -291,16 +313,7 @@ extern NPCScriptStep strafeOutStrafeBack[];
 extern NPCScriptStep grenade[];
 extern NPCScriptStep flipSwitch[];
 extern NPCScriptStep openDoor[];
-extern s32 D_8010F960;            /* NPCGetMoveMode: 1 kneel, -1 stand */
-extern s32 D_8011D1D0;            /* NPCGetMoveMode retreat direction */
-extern s32 D_8011D1D4;
-extern s32 D_8011D1D8;
-extern s16 npcGrenadeThrowerID;
-extern u16 grenadeWeaponRestore;
 extern s32 gPlayerFlashlight;
-extern u16 D_80106438[];          /* NPC health per level */
-extern NPCPathCtrl D_8011E1A0[NPC_SLOTS];
-extern s32 D_8011E890[NPC_SLOTS];
 /* Weapon table (D_80105F58[], 0x20 bytes each) */
 typedef struct NPCWeaponInfo {
     /* 0x00 */ u32 flags; /* bits 3-5: class, 8-10: burst */
@@ -322,8 +335,6 @@ extern NPCWeaponInfo D_80105F58[];
     (*(u8 *)&gameObjectsInfo[id].flags24 != 0                                          \
          ? *(u8 *)&gameObjectsInfo[id].flags24                                         \
          : ((f = GOBJ_INFO_FLAGS(&gameObjectsInfo[id]) & 0x3000) != 0x1000 ? (f == 0x2000 ? 20 : 0) : 19))
-extern VECTOR32 D_8011D220;       /* generator spawn point */
-extern VECTOR32 D_8011D230;       /* ... on screen */
 extern s32 D_801457A4;
 
 /* What a generated NPC was made from (genData[id - first generator NPC]) */
@@ -334,11 +345,7 @@ typedef struct NPCGenRecord {
 } NPCGenRecord;
 extern NPCGenRecord genData[];
 
-extern u8 D_80110128[NPC_SLOTS];
 extern u8 gNPCLevelAlertFlag;
-extern TargetInfo D_8011D240[NPC_SLOTS];
-extern MoveInfo D_8011D750[NPC_SLOTS];
-extern PointAction D_80106474[];
 extern void **gCamera;
 extern u8 gSniperCam[];
 extern s32 gSniperMode;
@@ -349,14 +356,9 @@ extern u32 losSortedCount;
 extern s32 npcList[NPC_SLOTS];    /* object id per slot, -1 when free */
 extern NPCGenerator *generatorInfo;
 extern DamagePacket D_8011E8E8[DAMAGE_PACKETS];
-extern VECTOR32 D_8011E8C8;       /* LOS override position (pad is the active flag) */
 #define D_8011E8D4 D_8011E8C8.pad
-extern VECTOR32 D_8011E8A8;       /* player position as seen by NPCs */
-extern VECTOR32 D_8011E8B8;       /* current NPC's position (y up) */
 extern VECTOR32 grenadePos;
-extern char D_8010F964[];         /* "s/npc.c" (.sdata) */
 extern u8 iAnimationArray[];
-extern NPCXALines D_801067C0[][6];
 extern u8 bone[][4];              /* fire bones */
 extern s16 gTaserGobjID;
 
@@ -375,7 +377,6 @@ void NPCSoundFromPC(s32 kind, s32 radius);
 void NPCSound(s32 kind, VECTOR32 *pos, s32 radius, s32 id);
 void ParticleNPCFireHide(s16 id);
 s32 NPCPointIQ(); /* (Gobj *obj, PathPoint *path), some callers leave out the path */
-extern VECTOR32 D_8011D1E0;       /* NPCPointIQ goal midpoint */
 void NPCKneel(Gobj *obj);
 void NPCStand(Gobj *obj);
 void NPCNavigateActionPath(Gobj *obj);
@@ -387,7 +388,6 @@ s32 rsin(s32 a);
 void MovementGobjRegisterCharacterMovement(Gobj *obj, VECTOR32 *dir, s32 mode);
 void ParticleBreath(s16 id);
 extern s32 particleBreathFlag;
-extern VECTOR32 D_8011D210;       /* NPCIQEveryFrame movement direction */
 /* TargetInfo+0x64: aim point (gameobj.h has it inside unk62[]) */
 #define TARGET_AIM(t) ((VECTOR32 *)((u8 *)(t) + 0x64))
 void EGSGeometryFIX_VectorGetAngleFromXZPlane(VECTOR32 *dir, VECTOR32 *angles);
@@ -401,6 +401,147 @@ void EGSGeometry_GetFuzzyXZDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, u32 *di
 void func_80065F5C(s32 id, s32 by);
 void NPCHazmatStop(s32 id);
 u8 NPCGetMoveMode(Gobj *obj);
+
+void NPCShoot(Gobj *obj);
+void NPCSwitch(Gobj *obj);
+void NPCOpenDoor(Gobj *obj);
+void NPCOpenDoorMessage(Gobj *obj);
+void NPCHazmatDone(Gobj *obj);
+void NPCThrowGrenade(Gobj *obj);
+void NPCRollTowardPath(Gobj *obj);
+void NPCRollAwayFromPath(Gobj *obj);
+void NPCWalkToPoint(Gobj *obj);
+void NPCStrafeTowardPath(Gobj *obj);
+void NPCStrafeAwayFromPath(Gobj *obj);
+
+/* .data */
+static u16 D_80106438[20] = { 100, 100, 100, 100, 100, 100, 100, 150, 150, 150, 150, 150, 150, 150, 200, 200, 200, 200, 200, 100 }; /* NPC health per level */
+static u8 D_80106460[20] = { 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 0 };
+static PointAction D_80106474[19] = {
+    { 0, 0, NULL, 0 },
+    { 0, 0, NPCKneel, 0 },
+    { 0, 0, NPCStand, 0 },
+    { 0, 0, NPCRollTowardPath, 0 },
+    { 0, 0, NPCRollAwayFromPath, 0 },
+    { 0, 0, NPCStrafeTowardPath, 0 },
+    { 0, 0, NPCStrafeAwayFromPath, 0 },
+    { 0, 0, NPCShoot, 0 },
+    { 0, 0, NPCShoot, 0 },
+    { 0, 0, NPCThrowGrenade, 0 },
+    { 60, 0, NULL, 0 },
+    { 0, 0, NPCSwitch, 0 },
+    { 0, 0, NPCOpenDoor, 0 },
+    { 0, 0, NPCOpenDoorMessage, 0 },
+    { 21, 0, NULL, 0 },
+    { 0, 0, NPCWalkToPoint, 0 },
+    { 37, 0, NULL, 0 },
+    { 0, 0, NPCHazmatDone, 0 },
+    { 83, 0, NULL, 0 },
+};
+NPCScriptStep kneelStandShoot[5] = {
+    { 1, 20, 0, 5, 1 },
+    { 8, 30, 63, 5, 0 },
+    { 2, 20, 0, 5, 1 },
+    { 7, 30, 63, 5, 0 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep kneelRollShootRoll[8] = {
+    { 1, 20, 0, 5, 1 },
+    { 8, 2, 0, 5, 0 },
+    { 3, 32766, 0, 6, 1 },
+    { 7, 40, 63, 5, 0 },
+    { 4, 32766, 0, 6, 1 },
+    { 15, 32766, 0, 6, 0 },
+    { 8, 30, 63, 5, 0 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep strafeOutStrafeBack[5] = {
+    { 5, 32766, 0, 5, 0 },
+    { 7, 40, 63, 5, 0 },
+    { 6, 32766, 0, 5, 0 },
+    { 8, 30, 63, 5, 0 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep look[2] = {
+    { 10, 120, 31, 5, 0 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep openDoor[4] = {
+    { 2, 20, 0, 5, 1 },
+    { 12, 20, 0, 5, 1 },
+    { 13, 1, 0, 5, 1 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep flipSwitch[3] = {
+    { 2, 20, 0, 5, 1 },
+    { 11, 20, 0, 5, 1 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep disarmBomb[3] = {
+    { 18, 400, 0, 5, 1 },
+    { 17, 20, 0, 5, 1 },
+    { 0, 0, 0, 5, 0 },
+};
+NPCScriptStep grenade[4] = {
+    { 16, 5, 0, 5, 1 },
+    { 9, 32767, 0, 5, 1 },
+    { 16, 5, 0, 5, 1 },
+    { 0, 0, 0, 5, 0 },
+};
+static s16 D_801066B4[134] = {
+    0x23D, 0x23E, 0x23F, 0x240, 0x23D, 0x23E, 0x23F, 0x240, 0x23C, 0x0, 0x1C9, 0x1CD,
+    0x1D1, 0x1E9, 0x1E1, 0x201, 0x1C1, 0x1C5, 0x1C9, 0x1CD, 0x1D1, 0x0, 0x1F5, 0x0,
+    0x1DD, 0x1F9, 0x103, 0x104, 0x105, 0x106, 0x102, 0x0, 0x107, 0x10F, 0x113, 0x0,
+    0x109, 0x10B, 0x10D, 0x0, 0x109, 0x10B, 0x10D, 0x0, 0x118, 0x0, 0x183, 0x184,
+    0x185, 0x0, 0x181, 0x182, 0x141, 0x142, 0x143, 0x144, 0x145, 0x14A, 0x14B, 0x17F,
+    0x180, 0x0, 0x13F, 0x140, 0x13D, 0x13E, 0x153, 0x0, 0x150, 0x15E, 0x150, 0x15E,
+    0xAC, 0xAD, 0xAE, 0x0, 0xAA, 0xAB, 0x12D, 0x12E, 0x12F, 0x0, 0x12B, 0x12C,
+    0x13C, 0x0, 0x138, 0x0, 0x138, 0x0, 0x11A, 0x11B, 0x11C, 0x11D, 0x11E, 0x11F,
+    0x119, 0x0, 0x1A4, 0x1A5, 0x1A2, 0x0, 0x1A6, 0x0, 0x1B0, 0x1B7, 0x1BD, 0x1BF,
+    0x1B0, 0x1B7, 0x1BD, 0x1BF, 0x1A8, 0x1B9, 0x1B3, 0x0, 0x299, 0x29E, 0x296, 0x297,
+    0x298, 0x0, 0x23D, 0x23E, 0x23F, 0x240, 0x290, 0x0, 0x28F, 0x290, 0x293, 0x294,
+    0x295, 0x0,
+};
+static NPCXALines D_801067C0[11][6] = {
+    { { &D_801066B4[0], 4 }, { &D_801066B4[4], 5 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 } },
+    { { &D_801066B4[10], 6 }, { &D_801066B4[16], 5 }, { &D_801066B4[22], 1 }, { NULL, 2 }, { NULL, 2 }, { &D_801066B4[24], 2 } },
+    { { &D_801066B4[26], 4 }, { &D_801066B4[30], 1 }, { &D_801066B4[32], 3 }, { &D_801066B4[36], 3 }, { &D_801066B4[40], 3 }, { &D_801066B4[44], 1 } },
+    { { &D_801066B4[46], 3 }, { &D_801066B4[50], 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 } },
+    { { &D_801066B4[52], 9 }, { &D_801066B4[62], 2 }, { &D_801066B4[64], 3 }, { &D_801066B4[68], 2 }, { &D_801066B4[70], 2 }, { NULL, 2 } },
+    { { &D_801066B4[72], 3 }, { &D_801066B4[76], 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 } },
+    { { &D_801066B4[78], 3 }, { &D_801066B4[82], 2 }, { &D_801066B4[84], 1 }, { &D_801066B4[86], 1 }, { &D_801066B4[88], 1 }, { NULL, 2 } },
+    { { &D_801066B4[90], 6 }, { &D_801066B4[96], 1 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 }, { NULL, 2 } },
+    { { &D_801066B4[98], 2 }, { &D_801066B4[100], 1 }, { &D_801066B4[102], 1 }, { &D_801066B4[104], 4 }, { &D_801066B4[108], 4 }, { &D_801066B4[112], 3 } },
+    { { &D_801066B4[122], 4 }, { &D_801066B4[122], 4 }, { NULL, 2 }, { &D_801066B4[116], 5 }, { &D_801066B4[116], 5 }, { &D_801066B4[116], 5 } },
+    { { &D_801066B4[122], 4 }, { &D_801066B4[122], 4 }, { &D_801066B4[126], 1 }, { &D_801066B4[128], 5 }, { &D_801066B4[128], 5 }, { &D_801066B4[128], 5 } },
+};
+u8 bone[4][4] = { { 11, 9, 11, 13 }, { 5, 3, 5, 13 }, { 12, 10, 12, 14 }, { 6, 4, 6, 14 } }; /* fire bones */
+
+#ifndef _PSYQ
+/* labels the asm functions use inside the vectors above */
+__asm__(".set D_80110128, D_80110128_\n"
+        ".set D_8011D1D4, D_8011D1D0+4\n"
+        ".set D_8011D1D8, D_8011D1D0+8\n"
+        ".set D_8011D1E4, D_8011D1E0+4\n"
+        ".set D_8011D1E8, D_8011D1E0+8\n"
+        ".set D_8011D1F4, D_8011D1F0+4\n"
+        ".set D_8011D1F8, D_8011D1F0+8\n"
+        ".set D_8011D214, D_8011D210+4\n"
+        ".set D_8011D218, D_8011D210+8\n"
+        ".set D_8011D224, D_8011D220+4\n"
+        ".set D_8011D228, D_8011D220+8\n"
+        ".set D_8011D238, D_8011D230+8\n"
+        ".set D_8011E8A8, D_8011E890+0x18\n"
+        ".set D_8011E8AC, D_8011E890+0x1C\n"
+        ".set D_8011E8B0, D_8011E890+0x20\n"
+        ".set D_8011E8B8, D_8011E890+0x28\n"
+        ".set D_8011E8BC, D_8011E890+0x2C\n"
+        ".set D_8011E8C0, D_8011E890+0x30\n"
+        ".set D_8011E8C8, D_8011E890+0x38\n"
+        ".set D_8011E8CC, D_8011E890+0x3C\n"
+        ".set D_8011E8D0, D_8011E890+0x40\n"
+        ".set D_8011E8D4, D_8011E890+0x44\n");
+#endif
 
 /* Wake an NPC up: full awareness, and leave its path unless it is a stationary type */
 #define NPC_ALERT(obj, npc)                                                                 \
@@ -421,7 +562,6 @@ s32 TargetShoot(Gobj *obj, s32 arg1, s32 arg2);
 void EGSAnimGunFlash2(GameObjectAnim *anim, s32 arg1, s32 arg2);
 void SysSoundSetShootingExciteLevel(void);
 void DamageGOBJ(s16 by, s16 from, s16 id, s16 amount, s32 type);
-extern u8 D_80106460[];
 void TargetCalcProb(s32 id);
 void TargetSetThreatLevel(s32 id);
 void NPCIQ(Gobj *obj);
@@ -802,12 +942,12 @@ s32 NPCPickNPCTarget(s32 self) {
                     other = o->move->pos;
                     EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &other, &dist2);
                     if (o->healthInfo->health != -1) {
-                        D_8011D1D0 = pos.vx - other.vx;
+                        D_8011D1D0.vx = pos.vx - other.vx;
                         D_8011D1D4 = pos.vy - other.vy;
                         D_8011D1D8 = pos.vz - other.vz;
                         D_8011D1D4 = 0;
-                        GTEMath_VectorNormal((VECTOR32 *)&D_8011D1D0, (VECTOR32 *)&D_8011D1D0);
-                        if ((D_8011D1D0 * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || dist2 < 0x1E0) && dist2 < best) {
+                        GTEMath_VectorNormal(&D_8011D1D0, &D_8011D1D0);
+                        if ((D_8011D1D0.vx * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || dist2 < 0x1E0) && dist2 < best) {
                             target = id;
                             best = dist2;
                         }
@@ -1669,12 +1809,12 @@ u8 NPCGetMoveMode(Gobj *obj) {
         }
         if (obj->target->targetId < 0 || dist > 0x640) {
         retreat:
-            D_8011D1D0 = D_8011E8B8.vx - D_8011E8A8.vx;
+            D_8011D1D0.vx = D_8011E8B8.vx - D_8011E8A8.vx;
             D_8011D1D4 = D_8011E8B8.vy - D_8011E8A8.vy;
             D_8011D1D8 = D_8011E8B8.vz - D_8011E8A8.vz;
             D_8011D1D4 = 0;
-            GTEMath_VectorNormal((VECTOR32 *)&D_8011D1D0, (VECTOR32 *)&D_8011D1D0);
-            if (D_8011D1D0 * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || npc->unk28 < 0x140) {
+            GTEMath_VectorNormal(&D_8011D1D0, &D_8011D1D0);
+            if (D_8011D1D0.vx * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || npc->unk28 < 0x140) {
                 D_8010F960 = -1;
                 mode = 7;
             } else {
@@ -4056,8 +4196,6 @@ typedef struct NPCLosRay {
     /* 0x30 */ NPCLosP2P *window;
 } NPCLosRay;
 
-extern s32 D_8010F974; /* NPCLosCheck: npcList resume index */
-extern s32 D_8010F978; /* NPCLosCheck: phase (-1 camera, 0 target, 1 dead) */
 void _LOSPoint2Point(NPCLosP2P *q);
 void _LOSPointAlongDirection(NPCLosRay *q);
 s16 LOSGetSortOrder(void);

@@ -5,23 +5,7 @@
 #include "gobj.h"
 #include "game.h"
 
-/* pickup.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FCF8)
-SDATA_LOCAL(D_8010FCFC)
-SDATA_LOCAL(D_8010FD00)
-SDATA_LOCAL(D_8010FD04)
-SDATA_LOCAL(D_8010FD08)
-SDATA_LOCAL(D_8010FD0C)
-SDATA_LOCAL(gObjectInteractionCallback)
-SDATA_LOCAL(D_801101B8)
-SDATA_LOCAL(D_801101BC)
-SDATA_LOCAL(D_801101C0)
-SDATA_LOCAL(D_801101C4)
-SDATA_LOCAL(D_801101C8)
-SDATA_LOCAL(gDeviceDetonated)
-SDATA_LOCAL(gLevelKeycards)
-SDATA_LOCAL(gLevelKeycardsTaken)
-SDATA_LOCAL(gNextTickAllowMsgLongText)
+/* pickup.c's data is defined below its types */
 
 /* "Use" prompts shown for objects the player is standing at. */
 typedef struct UseMsg {
@@ -43,27 +27,54 @@ typedef struct PickupPending {
 #define PICKUP_PENDING_MAX 4
 #define PICKUP_TAKEN_MSG_COUNT 27 /* one per weapon/item id, 0x1A is the flak jacket */
 
-extern char *(*D_8010FCF8)();         /* locked-door string callback */
-extern char *(*D_8010FCFC)();         /* use string callback */
-extern void (*D_8010FD00)();          /* key callback */
-extern void (*D_8010FD04)();          /* bomb callback */
-extern s32 (*D_8010FD08)();           /* computer callback */
-extern s32 (*D_8010FD0C)();           /* switch callback */
-extern void (*gObjectInteractionCallback)(); /* level specific object callback */
-extern s32 D_801101B8;
-extern s32 D_801101BC;                /* UseMsg count */
-extern s32 D_801101C0;                /* PickupPending count */
-extern u8 D_801101C4;
-extern u8 D_801101C8;
-extern u8 gDeviceDetonated;
-extern s32 gLevelKeycards;
-extern s32 gLevelKeycardsTaken;
-extern u32 gNextTickAllowMsgLongText;
+/* .data */
+static VECTOR32 D_80107840 = { 0, 0, 0, 0 };
 
+/* .sdata */
+static char D_8010FCEC[1] = "";
+static s16 D_8010FCF0[4] = { -1, 0x18, 0x19, 0 }; /* armor pickup message ids */
+static char *(*D_8010FCF8)() = NULL;  /* locked-door string callback */
+static char *(*D_8010FCFC)() = NULL;  /* use string callback */
+static void (*D_8010FD00)() = NULL;   /* key callback */
+static void (*D_8010FD04)() = NULL;   /* bomb callback */
+static s32 (*D_8010FD08)() = NULL;    /* computer callback */
+static s32 (*D_8010FD0C)() = NULL;    /* switch callback */
+static s32 D_8010FD10 = 0xAA;         /* unreferenced */
+static s32 D_8010FD14 = 0x44;         /* unreferenced */
+void (*gObjectInteractionCallback)() = NULL; /* level specific object callback */
+
+/* .sbss: the original assembler gave every .lcomm 4 bytes (see particle.c) */
+static s32 D_801101B8;
+static s32 D_801101BC;                /* UseMsg count */
+static s32 D_801101C0;                /* PickupPending count */
+static u8 D_801101C4;
+#ifndef _PSYQ
+static u8 D_801101C4_pad;
+static s16 D_801101C4_pad2;
+#endif
+static u8 D_801101C8;
+
+/* .bss */
+#ifdef _PSYQ
+static UseMsg D_80121978[USE_MSG_MAX];
+static PickupPending D_80121990[PICKUP_PENDING_MAX];
+static u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT]; /* taken-message text ids */
+static u8 D_801219E8[PICKUP_TAKEN_MSG_COUNT];  /* checksums of those messages */
+#else
+/* maspsx's 2.7x layout would 16-align the arrays; one block, named with .set below
+ * (the size includes psylink's 8-alignment before save's .bss) */
+static u8 D_80121978_bss[0x90];
 extern UseMsg D_80121978[USE_MSG_MAX];
 extern PickupPending D_80121990[PICKUP_PENDING_MAX];
-extern u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT]; /* taken-message text ids */
-extern u8 D_801219E8[PICKUP_TAKEN_MSG_COUNT];  /* checksums of those messages */
+extern u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT];
+extern u8 D_801219E8[PICKUP_TAKEN_MSG_COUNT];
+#endif
+
+/* commons this TU reaches through $gp */
+u8 gDeviceDetonated;
+s32 gLevelKeycards;
+s32 gLevelKeycardsTaken;
+u32 gNextTickAllowMsgLongText;
 
 void TextRemoveString();
 s32 TextIsStringShowing(u16 str);
@@ -105,7 +116,6 @@ void PickUpInventory(s16 objId);
 s32 IsWideDoor(Gobj *obj);
 void EGSFrameRotateLocalYXZ(EGSFrame *frame, VECTOR32 *rot);
 void MovementRemoveGobj(Gobj *obj);
-extern VECTOR32 D_80107840;
 void func_8008C194(Gobj *obj);
 void func_8008C058(Gobj *obj, s32 openerId);
 void ObjectRemoveAndIgnoreBulletHoles(Gobj *obj);
@@ -157,9 +167,7 @@ extern u8 D_80105F55[]; /* rounds per clip */
 extern u8 D_80105F56[]; /* pickup amount for single-item weapons */
 extern u8 D_80105F58[]; /* flags; bits 0-2: clips per pickup - 1 */
 extern u8 D_80105F64[]; /* s16 name message id */
-extern s16 D_8010FCF0[]; /* armor pickup message ids */
 
-extern char D_8010FCEC[]; /* "" */
 extern s32 gCurrentWeapon;
 extern s32 gExploDir;
 
@@ -209,6 +217,22 @@ void PickupInitData(void) {
     UseSetLevSpecObjCallback(NULL);
     UseSetSwitchCallback(NULL);
 }
+
+#ifndef _PSYQ
+__asm__(".set D_80121978, D_80121978_bss\n"
+        ".set D_8012197A, D_80121978_bss+0x2\n"
+        ".set D_8012197C, D_80121978_bss+0x4\n"
+        ".set D_80121990, D_80121978_bss+0x18\n"
+        ".set D_80121992, D_80121978_bss+0x1A\n"
+        ".set D_80121993, D_80121978_bss+0x1B\n"
+        ".set D_80121994, D_80121978_bss+0x1C\n"
+        ".set D_80121996, D_80121978_bss+0x1E\n"
+        ".set D_801219B0, D_80121978_bss+0x38\n"
+        ".set D_801219E8, D_80121978_bss+0x70\n"
+        /* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes its own array from this
+         * folded address */
+        ".globl D_801101C8\n");
+#endif
 
 void SetNextTickAllowMsgLongText(u32 tick) {
     if (gNextTickAllowMsgLongText < tick) {

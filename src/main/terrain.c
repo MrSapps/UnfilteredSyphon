@@ -5,24 +5,6 @@
 #include "gobj.h"
 #include "level.h"
 
-/* terrain.c's small data, still assembled from asm */
-SDATA_LOCAL(vramLoaded)
-SDATA_LOCAL(gTextureCache)
-SDATA_LOCAL(gTerrSectorCount)
-SDATA_LOCAL(gNumTerrainDataBlocks)
-SDATA_LOCAL(gTerrainCache)
-SDATA_LOCAL(gTerrainCacheFreeBlocks)
-SDATA_LOCAL(gTerrainCacheInactiveBlocks)
-SDATA_LOCAL(gSHCount)
-SDATA_LOCAL(gSectorsPerBlock)
-SDATA_LOCAL(gTerrSector)
-SDATA_LOCAL(gTUTime)
-SDATA_LOCAL(gTerrainDirectory)
-SDATA_LOCAL(gGabeSectorAnim)
-SDATA_LOCAL(gCache)
-SDATA_LOCAL(gVramHogCount)
-SDATA_LOCAL(D_8010F9FC)
-SDATA_LOCAL(D_8010FA00)
 
 /* Terrain sector table (gSectorMap[], 0x10 bytes each). */
 typedef struct SectorMapEntry {
@@ -154,16 +136,25 @@ typedef struct Vec3 {
     s32 x, y, z;
 } Vec3;
 
-extern u8 vramLoaded;
-extern void *gTextureCache;
-extern s32 gTerrSectorCount;
-extern s32 gNumTerrainDataBlocks;
-extern TerrainCacheEntry *gTerrainCache;
-extern s32 gTerrainCacheFreeBlocks;
-extern s32 gTerrainCacheInactiveBlocks;
+/* .sdata: defined after VramSwap (maspsx can't take file-scope asm right after .sdata) */
+extern s16 gVramHogCount;
 extern s32 gSHCount;
+extern TerrainAnim *gGabeSectorAnim;
+extern u8 vramLoaded;
+static TerrainRect D_8010F9E0;
 extern s32 gTUTime;
-extern TerrSector *gTerrSector;
+
+/* commons this TU reaches through $gp */
+void *gTextureCache;
+s32 gTerrSectorCount;
+s32 gNumTerrainDataBlocks;
+TerrainCacheEntry *gTerrainCache;
+s32 gTerrainCacheFreeBlocks;
+s32 gTerrainCacheInactiveBlocks;
+TerrSector *gTerrSector;
+s32 gSectorsPerBlock;
+struct TerrHogDir *gTerrainDirectory;
+u8 *gCache;
 extern ActivationList *objActivationList;
 extern ActivationList *generatorActivationList;
 extern u8 mFaceCollisionSectors[];
@@ -175,16 +166,11 @@ extern VramMapEntry gVRAMMap[2][33];
 extern DisplayCamera *gSniperCam;
 extern s32 gSniperMode;
 extern char D_80012360[]; /* "s/terrain.c", still owned by asm SetupTerrain */
-extern s16 gVramHogCount;
-extern TerrainRect D_8010F9E0; /* one texture page */
 extern char gVramFileName[];
-extern char D_8010F9D0[]; /* "" */
-extern char D_8010F9F0[]; /* "1" */
 void InitStreamRequests(void);
 void HotboxInit(TerrainAnim *anim);
 void InitBxv(TerrainModel *model);
 void ObjectSetSectorLighting(s32 sector);
-extern s32 gSectorsPerBlock;
 void CdIntToPos(s32 sector, void *pos);
 void EGSDisplayGetSectorBox(EMDHeader *emd, s32 arg1);
 void LoadImage(TerrainRect *rect, void *pixels);
@@ -252,6 +238,23 @@ void VramSwap(StreamReq *req) {
 #else
 INCLUDE_ASM("asm/main/nonmatchings/terrain", VramSwap);
 #endif
+
+/* terrain.c's .sdata, in address order (0x8010FA04 is unreferenced; the "" and "1"
+ * are the VRAM hog name suffixes) */
+static char D_8010F9D0[1] = "";
+s16 gVramHogCount = 0;
+s32 gSHCount = 0;
+TerrainAnim *gGabeSectorAnim = NULL;
+u8 vramLoaded = 0;
+static TerrainRect D_8010F9E0 = { 0, 0, 0x40, 0x100 }; /* one texture page */
+s32 gTexInfo = 0;
+static s32 D_8010F9EC = 0; /* unreferenced */
+static char D_8010F9F0[2] = "1";
+s32 gLoadOrder = 0;
+s32 gTUTime = 666;
+static u8 D_8010F9FC = 1;  /* full (re)activation pending */
+static s32 D_8010FA00 = 0; /* sniper view active on the last update */
+static s32 D_8010FA04 = 0; /* unreferenced */
 
 void AckVram(void) {
     vramLoaded = 1;
@@ -326,8 +329,6 @@ typedef struct TerrCdlFILE {
 
 extern TerrLoadHeader *levelLoadHeader;
 extern char gTerrainFileName[];
-extern TerrHogDir *gTerrainDirectory;
-extern u8 *gCache;
 extern s32 gActivationDistance;
 extern u8 gEGSIdentityMatrix[];
 s32 EGSHogOpenDirectoryOnly(char *path, s32 unused, TerrHogDir **out);
@@ -731,9 +732,6 @@ u8 FindSectorInNewMap(s16 sector, u8 *map, u8 includeFar) {
     }
 }
 
-extern u8 D_8010F9FC;  /* full (re)activation pending */
-extern s32 D_8010FA00; /* sniper view active on the last update */
-extern TerrainAnim *gGabeSectorAnim;
 void EGSDisplayRegisterSectorFaceCollisionArray(u8 *sectors);
 s32 NPCActivationOK(s32 id);
 void StreamSynchronous(void);

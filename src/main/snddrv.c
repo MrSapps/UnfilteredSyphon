@@ -9,49 +9,7 @@
 /* The original was built with gcc's builtin abs() (inline bgez/negu); this build passes -fno-builtin. */
 #define abs(x) __builtin_abs(x)
 
-/* snddrv.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FD78)
-SDATA_LOCAL(D_8010FD7C)
-SDATA_LOCAL(D_8010FD7E)
-SDATA_LOCAL(D_8010FD80)
-SDATA_LOCAL(D_8010FD82)
-SDATA_LOCAL(D_8010FD84)
-SDATA_LOCAL(D_8010FD88)
-SDATA_LOCAL(D_8010FD8C)
-SDATA_LOCAL(D_8010FD90)
-SDATA_LOCAL(D_8010FD94)
-SDATA_LOCAL(D_8010FD98)
-SDATA_LOCAL(D_801101E8)
-SDATA_LOCAL(D_801101EC)
-SDATA_LOCAL(D_801101F0)
-SDATA_LOCAL(D_801101F4)
-SDATA_LOCAL(D_801101F8)
-SDATA_LOCAL(gAllowCueAfter)
-SDATA_LOCAL(gCurrentMovieVol)
-SDATA_LOCAL(gHasCD)
-SDATA_LOCAL(gLastXAPan)
-SDATA_LOCAL(gLastXAVol)
-SDATA_LOCAL(gLoopsPaused)
-SDATA_LOCAL(gMusicNumPaused)
-SDATA_LOCAL(gMusicPaused)
-SDATA_LOCAL(gPlayingMIDIUnderscore)
-SDATA_LOCAL(gPlayingMIDIUnderscoreBlock)
-SDATA_LOCAL(gRevDepth)
-SDATA_LOCAL(gRevType)
-SDATA_LOCAL(gReverbOn)
-SDATA_LOCAL(gReverbWaiting)
-SDATA_LOCAL(gSEvent)
-SDATA_LOCAL(gStereoMode)
-SDATA_LOCAL(gUnderscoreID)
-SDATA_LOCAL(gUserXACallback)
-SDATA_LOCAL(gUserXACallbackData)
-SDATA_LOCAL(gUserXACallbackFrame)
-SDATA_LOCAL(gVABDoneCallback)
-SDATA_LOCAL(gVABDoneCallbackData_1)
-SDATA_LOCAL(gVABDoneCallbackData_2)
-SDATA_LOCAL(gXferingVAB)
-SDATA_LOCAL(gXferingVABPtr)
-SDATA_LOCAL(oldreadycallback)
+/* snddrv.c's data is defined below its types */
 
 /* One sound in a bank (0x18 bytes) */
 typedef struct SoundEntry {
@@ -140,12 +98,6 @@ typedef struct MIDIMacro {
     /* 0x04 */ u8 data[16];
 } MIDIMacro;
 
-/* Queued SEPs started together by the next play mark */
-typedef struct SeqQueueState {
-    u8 count;
-    u8 bank; /* high nibble of the next SEP number */
-} SeqQueueState;
-
 /* An XA play request (0xC bytes) */
 typedef struct XAQueue {
     /* 0x00 */ s32 pos;
@@ -195,61 +147,86 @@ typedef struct CdlLOC {
 } CdlLOC;
 
 extern SoundBlock *gVabBlock[16];
-extern s32 gSndMemPtr[16];
 extern XABlock *gXABlock[6];
 extern MIDIDesc *gMIDIDesc[6];
 extern SoundEvent gEventQue[8];
-extern SoundEvent *gSEvent;
-extern SoundGroup D_801221E8[];
-extern XAQueue D_80122528[8];
-extern XAQueue *D_801101E8;
-extern XAQueue *D_801101EC;
-extern s16 D_801101D0[3]; /* master volumes */
-extern u8 D_801101E0[];   /* MIDI registers */
-extern s32 D_80107890[32]; /* per-SEQ MIDI channel mute masks */
-extern u8 D_80107910[32];  /* per-SEQ mark state: skipping (1 = if-false, 2 = else) */
-extern u8 D_80107930[32];  /* per-SEQ mark state: argument bytes still expected */
-extern u8 D_80107950[32];  /* per-SEQ mark state: pending opcode */
-extern u8 D_80107970[32];  /* per-SEQ mark state: operand */
 extern MIDIMacro gMIDIMacro[4];
-extern s16 D_8010FD80;              /* a mark macro is running */
-extern SeqQueueState D_8010FD82;
-extern u8 D_801101D8[8];            /* queued SEP numbers */
-void SsChannelMute(s16 acc, s16 seq, s32 channels);
 
-extern s32 D_8010FD78; /* global excite */
-extern s16 D_8010FD7C; /* MIDI vol */
-extern s16 D_8010FD7E; /* MIDI pan */
-extern u32 D_8010FD84; /* XA position (sectors played) */
-extern s32 D_8010FD88; /* XA prepared */
-extern s32 D_8010FD8C; /* XA playing */
-extern s32 D_8010FD90; /* XA paused */
-extern s16 D_8010FD98; /* XA error count */
-extern s32 gHasCD;
-extern SoundEntry *gPlayingMIDIUnderscore; /* the underscore's sound table */
-extern s16 gUnderscoreID;
-extern s16 gLastXAVol;
-extern s16 gLastXAPan;
-extern s32 D_801101F0; /* XA: start position */
-extern u32 D_801101F4; /* XA length (sectors) */
-extern s32 D_801101F8; /* XA: channel */
-extern s32 D_8010FD94;
-extern s16 gStereoMode;
-extern s16 gReverbOn;
-extern s16 gReverbWaiting;
-extern s16 gRevType;
-extern s16 gRevDepth;
-extern s16 gLoopsPaused;
-extern u16 gCurrentMovieVol;
-extern s32 gXferingVAB;
-extern SoundBlock *gXferingVABPtr;
-extern void (*gVABDoneCallback)();
-extern s32 gVABDoneCallbackData_1;
-extern s32 gVABDoneCallbackData_2;
-extern void (*gUserXACallback)();
-extern s32 gUserXACallbackFrame;
-extern s32 gUserXACallbackData;
-extern s32 oldreadycallback;
+/* .sdata (0x8010FD20 before it is unreferenced and stays in the splat blob) */
+s16 gStereoMode = 1;
+u16 gCurrentMovieVol = 0;
+SoundEntry *gPlayingMIDIUnderscore = NULL; /* the underscore's sound table */
+SoundBlock *gPlayingMIDIUnderscoreBlock = NULL;
+s16 gUnderscoreID = 0;
+s32 gMusicPaused = 0;
+s32 gMusicNumPaused = 0;
+s16 gLoopsPaused = 0;
+void (*gVABDoneCallback)() = NULL;
+s32 gVABDoneCallbackData_1 = 0;
+s32 gVABDoneCallbackData_2 = 0;
+s32 gXferingVAB = -1;
+SoundBlock *gXferingVABPtr = NULL;
+SoundEvent *gSEvent = NULL;
+s16 gRevType = -1;
+s16 gRevDepth = 0;
+s16 gReverbOn = 0;
+s32 gReverbVoices = 0;
+s16 gReverbWaiting = 0;
+s32 gHasCD = 0;
+s16 gLastXAVol = 0;
+s16 gLastXAPan = 0;
+void (*gUserXACallback)() = NULL;
+s32 gAllowCueAfter = 0;
+static s32 D_8010FD78 = 0; /* global excite */
+static s16 D_8010FD7C = 0; /* MIDI vol */
+static s16 D_8010FD7E = 0; /* MIDI pan */
+static s16 D_8010FD80 = 0; /* a mark macro is running */
+static u8 D_8010FD82 = 0; /* queued SEP count (two u8s: a struct would be word-aligned) */
+static u8 D_8010FD83 = 0; /* high nibble of the next SEP number */
+static u32 D_8010FD84 = 0; /* XA position (sectors played) */
+static s32 D_8010FD88 = 0; /* XA prepared */
+static s32 D_8010FD8C = 0; /* XA playing */
+static s32 D_8010FD90 = 0; /* XA paused */
+static s32 D_8010FD94 = 0;
+static s16 D_8010FD98 = 0; /* XA error count */
+s32 oldreadycallback = 0;
+
+/* .sbss */
+static s16 D_801101D0[3]; /* master volumes */
+static u8 D_801101D8[8];  /* queued SEP numbers */
+static u8 D_801101E0[8];  /* MIDI registers */
+static XAQueue *D_801101E8;
+static XAQueue *D_801101EC;
+static s32 D_801101F0; /* XA: start position */
+static u32 D_801101F4; /* XA length (sectors) */
+static s32 D_801101F8; /* XA: channel */
+
+/* .bss */
+static SoundGroup D_801221E8[16];
+static XAQueue D_80122528[8];
+static s16 D_80122588[32]; /* XA sector header buffer */
+
+/* commons this TU reaches through $gp */
+s32 gUserXACallbackFrame;
+s32 gUserXACallbackData;
+
+/* .data */
+s32 gSndMemPtr[16] = { 0x1040, 0x31D80, 0, 0x505C0, 0, 0x7A000, 0, 0, 0, 0x6D2C0 };
+static s32 D_80107890[32] = { 0 }; /* per-SEQ MIDI channel mute masks */
+static u8 D_80107910[32] = { 0 };  /* per-SEQ mark state: skipping (1 = if-false, 2 = else) */
+static u8 D_80107930[32] = { 0 };  /* per-SEQ mark state: argument bytes still expected */
+static u8 D_80107950[32] = { 0 };  /* per-SEQ mark state: pending opcode */
+static u8 D_80107970[32] = { 0 };  /* per-SEQ mark state: operand */
+
+#ifndef _PSYQ
+/* labels the asm functions use inside the arrays above */
+__asm__(".set D_801101DF, D_801101E0-1\n"
+        ".set D_801221EA, D_801221E8+0x2\n"
+        ".set D_801221FA, D_801221E8+0x12\n"
+        ".set D_8012220A, D_801221E8+0x22\n"
+        ".set D_8012221A, D_801221E8+0x32\n"
+        ".set D_8012221B, D_801221E8+0x33\n");
+#endif
 
 /* libsnd / libspu / libcd / libapi */
 void SsInit(void);
@@ -317,16 +294,11 @@ void SsSepPause(s16 access_num, s16 seq_num);
 void SsSepReplay(s16 access_num, s16 seq_num);
 s32 EnterCriticalSection(void);
 void ExitCriticalSection(void);
-extern SoundBlock *gPlayingMIDIUnderscoreBlock;
-extern s32 gMusicPaused;
-extern s32 gMusicNumPaused;
 extern u8 gMusicPID[]; /* SEPs paused by PauseMusicUnderscore */
 void PlayXA(s32 pos, s32 chan, s32 force, s32 arg3);
 void PrepareXA(void);
-extern s32 gAllowCueAfter;
 s32 CanIHaveTheCDPlease(s32 pos, s16 chan, s32 arg);
 s32 CdGetSector(void *madr, s32 size);
-extern s16 D_80122588[]; /* XA sector header buffer */
 void AdjustRunningMusicVol(void);
 void SsSeqClose(s16 access_num);
 void SsSepClose(s16 access_num);
@@ -2351,7 +2323,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             D_801221E8[i].unk32[0] = 0;
             D_801221E8[i].unk32[1] = 0;
         }
-        D_8010FD82.count = 0;
+        D_8010FD82 = 0;
         return 0;
     }
     if (D_80107930[seq] != 0) {
@@ -2523,7 +2495,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         return 0;
     case 8:
         if (D_80107910[seq] == 0) {
-            D_8010FD82.bank = 1;
+            D_8010FD83 = 1;
             return 0;
         }
         if (D_80107910[seq] == 1) {
@@ -2567,12 +2539,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             GetVolumesFromPan(D_8010FD7C, D_8010FD7E, &left, &right, 1);
             SsSepSetVol(acc, D_801101E0[data - 16] - 1, left, right);
             SsSepPlay(acc, D_801101E0[data - 16] - 1, 1, 0);
-            if (D_8010FD82.count != 0) {
-                for (i = 0; i < D_8010FD82.count; i++) {
+            if (D_8010FD82 != 0) {
+                for (i = 0; i < D_8010FD82; i++) {
                     SsSepSetVol(acc, D_801101D8[i], left, right);
                     SsSepPlay(acc, D_801101D8[i], 1, 0);
                 }
-                D_8010FD82.count = 0;
+                D_8010FD82 = 0;
             }
             return 0;
         }
@@ -2589,8 +2561,8 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
     case 30:
     case 31:
         if (D_80107910[seq] == 0) {
-            D_801101D8[D_8010FD82.count] = D_801101E0[data - 24] - 1;
-            D_8010FD82.count++;
+            D_801101D8[D_8010FD82] = D_801101E0[data - 24] - 1;
+            D_8010FD82++;
             return 0;
         }
         if (D_80107910[seq] == 1) {
@@ -2674,15 +2646,15 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             D_8010FD80 = 0;
             SsSepStop(acc, seq);
             GetVolumesFromPan(D_8010FD7C, D_8010FD7E, &left, &right, 1);
-            SsSepSetVol(acc, data + (D_8010FD82.bank * 16 - 64), left, right);
-            SsSepPlay(acc, data + (D_8010FD82.bank * 16 - 64), 1, 0);
-            D_8010FD82.bank = 0;
-            if (D_8010FD82.count != 0) {
-                for (i = 0; i < D_8010FD82.count; i++) {
+            SsSepSetVol(acc, data + (D_8010FD83 * 16 - 64), left, right);
+            SsSepPlay(acc, data + (D_8010FD83 * 16 - 64), 1, 0);
+            D_8010FD83 = 0;
+            if (D_8010FD82 != 0) {
+                for (i = 0; i < D_8010FD82; i++) {
                     SsSepSetVol(acc, D_801101D8[i], left, right);
                     SsSepPlay(acc, D_801101D8[i], 1, 0);
                 }
-                D_8010FD82.count = 0;
+                D_8010FD82 = 0;
             }
             return 0;
         }
@@ -2707,9 +2679,9 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
     case 94:
     case 95:
         if (D_80107910[seq] == 0) {
-            D_801101D8[D_8010FD82.count] = data - 80 + D_8010FD82.bank * 16;
-            D_8010FD82.bank = 0;
-            D_8010FD82.count++;
+            D_801101D8[D_8010FD82] = data - 80 + D_8010FD83 * 16;
+            D_8010FD83 = 0;
+            D_8010FD82++;
             return 0;
         }
         if (D_80107910[seq] == 1) {

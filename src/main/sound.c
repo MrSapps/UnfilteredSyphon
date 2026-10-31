@@ -8,54 +8,55 @@ typedef struct XARandTable {
     /* 0x04 */ s16 tracks[1]; /* -1 terminated */
 } XARandTable;
 
-/* sound.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F990)
-SDATA_LOCAL(D_8010F994)
-SDATA_LOCAL(D_8010F995)
-SDATA_LOCAL(D_8010F996)
-SDATA_LOCAL(D_8010F997)
-SDATA_LOCAL(D_8010F998)
-SDATA_LOCAL(D_80110188)
-SDATA_LOCAL(D_80110190)
-SDATA_LOCAL(D_80110194)
-SDATA_LOCAL(D_80110198)
-SDATA_LOCAL(D_8011019C)
-SDATA_LOCAL(D_801101A0)
-SDATA_LOCAL(D_801101A4)
-SDATA_LOCAL(mXABlock)
+/* sound.c's data. .sdata, .sbss and .bss each in address order. */
+static s32 *D_80110188;            /* .sbss: loaded sound data: [0] = offset (words) of the MIDI data */
+static s32 D_8010F98C = 0;         /* .sdata: unreferenced */
+static s32 D_8010F990 = (s32)&D_80110188;
+static s8 D_8010F994[2] = { 0x50, 0x50 }; /* master volumes */
+#define D_8010F995 D_8010F994[1]
+static u8 D_8010F996 = 0x7F;
+static u8 D_8010F997 = 1;          /* stereo flag */
+static u8 D_8010F998 = 0;          /* sound system initialised */
+static char D_8010F99C[8] = "PL.VB"; /* sound bank names */
+static char D_8010F9A4[8] = "AM.VB";
+static char D_8010F9AC[8] = "RC.VB";
+static s32 D_8010F9B4 = 0;         /* unreferenced (could be cobj's as well) */
+static s32 D_8010F9B8 = 0;
+static s32 D_8010F9BC = 0;
 
-extern s32 D_8010F990;
-extern s8 D_8010F994[2]; /* master volumes */
-extern s8 D_8010F995;
-extern u8 D_8010F996;
-extern u8 D_8010F997; /* stereo flag */
-extern u8 D_8010F998; /* sound system initialised */
-extern s32 *D_80110188; /* loaded sound data: [0] = offset (words) of the MIDI data */
-extern s32 *D_80110190; /* MIDI data */
-extern u8 D_80110194;  /* shooting excite active */
-extern u8 D_80110198;  /* chase excite level */
-extern s32 D_8011019C; /* periodic song */
-extern s32 D_801101A0;
-extern u8 D_801101A4;
-extern s32 mXABlock;
+static s32 D_8011018C;             /* unreferenced */
+static s32 *D_80110190;            /* MIDI data */
+static u8 D_80110194;              /* shooting excite active */
+#ifndef _PSYQ
+static u8 D_80110194_pad;          /* the original assembler gave every .lcomm 4 bytes */
+static s16 D_80110194_pad2;
+#endif
+static u8 D_80110198;              /* chase excite level */
+static s32 D_8011019C;             /* periodic song */
+static s32 D_801101A0;
+static u8 D_801101A4;
 
-extern s32 D_8011EB08[6]; /* sound block handles (slot 3: music) */
-extern s32 D_8011EB30;    /* XA state, -3: queued */
-extern s16 D_8011EB34;
-extern s16 D_8011EB36;
-extern s16 D_8011EB38; /* queued XA */
+/* .bss: one object (the s16s are 2 apart, and the original .lcomm layout gives every
+ * static 4 bytes) */
+typedef struct SoundBss {
+    /* 0x00 */ s32 blocks[6]; /* sound block handles (slot 3: music) */
+    /* 0x18 */ s32 unk18[4];  /* unreferenced */
+    /* 0x28 */ s32 xaState;   /* XA state, -3: queued */
+    /* 0x2C */ s16 xa2C;
+    /* 0x2E */ s16 xa2E;
+    /* 0x30 */ s16 xaQueued;  /* queued XA */
+} SoundBss;
+static SoundBss D_8011EB08;
+#define D_8011EB30 D_8011EB08.xaState
+#define D_8011EB34 D_8011EB08.xa2C
+#define D_8011EB36 D_8011EB08.xa2E
+#define D_8011EB38 D_8011EB08.xaQueued
+
+s32 mXABlock; /* common, $gp */
 extern u8 gUsingSndBigFire;
 extern u8 gSoundFootstep[26];
 extern s16 getNPCIndex;
 extern s32 npcList[6];
-extern s8 mExciteLevelModTable[];
-extern s8 D_80106AD0; /* excite: distance divisor */
-extern s8 D_80106AD1; /* excite: no threat */
-extern s8 D_80106AD2; /* excite: threat 1 */
-extern s8 D_80106AD3; /* excite: low threat */
-extern s8 D_80106AD4; /* excite: high threat */
-extern s8 D_80106AD5; /* excite: full threat */
-extern s8 D_80106AD6; /* excite: shooting bonus */
 
 typedef struct SoundTarget {
     /* 0x00 */ u8 unk00[0xD4];
@@ -65,7 +66,6 @@ typedef struct SoundSysInfo {
     s16 level;
 } SoundSysInfo;
 extern SoundSysInfo gSysInfo;
-extern s32 xaLevelStartIndex[];
 extern s32 gPlayerOffset;
 
 typedef struct CdlLOC {
@@ -136,9 +136,6 @@ typedef struct SoundFileName {
 extern char D_80012224[]; /* "s/sound.c" */
 extern char D_80012230[]; /* "MUSIC.VB" */
 extern char D_8001223C[]; /* "INGAME.XH" */
-extern char D_8010F99C[]; /* sound bank names (.sdata) */
-extern char D_8010F9A4[];
-extern char D_8010F9AC[];
 extern char D_80012248[]; /* "\COMMON\BEEPSX.VH;1" */
 extern char D_8001225C[]; /* "\COMMON\BEEPSX.VB;1" */
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
@@ -159,7 +156,36 @@ void EGSFrameTransformPoint(VECTOR32 *in, s32 arg1, void *frame, VECTOR32 *out);
 int ratan2(int y, int x);
 void iSndCalcVolPan(s32 type, s32 song, GameObjectRuntime *src, VECTOR32 *pos, s16 *volOut, s16 *panOut);
 
-extern XARandTable D_80106A88; /* random XA table for SoundPlayXACASAnimCB */
+/* .data */
+s32 xaLevelStartIndex[20] = { 118, 118, 118, 83, 83, 52, 52, 34, 34, 34, 34, 20, 20, 0, 157, 166, 8, 8, 111, 118 };
+typedef struct XARandTable32 {
+    u32 used;
+    s16 tracks[32];
+} XARandTable32;
+static XARandTable32 D_80106A88 = { 0, { 0x285, 0x286, 0x287, -1 } }; /* random XA table for SoundPlayXACASAnimCB */
+s8 mExciteLevelModTable[11] = { 10, 6, 6, 6, 10, 0, 1, 25, 25, 75, 25 };
+#define D_80106AD0 mExciteLevelModTable[4]  /* excite: distance divisor */
+#define D_80106AD1 mExciteLevelModTable[5]  /* excite: no threat */
+#define D_80106AD2 mExciteLevelModTable[6]  /* excite: threat 1 */
+#define D_80106AD3 mExciteLevelModTable[7]  /* excite: low threat */
+#define D_80106AD4 mExciteLevelModTable[8]  /* excite: high threat */
+#define D_80106AD5 mExciteLevelModTable[9]  /* excite: full threat */
+#define D_80106AD6 mExciteLevelModTable[10] /* excite: shooting bonus */
+
+#ifndef _PSYQ
+/* labels the asm functions use */
+__asm__(".set D_80106AD0, mExciteLevelModTable+4\n"
+        ".set D_80106AD1, mExciteLevelModTable+5\n"
+        ".set D_80106AD2, mExciteLevelModTable+6\n"
+        ".set D_80106AD3, mExciteLevelModTable+7\n"
+        ".set D_80106AD4, mExciteLevelModTable+8\n"
+        ".set D_80106AD5, mExciteLevelModTable+9\n"
+        ".set D_80106AD6, mExciteLevelModTable+10\n"
+        ".set D_8011EB30, D_8011EB08+0x28\n"
+        ".set D_8011EB34, D_8011EB08+0x2C\n"
+        ".set D_8011EB36, D_8011EB08+0x2E\n"
+        ".set D_8011EB38, D_8011EB08+0x30\n");
+#endif
 
 typedef struct SoundCamera {
     void **display; /* *display: the camera frame */
@@ -303,7 +329,7 @@ void SysInitSound(s32 name, s32 arg1) {
         } else if (!strcmp(blockName, D_80012230)) {
             bank = 3;
         }
-        D_8011EB08[bank] = SoundRegisterVAB(vh, vb);
+        D_8011EB08.blocks[bank] = SoundRegisterVAB(vh, vb);
         while (!SoundRegisterVABComplete()) {
         }
     }
@@ -340,7 +366,7 @@ void SysInitMenuSoundBank(void) {
     *(SoundFileName *)D_80012248 = *(SoundFileName *)D_8001225C;
     SysLoadData(D_80012248, &vb, 0);
     if (vb != NULL && vh != NULL) {
-        D_8011EB08[5] = SoundRegisterVAB(vh, vb);
+        D_8011EB08.blocks[5] = SoundRegisterVAB(vh, vb);
         while (!SoundRegisterVABComplete()) {
         }
     }
@@ -376,7 +402,7 @@ void SysStopSound(void) {
         }
         ReleaseXA(mXABlock);
         for (i = 0; i < 4; i++) {
-            ReleaseOneSoundBlock(D_8011EB08[i]);
+            ReleaseOneSoundBlock(D_8011EB08.blocks[i]);
         }
         D_8010F998 = 0;
     }
@@ -413,7 +439,7 @@ void iSndCalcVolPan(s32 type, s32 song, GameObjectRuntime *src, VECTOR32 *pos, s
         if (type == 4) {
             base = 0x7F;
         } else {
-            base = GetSoundVol(D_8011EB08[type], song, -1);
+            base = GetSoundVol(D_8011EB08.blocks[type], song, -1);
         }
         dist -= 0x280;
         if (dist < 0) {
@@ -446,13 +472,13 @@ s16 SysPlaySong(s32 type, s32 song, s32 arg2, s32 arg3) {
     s16 pan;
 
     if (type == 3) {
-        PlayMusicUnderscoreVolPan(D_8011EB08[3], song, -2, -2);
+        PlayMusicUnderscoreVolPan(D_8011EB08.blocks[3], song, -2, -2);
     } else {
         iSndCalcVolPan(type, song, (GameObjectRuntime *)arg2, (VECTOR32 *)arg3, &vol, &pan);
         if (type == 5 && song == 3) {
             vol = 20;
         }
-        handle = PlaySoundVolPan(D_8011EB08[type], song, vol, pan);
+        handle = PlaySoundVolPan(D_8011EB08.blocks[type], song, vol, pan);
     }
     return handle;
 }
@@ -461,7 +487,7 @@ void SysStopSong(s32 type, s32 song) {
     if (type == 3) {
         StopMusicUnderscore();
     } else {
-        StopSound(D_8011EB08[type], song);
+        StopSound(D_8011EB08.blocks[type], song);
     }
     if (song == 7) {
         gUsingSndBigFire = 0;
@@ -476,7 +502,7 @@ void SysStopAllSongs(void) {
             if (i == 3) {
                 StopMusicUnderscore();
             } else {
-                StopAllSoundsInBlock(D_8011EB08[i]);
+                StopAllSoundsInBlock(D_8011EB08.blocks[i]);
             }
         }
         gUsingSndBigFire = 0;
@@ -494,8 +520,8 @@ void SysSetSongVolPan(s32 type, s32 song, GameObjectRuntime *src, s32 newVol, s3
     if (pan != -1) {
         pan = newPan;
     }
-    SetSoundPan(D_8011EB08[type], song, pan, 0, 0);
-    SetSoundVol(D_8011EB08[type], song, vol, 0, 0);
+    SetSoundPan(D_8011EB08.blocks[type], song, pan, 0, 0);
+    SetSoundVol(D_8011EB08.blocks[type], song, vol, 0, 0);
 }
 
 void SysPauseSound(u8 pause) {
@@ -642,7 +668,7 @@ void SoundPlayXACASAnimCB(s32 id, s32 event) {
         chance = rand() & 0x63;
         rt = gameObjectsInfo[(s16)id].runtime;
         if (chance < 10 && rt->npc != NULL && !((SoundNPC *)rt->npc)->unk51) {
-            SysSoundPlayRandXA(&D_80106A88);
+            SysSoundPlayRandXA((XARandTable *)&D_80106A88);
         }
     }
 }
@@ -654,10 +680,10 @@ void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 id = song + variant;
     s16 note;
 
-    note = GetSoundNote(D_8011EB08[type], id, -1);
-    SetSoundNote(D_8011EB08[type], id, note + (rand() % 3 - 1), 0, 0);
+    note = GetSoundNote(D_8011EB08.blocks[type], id, -1);
+    SetSoundNote(D_8011EB08.blocks[type], id, note + (rand() % 3 - 1), 0, 0);
     SysPlaySong(type, id, src, 0);
-    SetSoundNote(D_8011EB08[type], id, -1, 0, 0);
+    SetSoundNote(D_8011EB08.blocks[type], id, -1, 0, 0);
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/sound", SysPlayWpnSnd);

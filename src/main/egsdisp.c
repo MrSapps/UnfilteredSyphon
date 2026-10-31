@@ -2,66 +2,7 @@
 #include "game.h"
 #include "egsframe.h"
 
-/* small data (still assembled from asm) */
-SDATA_LOCAL(D_8010FE40)
-SDATA_LOCAL(D_8010FE44)
-SDATA_LOCAL(D_8010FE48)
-SDATA_LOCAL(D_8010FE5C)
-SDATA_LOCAL(D_8010FE60)
-SDATA_LOCAL(D_8010FE64)
-SDATA_LOCAL(D_8010FE68)
-SDATA_LOCAL(dTicks)
-SDATA_LOCAL(gCameraID)
-SDATA_LOCAL(gCollideXZ)
-SDATA_LOCAL(gCurrentCamera)
-SDATA_LOCAL(gCurrentDrawBuffer)
-SDATA_LOCAL(gDamagePolyPtr)
-SDATA_LOCAL(gDisplayBuffer)
-SDATA_LOCAL(gDisplayInterruptList)
-SDATA_LOCAL(gErrorString)
-SDATA_LOCAL(gFaceCache)
-SDATA_LOCAL(gFadeCallback)
-SDATA_LOCAL(gFadeRate)
-SDATA_LOCAL(gFadeRGB)
-SDATA_LOCAL(gFineCollideXZ)
-SDATA_LOCAL(gFlashEffect)
-SDATA_LOCAL(gFlashlightFrame)
-SDATA_LOCAL(gFlashlightHeadFlag)
-SDATA_LOCAL(gFlashlightList)
-SDATA_LOCAL(gFLCount)
-SDATA_LOCAL(gFogFlag)
-SDATA_LOCAL(gFogInfo)
-SDATA_LOCAL(gFogScrimFlag)
-SDATA_LOCAL(gFrameRate)
-SDATA_LOCAL(gGabeCache)
-SDATA_LOCAL(gGameTick)
-SDATA_LOCAL(gHADoneCallback)
-SDATA_LOCAL(gHMDVertTriplets)
-SDATA_LOCAL(gInitHeap)
-SDATA_LOCAL(gLoadC)
-SDATA_LOCAL(gLoadG)
-SDATA_LOCAL(gLoadP)
-SDATA_LOCAL(gMaxPackets)
-SDATA_LOCAL(gOTStart)
-SDATA_LOCAL(gOutPacket)
-SDATA_LOCAL(gPacketAreaEnd)
-SDATA_LOCAL(gPacketAreaFull)
-SDATA_LOCAL(gPacketAreaMallocSize)
-SDATA_LOCAL(gPacketAreaSafeSize)
-SDATA_LOCAL(gPacketAreaSize)
-SDATA_LOCAL(gPointSourceCount)
-SDATA_LOCAL(gPointSourceHMD)
-SDATA_LOCAL(gPointSourceList)
-SDATA_LOCAL(gpuTime)
-SDATA_LOCAL(gRearViewFlag)
-SDATA_LOCAL(gRunFlag)
-SDATA_LOCAL(gScrimModel)
-SDATA_LOCAL(gSectorsCollidedArray)
-SDATA_LOCAL(gSortBuffer)
-SDATA_LOCAL(gSubsectorPolysSorted)
-SDATA_LOCAL(gSubsectorsSorted)
-SDATA_LOCAL(gTerrainFog)
-SDATA_LOCAL(gTextureAnimationList)
+/* egsdisp.c's data is defined before the first function */
 
 typedef struct EGSListNode {
     /* 0x00 */ void *data;
@@ -461,20 +402,16 @@ typedef struct DisplayInitFlags {
     /* 0x01 */ u8 initFade; /* (re)build the fade prims */
 } DisplayInitFlags;
 
-extern DisplayInitFlags D_8010FE40;
 
 /* deferred re-inits requested by EGSDisplayReinitCameras */
-extern struct DamageInitFlags {
+typedef struct DamageInitFlags {
     /* 0x00 */ u8 initGabe;
     /* 0x01 */ u8 initDamage;
-} D_8010FE68;
-extern u8 *D_8010FE5C; /* gOutPacket saved by EGSDisplayMovieMalloc */
-extern u8 *D_8010FE60; /* D_80110234 saved */
-extern s32 D_8010FE64; /* gPacketAreaSize saved */
+} DamageInitFlags;
 extern void *gFlashlightFrame;
 extern u8 gFlashlightHeadFlag;
 extern u8 gRearViewFlag;
-extern s16 gHMDVertTriplets;
+s16 gHMDVertTriplets; /* common, $gp */
 extern s16 masterAnimCount;
 extern MATRIX gEGSIdentityMatrix;
 extern MATRIX GsIDMATRIX2;
@@ -485,17 +422,12 @@ typedef struct FLEntry {
     /* 0x0C */ u32 angle; /* bit 31: wide beam */
 } FLEntry;
 extern FLEntry gFLArray[];
-extern s32 gFLCount;
+s32 gFLCount; /* common, $gp */
 extern s16 gCurrentCamera;
 extern VECTOR gPCGouraudLight;
-extern VECTOR gFoo;
-extern s32 D_8010FE44; /* reset the Gabe view */
-extern s32 D_8010FE48; /* last VSync count */
-extern char D_8010FE4C[];
-extern char D_8010FE54[];
 extern MATRIX gCameraWSMatrix;
 extern s32 gFogFlag;
-extern u8 gRunFlag;
+u8 gRunFlag; /* common, $gp */
 extern s32 lastCounterTick;
 extern s32 lastCounterTickSort;
 extern s32 gImagePtr;
@@ -514,8 +446,8 @@ typedef struct EGSImage {
 extern EGSImage gImages[5];
 extern u32 D_80107B1C[];
 extern VECTOR D_80013740; /* up vector */
-extern s32 gSubsectorsSorted;
-extern s32 gSubsectorPolysSorted;
+s32 gSubsectorsSorted; /* common, $gp */
+s32 gSubsectorPolysSorted; /* common, $gp */
 extern s32 gGameTick;
 extern s16 gCurrentDrawBuffer;
 extern s16 gSortBuffer;
@@ -524,12 +456,11 @@ extern s32 gPacketAreaFull;
 typedef struct Str8 {
     char s[8];
 } Str8;
-extern char D_8010FE38[]; /* 8-byte error message */
 
 /* Run on the scratchpad stack (old sp saved at 0x1F800000). */
 #define SPAD_STACK_ENTER() __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0")
 #define SPAD_STACK_LEAVE() __asm__ volatile("lw $29, 0x1F800000")
-extern s32 gPointSourceHMD;
+s32 gPointSourceHMD; /* common, $gp */
 extern struct CameraAnim {
     /* 0x00 */ u8 unk00[0xC];
     /* 0x0C */ EGSFrame *frame;
@@ -545,7 +476,7 @@ extern s32 dTicks;
 extern GsOT gammaOT[2];
 extern s16 gDisplayBuffer;
 extern void *gInitHeap;
-extern s16 gMaxPackets;
+s16 gMaxPackets; /* common, $gp */
 extern void *gSortInfo;
 extern HAnimation gHAnimationArray[HANIM_MAX];
 extern EGSDamagePoly gDamagePolys[DAMAGE_MAX];
@@ -553,23 +484,20 @@ extern GsOT gOtbl[];
 extern s32 gPacketAreaMallocSize;
 extern s32 gPacketAreaSize;
 extern s32 gPacketAreaSafeSize;
-extern u8 *gOutPacket;
+u8 *gOutPacket; /* common, $gp */
 extern u8 *D_80110234; /* gOutPacket + 4 */
 extern EGSListNode *gTextureAnimationList;
 extern EGSListNode *gPointSourceList;
 extern EGSListNode *gFlashlightList;
 extern void (*gFadeCallback)();
-extern s32 gGabeCache;
+s32 gGabeCache; /* common, $gp */
 extern DamageEntry *D_8011045C; /* gGabeCache + 4 */
 extern DamageEntry gGabeCacheEntry;
 extern void *gDLA_npc_gun_flash[];
 extern char D_80013734[];
 extern u8 D_8014BAD8[]; /* initial packet area */
-extern TILE D_801225C8[2];
-extern DR_AREA D_80122600[]; /* per OT draw areas */
 extern GsBOXF D_80013724; /* video-mode border box */
 extern u16 POSITION[2]; /* fade tiles, per draw buffer */
-extern DR_MODE D_801225E8[2]; /* "s/egsdisp.c" */
 extern u16 gCameraID;
 extern s32 gTerrainFog;
 extern s32 gFlashEffect;
@@ -579,7 +507,7 @@ extern void *gSectorsCollidedArray;
 extern u16 gLoadC;
 extern u16 gLoadG;
 extern u16 gLoadP;
-extern char gErrorString[];
+char gErrorString[8]; /* common, $gp */
 extern s32 gCollideXZ;
 extern s32 gFineCollideXZ;
 extern s32 gPointSourceCount;
@@ -588,9 +516,9 @@ extern s32 gDamagePolyPtr;
 extern s16 gFadeRate;
 extern s16 gFadeRGB;
 extern void *gScrimModel;
-extern void (*gHADoneCallback)();
-extern s32 gpuTime;
-extern struct EGSFogInfo *gFogInfo;
+void (*gHADoneCallback)(); /* egshmd.c defines it; a tentative definition here so aspsx reaches it through $gp */
+s32 gpuTime; /* common, $gp */
+struct EGSFogInfo *gFogInfo; /* common, $gp */
 extern u8 gFogScrimFlag;
 extern s32 gAmbientLight; /* 0x00BBGGRR */
 extern s32 gFlashlightIntensity;
@@ -698,6 +626,82 @@ int EGSMathFIXDiv(int a, int b);
 u16 *EGSDisplayGetSectorLightArray(s32 info);
 
 extern EGSFace gFaceList[]; /* face cache */
+
+/* .sdata (0x8010FDA0 gLRTick before it is unreferenced and stays in the splat blob) */
+s32 gGameTick = 0;
+u16 gCameraID = 0;
+s16 gCurrentCamera = 0;
+s32 gFogFlag = 0;
+s32 gFogEnd = 0;
+s32 gTerrainFog = 0x107FF;
+s16 gDisplayBuffer = 0;
+s16 gCurrentDrawBuffer = 1;
+s16 gSortBuffer = 0;
+EGSListNode *gFlashlightList = NULL;
+void *gFlashlightFrame = NULL;
+u8 gFlashlightHeadFlag = 1;
+u8 gRearViewFlag = 0;
+u8 gFogScrimFlag = 0;
+s32 gFlashEffect = 0;
+EGSListNode *gPointSourceList = NULL;
+EGSListNode *gTextureAnimationList = NULL;
+s32 gTRender = 0;
+s16 gFrameRate = 3;
+s32 dTicks = 0;
+s32 emdFlag = 0;
+void *gSectorsCollidedArray = NULL;
+u16 gLoadC = 0;
+u16 gLoadG = 0;
+u16 gLoadP = 0;
+s32 gPacketAreaFull = 0;
+u8 *gPacketAreaEnd = NULL;
+s32 gPacketAreaSize = 0;
+s32 gPacketAreaSafeSize = 0;
+s32 gPacketAreaMallocSize = 0;
+void *gInitHeap = NULL;
+s32 gColorCollisionFaces = 0;
+s32 gCollideXZ = 0x130;
+s32 gFineCollideXZ = 0xA5;
+s32 gPointSourceCount = 0;
+EGSPointSource *gCameraPointSource = &gPointSourceArray[1];
+EGSListNode *gDisplayInterruptList = NULL;
+EGSFace *gFaceCache = NULL;
+s32 gDamagePolyPtr = 0;
+s16 gFadeRate = 0;
+s16 gFadeRGB = 0;
+void *gScrimModel = NULL;
+void (*gFadeCallback)() = NULL;
+static char D_8010FE38[8] = "GPU ERR"; /* 8-byte error messages */
+static DisplayInitFlags D_8010FE40 = { 1, 1 };
+static s32 D_8010FE44 = 1; /* reset the Gabe view */
+static s32 D_8010FE48 = 0; /* last VSync count */
+static char D_8010FE4C[8] = "PK FULL";
+static char D_8010FE54[8] = "FC FULL";
+static u8 *D_8010FE5C = NULL; /* gOutPacket saved by EGSDisplayMovieMalloc */
+static u8 *D_8010FE60 = NULL; /* D_80110234 saved */
+static s32 D_8010FE64 = 0;    /* gPacketAreaSize saved */
+static DamageInitFlags D_8010FE68 = { 1, 1 }; /* deferred re-inits requested by EGSDisplayReinitCameras */
+void *gOTStart = NULL;
+
+/* .bss */
+static TILE D_801225C8[2];
+#ifdef _PSYQ
+static DR_MODE D_801225E8[2];
+static DR_AREA D_80122600[10]; /* per OT draw areas */
+#else
+/* maspsx's 2.7x layout would 16-align the draw areas; one block, named with .set */
+static DR_MODE D_801225E8_bss[12];
+extern DR_MODE D_801225E8[2];
+extern DR_AREA D_80122600[10];
+#endif
+
+/* .data */
+VECTOR gFoo = { 0, -0xFFF, 0, 0 };
+
+#ifndef _PSYQ
+__asm__(".set D_801225E8, D_801225E8_bss\n"
+        ".set D_80122600, D_801225E8_bss+0x18\n");
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSEmergencyBreak);
 

@@ -35,3 +35,10 @@ D_80105F64 = 0x80105F64; /* &gWeaponInfo[0].unk18 */
 D_801061AC = 0x801061AC; /* &gWeaponInfo[19] (grenade), asm WeaponReplace */
 D_801061C0 = 0x801061C0; /* &gWeaponInfo[19] + 0x14 */
 D_801061E0 = 0x801061E0; /* &gWeaponInfo[20] + 0x14 */
+/* inside strings.c's .data tables (damage, interface) */
+D_801077F4 = 0x801077F4; /* gUseMsgs[24] */
+D_80107818 = 0x80107818; /* gStringSniperSpareText[1] */
+D_8010781C = 0x8010781C; /* gStringSniperSpareText[2] */
+D_80107820 = 0x80107820; /* gStringSniperSpareText[3] */
+D_80107828 = 0x80107828; /* gStringSnifferSpareText[1] */
+D_8010782C = 0x8010782C; /* gStringSnifferSpareText[2] */

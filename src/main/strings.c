@@ -1,56 +1,113 @@
 #include "common.h"
 
-/* strings.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FAC4)
-SDATA_LOCAL(D_8010FAC8)
-SDATA_LOCAL(D_8010FACC)
-SDATA_LOCAL(D_8010FAD0)
-SDATA_LOCAL(D_8010FADC)
-SDATA_LOCAL(D_8010FAE8)
-SDATA_LOCAL(D_8010FAF4)
-SDATA_LOCAL(D_8010FB00)
-SDATA_LOCAL(D_8010FB0C)
-SDATA_LOCAL(D_8010FB10)
-SDATA_LOCAL(D_8010FB14)
-SDATA_LOCAL(D_8010FB20)
-SDATA_LOCAL(D_8010FB24)
-SDATA_LOCAL(D_8010FB28)
-SDATA_LOCAL(D_8010FB34)
-SDATA_LOCAL(D_8010FB38)
-SDATA_LOCAL(D_8010FB3C)
-SDATA_LOCAL(D_8010FB40)
-SDATA_LOCAL(D_8010FB44)
-SDATA_LOCAL(gContactMeiXingMsgH)
-SDATA_LOCAL(gMeiXingMsg)
-SDATA_LOCAL(gRhoemerMsg)
+/*
+ * strings.c's data. cc1 outputs a pointer's string literal while it reads the
+ * initialiser, so each short literal lands in .sdata just before its pointer and each
+ * long one in .rdata, in definition order; a table's literals come out in reverse
+ * element order. Identical literals are shared ("%s%s %s", "Shotgun").
+ */
+static const s32 D_80012874[4] = { 1, 1, 1, 0 };
 
-/* Format strings and text fragments (game text lives in rodata, see D_80012874) */
-extern char *D_8010FAC4; /* take object */
-extern char *D_8010FAC8; /* take ammo */
-extern char *D_8010FACC; /* ammo maxed */
-extern char *D_8010FAD0; /* undamaged flak jacket */
-extern char *D_8010FADC; /* "%s%s" style join */
-extern char *D_8010FAE8;
-extern char *D_8010FAF4;
-extern char *D_8010FB00;
-extern char *D_8010FB0C;
-extern char *D_8010FB10;
-extern char *D_8010FB14;
-extern char *D_8010FB20; /* "Objective" */
-extern char *D_8010FB24;
-extern char *D_8010FB28;
-extern char *D_8010FB34;
-extern char *D_8010FB38; /* "Complete" */
-extern char *D_8010FB3C;
-extern char *D_8010FB40; /* "Press %s to Contact %s" */
-extern char *D_8010FB44; /* "Eliminate %s" */
-extern u16 gContactMeiXingMsgH;
-extern char *gMeiXingMsg;
-extern char *gRhoemerMsg;
+static char D_8010FAB8[1] = "";
+static char *D_8010FAC4 = "%s%s %s";       /* take object */
+static char *D_8010FAC8 = "%s%s%s %s";     /* take ammo */
+static char *D_8010FACC = "%s%ss maxed";   /* ammo maxed */
+static char *D_8010FAD0 = "%s undamaged";  /* undamaged flak jacket */
+static char *D_8010FADC = "%s%s";
+static char *D_8010FAE8 = "taken";
+static char *D_8010FAF4 = " bullet";
+static char *D_8010FB00 = " shell";
+static char *D_8010FB0C = "%s %s";
+static char *D_8010FB10 = "%s%s %s";
+static char *D_8010FB14 = "%s %s %s";
+static char *D_8010FB20 = "Mission";
+static char *D_8010FB24 = "Objective";
+static char *D_8010FB28 = "Parameter";
+static char *D_8010FB34 = "Failed";
+static char *D_8010FB38 = "Complete";
+static char *D_8010FB3C = "Markinson";
+static char *D_8010FB40 = "Press %s to Contact %s";
+static char *D_8010FB44 = "Eliminate %s";
 
-extern char D_8010FAB8[]; /* "" (.sdata) */
-extern char D_8010FCE4[]; /* "s" (.sdata) */
-extern char D_8010FCE8[]; /* " " (.sdata) */
+char *gLevelPrettyNames[20] = {
+    "Georgia Street Subway District",
+    "Subway District: Disaster Area",
+    "Subway District: Tunnel Chase",
+    "Washington Park",
+    "Freedom Memorial",
+    "Pharcom Exposition Center: The Hunt",
+    "Pharcom Exposition Center: The Search",
+    "Rozovka Terrorist Base",
+    "Terrorist Base: Bunker",
+    "Terrorist Base: Radar-Comm Tower",
+    "Terrorist Base: Escape",
+    "Uzhorod Secret Prison: Upper Level",
+    "Uzhorod Secret Prison: Lower Level",
+    "Uzhorod Catacombs",
+    "Kazakhstan Warehouse District",
+    "Warehouse 76",
+    "Kazakhstan Mining Tunnels",
+    "Silo Access Tunnels",
+    "Soviet Missile Silo",
+    "TRANSTUN",
+};
+
+char *gUseMsgs[28] = {
+    "Bomb",        "Computer",    "Elevator",      "*",          "Switch",            "Silenced 9mm",
+    "9mm",         ".45",         "Shotgun",       "Shotgun",    "PK-102",            "M-16",
+    "HK-5",        "G-18",        "BIZ-2",         "K3G4",       "Nightvision rifle", "Sniper rifle",
+    "Grenade",     "Gas Grenade", "M-79",          "Taser",      "Flashlight",        "Viral Scanner",
+    "Flak Jacket", "Keycard",     "C4 Explosives", "Antigen",
+};
+
+char *gObjectiveInstructionsMsg = "Press START to see objectives";
+char *gHealthMsg = "health";
+char *gArmorMsg = "armor";
+char *gTargetMsg = "target";
+char *gDangerMsg = "danger";
+char *gCountdownFmt = "00:00:00";
+char *gTargetLockMsg = "Target Lock";
+char *gHeadShotMsg = "Head Shot";
+char *gHeadMsg = "head";
+char *gWeaponMsg = "weapon";
+char *gHandMsg = "hand";
+char *gBodyMsg = "body";
+char *gLimbMsg = "limb";
+char *gTargetFmt = "tgt: %s";
+char *gZoomFmt = "zoom %dx";
+char *gGameOverMsg = "Game Over";
+char *gObjectiveAddedMsg = "Objective Added";
+char *gCheckpointMsg = "Checkpoint";
+char *gObjectivesIncompleteMsg = "Objectives Incomplete";
+char *gLevelAlertedMsg = "Level alerted";
+char *gLockedMsg = "Locked";
+char *gElectronicallyLockedMsg = "Electronically Locked";
+char *gLockCodeRequiredMsg = "Lock Code Required";
+char *gElevatorCallSwitchMsg = "Elevator Call Switch";
+char *gPowerSwitchMsg = "Power Switch";
+char *gCommArrayMsg = "Communications array";
+char *gNoTgtMsg = "No Target Available";
+char *gRemainingMsg = " remaining";
+char *gBodyArmorHitMsg = "Body Armor";
+char *gCBCDAgentMsg = "CBDC Agent";
+char *gMeiXingMsg = "Lian Xing";
+char *gPhaganMsg = "Phagan";
+char *gAramovMsg = "Aramov";
+char *gRhoemerMsg = "Rhoemer";
+char *gLoadingStringFmt = "Loading:\n%s";
+char *gLoadedStringFmt = "%s loaded!\nPress %%x to continue";
+s32 gStringNumFillers = 4;
+char *gStringFillerText[4] = { "Status: ok", "diagnostic: ok", "power: ok", "monitoring..." };
+char *gStringSniperSpareText[4] = { "SuperScope", "Dest LMF", "Castor OK", "Mag On" };
+char *gStringSnifferSpareText[3] = { "Viral detector", "v 1.0c", "Init OK" };
+char *gStringSnifferLock[4] = { "Scanning...", "Virus detected", "analysis complete", "notify hq" };
+u16 gContactMeiXingMsgH = 0xFFFF;
+static char D_8010FCE4[2] = "s";
+static char D_8010FCE8[2] = " ";
+
+/* .bss */
+static char D_80121918[0x40]; /* contact message buffer */
+static char D_80121958[0x20]; /* weapon name buffer */
 
 /* Weapon table entry (0x20 bytes) */
 typedef struct WeaponDesc {
@@ -69,12 +126,9 @@ typedef struct SysInfo {
 } SysInfo;
 
 extern WeaponDesc D_80105F58[];
-extern char *gUseMsgs[];
 extern char *gButtonStrings[];
 extern s32 gJoyMap[];
 extern SysInfo gSysInfo;
-extern char D_80121918[]; /* contact message buffer */
-extern char D_80121958[]; /* weapon name buffer */
 extern char gEliminateRhoemerMsg[];
 extern SubObjectiveInfo mStringSubObjectiveInfo[2];
 
@@ -216,4 +270,3 @@ void StringReplaceContactMeiXingMsg(char *msg) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/strings", D_80012874);
