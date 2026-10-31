@@ -91,10 +91,10 @@ typedef struct Particle {
     /* 0x50 */ s16 wx; /* world position */
     /* 0x52 */ s16 wy;
     /* 0x54 */ s16 wz;
-    /* 0x56 */ s16 size;
+    /* 0x56 */ s16 size; /* triangles: angle of the second vertex */
     /* 0x58 */ u8 unk58[4];
-    /* 0x5C */ s16 unk5C; /* size / 2 + 0x800 */
-    /* 0x5E */ u8 unk5E[2];
+    /* 0x5C */ s16 unk5C; /* size / 2 + 0x800; triangles: angle of the third vertex */
+    /* 0x5E */ s16 unk5E;
     /* 0x60 */ s16 unk60;
     /* 0x62 */ s16 unk62;
     /* 0x64 */ s16 unk64;
@@ -154,8 +154,7 @@ extern VECTOR32 D_8011D140; /* NPC fire position followed by the fire light */
 extern VECTOR32 D_8011D150; /* emitter position */
 extern VECTOR32 D_8011D170; /* emitter mask size */
 extern VECTOR32 D_8011D180; /* direction base */
-extern s32 D_8011D1C0; /* wind x */
-extern s32 D_8011D1C8; /* wind z */
+extern VECTOR32 D_8011D1C0; /* wind (x, z used) */
 
 extern u8 D_801062C4[]; /* per level: number of levelFloorY entries */
 extern s16 levelFloorY[][7];
@@ -3193,39 +3192,31 @@ void ParticleStopSnow(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* rcos+0x4000 reassociated onto the rsin term */
 void ParticleGroupUpdateWind(ParticleGroup *g) {
     s32 c = rcos(D_8011003C);
     s32 s = rsin(D_80110040);
     s32 angle = (s >> 5) + 0x200;
-    s32 mag = (s + (c + 0x4000)) >> 6;
+    s32 bias;
+    s32 mag = (s + (bias = c + 0x4000)) >> 6;
 
     c = rcos(angle);
     s = rsin(angle);
-    D_80110040 += 4;
     D_8011003C += 3;
-    D_8011D1C0 = (mag * c) >> 12;
-    D_8011D1C8 = (mag * s) >> 12;
+    D_80110040 += 4;
+    D_8011D1C0.vx = (mag * c) >> 12;
+    D_8011D1C0.vz = (mag * s) >> 12;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGroupUpdateWind);
-#endif
 
-#ifdef NON_MATCHING
-/* addiu -0x6000 lands on the wrong addend */
 void ParticleGroupUpdateRain(ParticleGroup *g) {
-    s32 a;
+    s32 a = rsin(D_80110044);
+    s32 b = rsin(D_80110048);
+    s32 bias;
 
-    a = rsin(D_80110044);
-    g->wind = (a >> 3) + ((rsin(D_80110048) >> 3) - 0x6000);
+    g->wind = (a >> 3) + (bias = (b >> 3) - 0x6000);
     D_80110044 += 0xC0;
     D_80110048 += 0x100;
     ParticleGroupUpdateWind(g);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGroupUpdateRain);
-#endif
 
 #ifdef NON_MATCHING
 /* velocity loads scheduled above the pos.vy store */
@@ -3275,21 +3266,716 @@ INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateFragmentMeterFrictio
 
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateExplosion);
 
+/* GPU code word: r, g, b and the primitive code in the top byte */
+typedef union ParticleRGBC {
+    u32 word;
+    struct {
+        u8 r, g, b, code;
+    } c;
+} ParticleRGBC;
+
+/* Particle display primitive (Particle + 0x28) drawn as a flat triangle */
+typedef struct ParticlePolyF3 {
+    /* 0x00 */ s32 data;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ u8 unk08[4];
+    /* 0x0C */ ParticleRGBC rgbc0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ s32 xy1;
+    /* 0x18 */ s32 xy2;
+} ParticlePolyF3;
+
+SDATA_LOCAL(D_80110054)
+SDATA_LOCAL(D_80110080)
+extern s32 D_80110054; /* screen size shift of the current triangle group */
+extern s32 D_80110080; /* triangles drawn */
+
+/* Same layout as libgte MATRIX (egsmath.h conflicts with this file's prototypes) */
+typedef struct CameraMatrix {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x14 */ s32 t[3];
+} CameraMatrix;
+
+/* Particle display primitive (Particle + 0x28) drawn as a scaled sprite */
+typedef struct ParticleSprite {
+    /* 0x00 */ u32 tag;
+    /* 0x04 */ s16 x;
+    /* 0x06 */ s16 y;
+    /* 0x08 */ u8 unk08[0xC];
+    /* 0x14 */ u8 r;
+    /* 0x15 */ u8 g;
+    /* 0x16 */ u8 b;
+    /* 0x17 */ u8 unk17[5];
+    /* 0x1C */ s16 w;
+    /* 0x1E */ s16 h;
+    /* 0x20 */ u8 unk20[4];
+    /* 0x24 */ s32 z;
+} ParticleSprite;
+
+typedef struct {
+    s16 x, y;
+} ParticleScreenPos;
+extern ParticleScreenPos POSITION; /* screen centre */
+SDATA_LOCAL(D_8011004C)
+SDATA_LOCAL(D_80110050)
+extern s32 D_8011004C; /* glow pulse phase */
+extern s32 D_80110050; /* glow pulse counter */
+
+void EGSDisplayAddSprite(void *display, void *prim);
+
+#define CAMERA_MATRIX (*(CameraMatrix **)*gCamera)
+#define SPRITE(p) ((ParticleSprite *)(p)->prim)
+
+#ifdef NON_MATCHING
+/* scheduling of the camera-matrix copy and register choice for p/sprite differ */
+/* Glows: camera-facing sprites sized by the projected height of the group */
+void ParticleDisplayPolyFlat4(ParticleGroup *g) {
+    VECTOR32 screen;
+    void *display[2];
+    VECTOR32 pos;
+    VECTOR32 up;
+    CameraMatrix m;
+    void *display2[6];
+    s32 i;
+    s32 height;
+    s32 infrared;
+    s32 prev;
+    s32 added;
+    s32 scale;
+    s32 top;
+    s32 w;
+    s32 depth;
+    s32 bias;
+    Particle *p;
+    ParticleSprite *sprite;
+
+    CameraGetDisplay(gCamera, display);
+    i = g->head;
+    height = g->unk23;
+    infrared = ((u8 *)display[0])[6] & 0x10;
+    m.m[0][0] = CAMERA_MATRIX->m[0][0];
+    m.m[0][1] = -CAMERA_MATRIX->m[0][1];
+    m.m[0][2] = CAMERA_MATRIX->m[0][2];
+    m.m[1][0] = -CAMERA_MATRIX->m[1][0];
+    m.m[1][1] = CAMERA_MATRIX->m[1][1];
+    m.m[1][2] = -CAMERA_MATRIX->m[1][2];
+    m.m[2][0] = CAMERA_MATRIX->m[2][0];
+    m.m[2][1] = -CAMERA_MATRIX->m[2][1];
+    m.m[2][2] = CAMERA_MATRIX->m[2][2];
+    prev = 0;
+    added = 0;
+    height *= 16;
+    up.vx = m.m[0][1];
+    up.vy = m.m[1][1];
+    up.vz = m.m[2][1];
+    p = &D_80119040[i];
+    pos.vx = p->pos.vx + ((up.vx * height) >> 12);
+    pos.vy = p->pos.vy + ((up.vy * height) >> 12);
+    pos.vz = p->pos.vz + ((up.vz * height) >> 12);
+    EGSDisplayTransformWorldToScreen(&pos, &screen);
+    scale = 0;
+    if (screen.vz > 0 && (u32)(screen.vx + 0xFF) < 0x1FF) {
+        scale = screen.vy;
+        EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        if (screen.vy >= scale) {
+            scale = 0;
+        } else {
+            top = scale - screen.vy;
+            scale = top << 6;
+            if ((s32)g->fade >= 0 && g->unk1C == 3) {
+                scale = top << 7;
+            }
+            if (scale > 0x7FFF) {
+                scale = 0x7FFF;
+            }
+        }
+    }
+    if (g->unk25 == 0) {
+        if (scale != 0) {
+            added = 1;
+            g->unk25 = 1;
+        }
+    } else if (scale == 0) {
+        CameraGetDisplay(gCamera, display2);
+        for (i = g->head; i >= 0; i = p->next) {
+            p = &D_80119040[i];
+            EGSDisplayDeleteSprite(display2[0], p->prim);
+        }
+        g->unk25 = 0;
+        return;
+    }
+    while (i >= 0) {
+        p = &D_80119040[i];
+        sprite = SPRITE(p);
+        if (i != g->head) {
+            EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        }
+        if (screen.vz <= 0) {
+            if (g->id < 0) {
+                ParticleFree(g, p, prev, i);
+                goto next;
+            }
+        } else {
+            if (g->unk1C == 1) {
+                D_80110050++;
+                D_8011004C += (rcos(gSystemTick) + 0x2000) >> 6;
+                SPRITE(p)->w = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 1))) >> 14);
+                SPRITE(p)->h = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 3))) >> 15);
+                SPRITE(p)->x = screen.vx - (POSITION.x - 0xC0);
+                SPRITE(p)->y = -screen.vy - (POSITION.y - 0x78);
+            } else {
+                w = scale;
+                if ((s32)g->fade < 0 && p->unk62 == 3 && w < 0x4000) {
+                    w *= 2;
+                }
+                sprite->x = screen.vx - (POSITION.x - 0xC0);
+                sprite->w = w;
+                sprite->h = w;
+                sprite->y = -screen.vy - (POSITION.y - 0x78);
+            }
+            depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+            if (depth >= 0) {
+                sprite->z = depth;
+            } else {
+                sprite->z = 0;
+            }
+            sprite->tag &= 0x7FFFFFFF;
+            if (infrared) {
+                sprite->r = 0;
+                sprite->b = 0;
+                sprite->g = (u32)(((u8 *)&p->color)[2] + ((u8 *)&p->color)[1] + ((u8 *)&p->color)[0]) >> 2;
+            } else {
+                sprite->r = p->color;
+                sprite->g = (u32)p->color >> 8;
+                sprite->b = ((u16 *)&p->color)[1];
+            }
+        }
+        prev = i;
+    next:
+        i = p->next;
+        D_80110080++;
+    }
+    if (added) {
+        for (i = g->head; i >= 0; i = p->next) {
+            p = &D_80119040[i];
+            EGSDisplayAddSprite(display[0], p->prim);
+        }
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyFlat4);
+#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/particle", D_80012050);
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateGlass);
+/* Falling glass: shatters into shards when it reaches the floor */
+void ParticleUpdateGlass(ParticleGroup *g) {
+    VECTOR32 mask = { 0x1F, 0x1F, 0x1F };
+    VECTOR32 pos;
+    VECTOR32 screen;
+    s32 prev = 0;
+    s32 i = g->head;
+    s32 next;
+    s32 j;
+    s32 angle;
+    s32 depth;
+    s32 bias;
+    Particle *p;
+    Particle *q;
+    ParticleGroup *shards;
+
+    while (i >= 0) {
+        p = &D_80119040[i];
+        next = p->next;
+        if (p->pos.vy < g->unk1C) {
+            if (!(i & 1) && D_8011007C + 12 < PARTICLE_MAX - 40) {
+                p->vel.vy = ~p->vel.vy >> 3;
+                pos.vx = p->pos.vx;
+                pos.vy = g->unk1C;
+                pos.vz = p->pos.vz;
+                ParticleInitEmitterMask(&pos, &mask);
+                ParticleInitAngle(0x555, 3, 0);
+                ParticleInitLifeColor(8, 0xEF9F9F);
+                D_801100B4 = 0x322;
+                ParticleInitDirection(&p->vel, 0x7FF, 0);
+                shards = ParticlePoolAllocate(6, NULL);
+                if (shards != NULL) {
+                    shards->unk23 = 4;
+                    shards->wind = -0x2916;
+                    shards->unk1C = 0;
+                    shards->updateType = PARTICLE_UPDATE_NONE;
+                    shards->drawType = 0;
+                    ParticleStart(shards, 6);
+                    j = shards->head;
+                    shards->wind = 0;
+                    while (j >= 0) {
+                        angle = rand();
+                        q = &D_80119040[j];
+                        q->vel.vx = rcos(angle) >> 8;
+                        q->vel.vy = 0;
+                        q->vel.vz = rsin(angle) >> 8;
+                        EGSDisplayTransformWorldToScreen(&q->pos, &screen);
+                        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                        if (depth >= 0) {
+                            q->depth = depth;
+                        } else {
+                            q->depth = 0;
+                        }
+                        j = q->next;
+                    }
+                }
+            }
+            ParticleFree(g, p, prev, i);
+        } else {
+            prev = i;
+            p->pos.vy += p->vel.vy >= 0 ? p->vel.vy >> 12 : -(-p->vel.vy >> 12);
+            p->unk62 += p->unk64;
+            p->unk5E -= 3;
+            p->pos.vx += p->vel.vx;
+            p->pos.vz += p->vel.vz;
+            p->vel.vy += g->wind;
+        }
+        i = next;
+    }
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayRain);
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateSnow);
 
+SDATA_LOCAL(D_8010F944)
+extern s32 D_8010F944; /* snow brightness, follows the player's size */
+
+/* View of GameObjectAnim's bounding box */
+typedef struct SnowAnimView {
+    /* 0x00 */ u8 unk00[0x1C];
+    /* 0x1C */ struct {
+        u8 unk00[4];
+        s16 x, y, z;
+    } *box;
+} SnowAnimView;
+
+/* Snow flakes: a box of flat triangles that follows the camera */
+void ParticleUpdateSnow(ParticleGroup *g) {
+    VECTOR32 center;
+    VECTOR32 dir;
+    VECTOR32 screen;
+    s32 i = g->head;
+    s32 size;
+    s32 delta;
+    s32 fall;
+    s32 floor;
+    s32 depth;
+    s32 bias;
+    s32 height;
+    s32 c;
+    s32 angle;
+    s32 x;
+    s32 y;
+    u32 color;
+    Particle *p;
+    ParticlePolyF3 *poly;
+    SnowAnimView *anim;
+
+    ParticleGroupUpdateRain(g);
+    anim = (SnowAnimView *)gameObjectsInfo[gPlayerOffset].runtime->anim;
+    size = (anim->box->x + anim->box->y + anim->box->z) >> 1;
+    fall = (g->wind >> 12) + (g->wind >> 13);
+    if (size > 0x1000) {
+        size = 0x1000;
+    }
+    delta = (size >> 7) + 0x20;
+    delta -= D_8010F944;
+    if (delta > 8) {
+        delta = 8;
+    } else if (delta < -8) {
+        delta = -8;
+    }
+    D_8010F944 += delta;
+    floor = 0;
+    if (D_80110088 >= 0) {
+        floor = levelFloorY[gSysInfo.level][0];
+    }
+    center.vx = (*D_8011008C)->pos.vx;
+    center.vy = (*D_8011008C)->pos.vy;
+    center.vz = (*D_8011008C)->pos.vz;
+    center.vy = -center.vy;
+    dir.vx = (*D_8011008C)->m[0][2];
+    dir.vy = (*D_8011008C)->m[1][2];
+    dir.vz = (*D_8011008C)->m[2][2];
+    dir.vy = -dir.vy;
+    center.vx += (dir.vx >> 2) - (dir.vx >> 4);
+    center.vz += (dir.vz >> 2) - (dir.vz >> 4);
+    while (i >= 0) {
+        p = &D_80119040[i];
+        if (p->pos.vy < floor) {
+            p->pos.vx = center.vx + (rand() & 0x3FF) - 0x1FF;
+            p->pos.vy = floor + (height = i * 4 + 500);
+            p->pos.vz = center.vz + (rand() & 0x3FF) - 0x1FF;
+        }
+        if (p->pos.vx < center.vx - 0x1FF) {
+            p->pos.vx += 0x3FF;
+        }
+        if (center.vx + 0x1FF < p->pos.vx) {
+            p->pos.vx -= 0x3FF;
+        }
+        if (p->pos.vz < center.vz - 0x1FF) {
+            p->pos.vz += 0x3FF;
+        }
+        if (center.vz + 0x1FF < p->pos.vz) {
+            p->pos.vz -= 0x3FF;
+        }
+        p->pos.vx += (D_8011D1C0.vx - i + 40) >> 4;
+        p->pos.vy += fall - ((i - 40) >> 4);
+        p->pos.vz += (D_8011D1C0.vz - i + 40) >> 4;
+        angle = (s16)(p->unk62 += p->unk64);
+        EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        poly = (ParticlePolyF3 *)p->prim;
+        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+        if (depth >= 0) {
+            poly->z = depth;
+        } else {
+            poly->z = 0;
+        }
+        c = (D_8010F944 * ((0x7FB - screen.vz) >> 3)) >> 6;
+        color = (c << 16) + (c << 8) + c;
+        x = screen.vx + (rcos(angle) >> 11);
+        y = (screen.vy + (rsin(angle) >> 11)) << 16;
+        poly->xy0 = (u16)x - y;
+        x = screen.vx + (rcos(angle + p->size) >> 11);
+        y = (screen.vy + (rsin(angle + p->size) >> 11)) << 16;
+        poly->xy1 = (u16)x - y;
+        x = screen.vx + (rcos(angle + p->unk5C) >> 11);
+        y = (screen.vy + (rsin(angle + p->unk5C) >> 11)) << 16;
+        poly->xy2 = (u16)x - y;
+        if (color & 0xFF000000) {
+            poly->rgbc0.word = (color & 0xFFFFFF) | 0x20000000;
+        } else {
+            poly->rgbc0.word = color | 0x20000000;
+        }
+        poly->rgbc0.c.code |= 2;
+        i = p->next;
+        D_80110080++;
+    }
+}
+
+/* Triangle vertex in the particle's local frame: polar position plus an offset */
+typedef struct ParticleTriVertex {
+    /* 0x00 */ s16 angle;
+    /* 0x02 */ s16 radius;
+    /* 0x04 */ s16 offset;
+} ParticleTriVertex;
+
+/* View of a Particle as a world-space triangle (fields from 0x50 reused) */
+typedef struct ParticleTriView {
+    /* 0x00 */ u8 unk00[0x50];
+    /* 0x50 */ ParticleTriVertex verts[3];
+} ParticleTriView;
+
+/* Particle display primitive (Particle + 0x28) drawn as a textured triangle */
+typedef struct ParticlePolyFT3 {
+    /* 0x00 */ s32 data;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ u8 unk08[4];
+    /* 0x0C */ ParticleRGBC rgbc0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ u32 uv0;
+    /* 0x18 */ s32 xy1;
+    /* 0x1C */ u32 uv1;
+    /* 0x20 */ s32 xy2;
+} ParticlePolyFT3;
+
+#define TRI(p) ((ParticleTriView *)(p))
+
+#ifdef NON_MATCHING
+/* regalloc: prev is spilled instead of &v (the target spills &v and &w) */
+/* World-space triangles (debris) spinning in the XY (type 3) or ZY (type 6) plane */
+void ParticleDisplayPolyWorld(ParticleGroup *g) {
+    VECTOR32 screen;
+    VECTOR32 v;
+    VECTOR32 w;
+    Particle *p;
+    s32 angle;
+    s32 i;
+    s32 prev;
+    u32 color;
+    s32 xy2;
+    s32 xy0;
+    s32 xy1;
+    s32 depth;
+    s32 bias;
+    ParticlePolyF3 *poly;
+    ParticlePolyFT3 *polyT;
+
+    prev = 0;
+    i = g->head;
+    xy2 = 0x7FFFFFFF;
+
+    while (i >= 0) {
+        p = &D_80119040[i];
+        angle = p->unk62;
+        if (p->state > 0) {
+            if (p->state < g->unk22) {
+                p->color -= g->fade;
+            }
+            color = p->color;
+            if (g->unk25 == 3) {
+                v.vx = p->pos.vx + ((TRI(p)->verts[0].radius * rcos(angle + TRI(p)->verts[0].angle)) >> 12);
+                v.vy = p->pos.vy + ((TRI(p)->verts[0].radius * rsin(angle + TRI(p)->verts[0].angle)) >> 12);
+                v.vz = p->pos.vz + TRI(p)->verts[0].offset;
+                EGSDisplayTransformWorldToScreen(&v, &screen);
+                if (screen.vz <= 0) {
+                    goto free;
+                }
+                xy0 = (u16)screen.vx - (screen.vy << 16);
+                v.vx = p->pos.vx + ((TRI(p)->verts[1].radius * rcos(angle + TRI(p)->verts[1].angle)) >> 12);
+                v.vy = p->pos.vy + ((TRI(p)->verts[1].radius * rsin(angle + TRI(p)->verts[1].angle)) >> 12);
+                v.vz = p->pos.vz + TRI(p)->verts[1].offset;
+                EGSDisplayTransformWorldToScreen(&v, &screen);
+                if (screen.vz <= 0) {
+                    goto free;
+                }
+                xy1 = (u16)screen.vx - (screen.vy << 16);
+                v.vx = p->pos.vx + ((TRI(p)->verts[2].radius * rcos(angle + TRI(p)->verts[2].angle)) >> 12);
+                v.vy = p->pos.vy + ((TRI(p)->verts[2].radius * rsin(angle + TRI(p)->verts[2].angle)) >> 12);
+                v.vz = p->pos.vz + TRI(p)->verts[2].offset;
+                EGSDisplayTransformWorldToScreen(&v, &screen);
+                if (screen.vz <= 0) {
+                    goto free;
+                }
+                prev = i;
+                xy2 = (u16)screen.vx - (screen.vy << 16);
+            } else if (g->unk25 == 6) {
+                w.vz = p->pos.vz + ((TRI(p)->verts[0].radius * rcos(angle + TRI(p)->verts[0].angle)) >> 12);
+                w.vy = p->pos.vy + ((TRI(p)->verts[0].radius * rsin(angle + TRI(p)->verts[0].angle)) >> 12);
+                w.vx = p->pos.vx + TRI(p)->verts[0].offset;
+                EGSDisplayTransformWorldToScreen(&w, &screen);
+                if (screen.vz <= 0) {
+                    goto free;
+                }
+                xy0 = (u16)screen.vx - (screen.vy << 16);
+                w.vz = p->pos.vz + ((TRI(p)->verts[1].radius * rcos(angle + TRI(p)->verts[1].angle)) >> 12);
+                w.vy = p->pos.vy + ((TRI(p)->verts[1].radius * rsin(angle + TRI(p)->verts[1].angle)) >> 12);
+                w.vx = p->pos.vx + TRI(p)->verts[1].offset;
+                EGSDisplayTransformWorldToScreen(&w, &screen);
+                if (screen.vz <= 0) {
+                    goto free;
+                }
+                xy1 = (u16)screen.vx - (screen.vy << 16);
+                w.vz = p->pos.vz + ((TRI(p)->verts[2].radius * rcos(angle + TRI(p)->verts[2].angle)) >> 12);
+                w.vy = p->pos.vy + ((TRI(p)->verts[2].radius * rsin(angle + TRI(p)->verts[2].angle)) >> 12);
+                w.vx = p->pos.vx + TRI(p)->verts[2].offset;
+                EGSDisplayTransformWorldToScreen(&w, &screen);
+                if (screen.vz <= 0) {
+                free:
+                    ParticleFree(g, p, prev, i);
+                } else {
+                    prev = i;
+                    xy2 = (u16)screen.vx - (screen.vy << 16);
+                }
+            }
+            if (xy2 != 0x7FFFFFFF) {
+                if (g->flags & 0x8000) {
+                    polyT = (ParticlePolyFT3 *)p->prim;
+                    if (color & 0xFF000000) {
+                        polyT->rgbc0.word = (color & 0xFFFFFF) | 0x24000000;
+                    } else {
+                        polyT->rgbc0.word = color | 0x24000000;
+                    }
+                    if (g->flags & 0x200) {
+                        polyT->rgbc0.c.code |= 2;
+                    }
+                    polyT->xy0 = xy0;
+                    polyT->xy1 = xy1;
+                    polyT->xy2 = xy2;
+                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    if (depth >= 0) {
+                        polyT->z = depth;
+                    } else {
+                        polyT->z = 0;
+                    }
+                } else {
+                    poly = (ParticlePolyF3 *)p->prim;
+                    if (color & 0xFF000000) {
+                        poly->rgbc0.word = (color & 0xFFFFFF) | 0x20000000;
+                    } else {
+                        poly->rgbc0.word = color | 0x20000000;
+                    }
+                    if (g->flags & 0x200) {
+                        poly->rgbc0.c.code |= 2;
+                    }
+                    poly->xy0 = xy0;
+                    poly->xy1 = xy1;
+                    poly->xy2 = xy2;
+                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    if (depth >= 0) {
+                        poly->z = depth;
+                    } else {
+                        poly->z = 0;
+                    }
+                }
+            }
+        }
+        i = p->next;
+        D_80110080++;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyWorld);
+#endif
 
+/* View of MoveInfo's velocity */
+typedef struct MoveVelView {
+    /* 0x00 */ VECTOR32 pos;
+    /* 0x10 */ VECTOR32 vel; /* << 12 */
+} MoveVelView;
+
+#ifdef NON_MATCHING
+/* scheduling: half and quarter shifts land one slot off */
+/* Shared particle step; returns 0 when the particle died */
+s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
+    u32 flags = g->flags;
+    s32 alive = 1;
+    MoveVelView *move;
+    s16 life;
+    s32 half;
+    s32 quarter;
+    s32 r0;
+    s32 r1;
+    s32 vy;
+
+    if (!(flags & 0x80)) {
+        p->state--;
+    }
+    if (p->state == 0) {
+        goto dead;
+    }
+    if (p->state < g->unk22) {
+        p->color -= g->fade;
+    }
+    if (g->flags & 0x20000) {
+        move = (MoveVelView *)gameObjectsInfo[g->gobjId].runtime->move;
+        p->pos.vx += move->vel.vx >> 12;
+        p->pos.vy += move->vel.vy >> 12;
+        p->pos.vz += move->vel.vz >> 12;
+    }
+    p->pos.vy += p->vel.vy >= 0 ? p->vel.vy >> 12 : -(-p->vel.vy >> 12);
+    p->pos.vx += p->vel.vx;
+    p->pos.vz += p->vel.vz;
+    if (flags & 0x4000) {
+        p->pos.vx += D_8011D1C0.vx >> 5;
+        p->pos.vz += D_8011D1C0.vz >> 5;
+    }
+    p->vel.vy += g->wind;
+    if (flags & 0x10) {
+        p->vel.vx -= (p->vel.vx + 1) >> 4;
+        p->vel.vz -= (p->vel.vz + 1) >> 4;
+    }
+    if (!(flags & 0x20) && p->pos.vy < g->unk1C) {
+        if (flags & 0x80) {
+        dead:
+            alive = 0;
+        } else if (flags & 0x40) {
+            life = p->state;
+            half = life >> 1;
+            p->vel.vx = (p->vel.vx >> 1) + (rand() & life) - half;
+            p->vel.vz = (p->vel.vz >> 1) + (rand() & life) - half;
+            r0 = rand();
+            r1 = rand() & half;
+            quarter = life >> 2;
+            vy = p->vel.vy >> ((r0 & 1) + 1);
+            if (vy < 0) {
+                vy = -vy;
+            }
+            vy += r1;
+            vy -= quarter;
+            p->vel.vy = vy;
+            p->pos.vy = g->unk1C;
+        } else {
+            p->pos.vy = g->unk1C;
+            p->vel.vx = 0;
+            p->vel.vy = 0;
+            p->vel.vz = 0;
+        }
+    }
+    return alive;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateMovement);
+#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateLineMeter);
+/* Particle display primitive (Particle + 0x28) drawn as a gouraud line */
+typedef struct ParticleLine {
+    /* 0x00 */ s32 data;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ u8 unk08[4];
+    /* 0x0C */ ParticleRGBC rgbc0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ u32 rgb1;
+    /* 0x18 */ s32 xy1;
+} ParticleLine;
+
+void ParticleUpdateLineMeter(ParticleGroup *g) {
+    VECTOR32 screen;
+    s32 prev = 0;
+    s32 i = g->head;
+    s32 next;
+    Particle *p;
+    ParticleLine *line;
+    MoveVelView *move;
+    s32 depth;
+    s32 bias;
+    u32 color;
+
+    while (i >= 0) {
+        p = &D_80119040[i];
+        next = p->next;
+        if (g->flags & 0x10000) {
+            move = (MoveVelView *)gameObjectsInfo[g->gobjId].runtime->move;
+            p->pos.vx += move->vel.vx >> 13;
+            p->pos.vy += move->vel.vy >> 13;
+            p->pos.vz += move->vel.vz >> 13;
+        }
+        EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        line = (ParticleLine *)p->prim;
+        if (screen.vz <= 0 || !ParticleUpdateMovement(g, p)) {
+            goto free;
+        }
+        line->xy1 = (u16)screen.vx - (screen.vy << 16);
+        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+        if (depth >= 0) {
+            line->z = depth;
+        } else {
+            line->z = 0;
+        }
+        EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        if (screen.vz <= 0) {
+        free:
+            ParticleFree(g, p, prev, i);
+            i = next;
+        } else {
+            color = p->color;
+            if ((g->flags & 2) && !((gSystemTick + i) & 0xF)) {
+                color = 0xFFFFFF;
+            }
+            line->xy0 = (u16)screen.vx - (screen.vy << 16);
+            if (color & 0xFF000000) {
+                line->rgbc0.word = (color & 0xFFFFFF) | 0x50000000;
+            } else {
+                line->rgbc0.word = color | 0x50000000;
+            }
+            if (g->flags & 0x400) {
+                line->rgb1 = (u32)(p->color & 0xFEFEFE) >> 1;
+            } else {
+                line->rgb1 = p->color;
+            }
+            prev = i;
+            if (g->flags & 0x200) {
+                line->rgbc0.c.code |= 2;
+            }
+            i = next;
+        }
+    }
+}
 
 s32 getShift(s32 n) {
     s32 shift = 0;
@@ -3301,10 +3987,94 @@ s32 getShift(s32 n) {
     return shift - 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyFlat);
-
 #ifdef NON_MATCHING
-/* depth: the -16 is folded onto the shift difference instead of the group offset */
+/* loop.c does not hoist 0x20000000 into fp, so next is not spilled and registers differ */
+/* Spinning flat triangles (debris), scaled by the projected size of the group's first particle */
+void ParticleDisplayPolyFlat(ParticleGroup *g) {
+    VECTOR32 top;
+    VECTOR32 screen;
+    VECTOR32 center;
+    s32 i = g->head;
+    s32 height = g->unk23;
+    s32 prev;
+    s32 next;
+    s32 size;
+    s32 depth;
+    s32 bias;
+    s32 color;
+    s32 angle;
+    s32 x;
+    s32 y;
+    Particle *p = &D_80119040[i];
+    ParticlePolyF3 *poly;
+
+    EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+    top.vx = p->pos.vx;
+    prev = 0;
+    top.vy = p->pos.vy + height;
+    size = screen.vy;
+    top.vz = p->pos.vz;
+    EGSDisplayTransformWorldToScreen(&top, &screen);
+    size = screen.vy - size;
+    if (g->unk24 < size) {
+        size = g->unk24;
+    }
+    D_80110054 = getShift(size);
+    while (i >= 0) {
+        p = &D_80119040[i];
+        angle = p->unk62;
+        next = p->next;
+        if (g->updateType == PARTICLE_UPDATE_NONE && !ParticleUpdateMovement(g, p)) {
+            goto free;
+        }
+        poly = (ParticlePolyF3 *)p->prim;
+        if (p->color & 0xFF000000) {
+            poly->rgbc0.word = (p->color & 0xFFFFFF) | 0x20000000;
+        } else {
+            poly->rgbc0.word = p->color | 0x20000000;
+        }
+        if ((g->flags & 2) && !((gSystemTick + i) & 0xF)) {
+            color = 0xFFFFFF;
+            if (gSniperMode && gCurrentWeapon == 12) {
+                color = 0xFF00;
+            }
+            poly->rgbc0.word = color | 0x20000000;
+        }
+        EGSDisplayTransformWorldToScreen(&p->pos, &center);
+        if (center.vz <= 0) {
+        free:
+            ParticleFree(g, p, prev, i);
+        } else {
+            if (!(g->flags & 0x100)) {
+                depth = (center.vz >> 2) - (center.vz >> 4) + (bias = g->unk26 - 16);
+                if (depth >= 0) {
+                    poly->z = depth;
+                } else {
+                    poly->z = 0;
+                }
+            }
+            x = center.vx + (rcos(angle) >> (12 - D_80110054));
+            y = center.vy + (rsin(angle) >> (12 - D_80110054));
+            poly->xy0 = (u16)x - (y << 16);
+            x = center.vx + (rcos(angle + p->size) >> (12 - D_80110054));
+            y = center.vy + (rsin(angle + p->size) >> (12 - D_80110054));
+            poly->xy1 = (u16)x - (y << 16);
+            x = center.vx + (rcos(angle + p->unk5C) >> (12 - D_80110054));
+            y = center.vy + (rsin(angle + p->unk5C) >> (12 - D_80110054));
+            poly->xy2 = (u16)x - (y << 16);
+            prev = i;
+            if (g->flags & 0x200) {
+                poly->rgbc0.c.code |= 2;
+            }
+        }
+        i = next;
+        D_80110080++;
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyFlat);
+#endif
+
 void ParticleUpdateTracer(ParticleGroup *g) {
     s32 prev = 0;
     s32 i = g->head;
@@ -3313,6 +4083,7 @@ void ParticleUpdateTracer(ParticleGroup *g) {
     VECTOR32 screen;
     VECTOR32 world;
     s32 depth;
+    s32 bias;
     s32 dy;
 
     while (i >= 0) {
@@ -3330,8 +4101,7 @@ void ParticleUpdateTracer(ParticleGroup *g) {
                 EGSDisplayTransformWorldToScreen(&world, &screen);
                 if (screen.vz > 0) {
                     p->xy0 = (u16)screen.vx - (screen.vy << 16);
-                    depth = g->unk26 - 16;
-                    depth += (screen.vz >> 2) - (screen.vz >> 4);
+                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
                     if (depth >= 0) {
                         p->depth = depth;
                     } else {
@@ -3360,11 +4130,108 @@ void ParticleUpdateTracer(ParticleGroup *g) {
         D_80110068 = 0;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateTracer);
-#endif
 
+/* Particle display primitive (Particle + 0x28) drawn as a flat line */
+typedef struct ParticleLineF2 {
+    /* 0x00 */ s32 data;
+    /* 0x04 */ s32 z;
+    /* 0x08 */ u8 unk08[4];
+    /* 0x0C */ ParticleRGBC rgbc0;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ s32 xy1;
+} ParticleLineF2;
+
+SDATA_LOCAL(D_80110084)
+extern Particle *D_80110084; /* last shell that bounced */
+
+#ifdef NON_MATCHING
+/* bounce velocity: rand()&energy lands in a0 instead of v0 (6 insns) */
+/* Spent shell casings: a spinning line segment that bounces on the floor */
+void ParticleUpdateShell(ParticleGroup *g) {
+    VECTOR32 screen;
+    VECTOR32 tip;
+    s32 prev = 0;
+    s32 i = g->head;
+    s32 next;
+    Particle *p;
+    ParticleLineF2 *line;
+    s32 depth;
+    s32 bias;
+    s16 energy;
+    s32 r;
+    s32 half;
+
+    while (i >= 0) {
+        p = &D_80119040[i];
+        next = p->next;
+        if (--p->state == 0) {
+            goto free;
+        }
+        line = (ParticleLineF2 *)p->prim;
+        p->unk62 += p->unk64;
+        tip.vx = p->pos.vx + (rcos(p->unk62) >> 10);
+        tip.vy = p->pos.vy;
+        tip.vz = p->pos.vz + (rsin(p->unk62) >> 10);
+        p->unk62 += p->unk64;
+        EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+        if (screen.vz > 0) {
+            line->xy1 = (u16)screen.vx - (screen.vy << 16);
+            EGSDisplayTransformWorldToScreen(&tip, &screen);
+            if (screen.vz > 0) {
+                line->xy0 = (u16)screen.vx - (screen.vy << 16);
+                depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                if (depth >= 0) {
+                    line->z = depth;
+                } else {
+                    line->z = 0;
+                }
+            }
+        }
+        if (screen.vz <= 0) {
+        free:
+            ParticleFree(g, p, prev, i);
+            i = next;
+        } else {
+            p->pos.vx += p->vel.vx;
+            p->vel.vy += g->wind;
+            p->pos.vy += p->vel.vy >> 12;
+            p->pos.vz += p->vel.vz;
+            if (p->pos.vy < g->unk1C) {
+                energy = p->unk60;
+                half = energy >> 1;
+                p->unk60 = half;
+                if (energy < 2) {
+                    p->vel.vx = 0;
+                    p->vel.vy = 0;
+                    p->vel.vz = 0;
+                    p->unk64 = 0;
+                    p->pos.vy = g->unk1C;
+                } else {
+                    p->pos.vy = g->unk1C * 2 - p->pos.vy;
+                    if ((rand() & 7) < 2) {
+                        p->vel.vx = 0;
+                        p->vel.vz = 0;
+                    }
+                    r = rand() & energy;
+                    p->vel.vx += r - (p->vel.vx >> 2) - half;
+                    r = rand() & energy;
+                    p->vel.vz += r - (p->vel.vz >> 2) - half;
+                    p->vel.vy = (-p->vel.vy >> 2) + (rand() & (energy * 4)) - energy * 2;
+                    p->unk64 = (rand() & 0xFF) - 0x7F;
+                    D_80110084 = p;
+                }
+            }
+            prev = i;
+            i = next;
+        }
+    }
+    if (g->head < 0) {
+        D_80110064 = 0;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateShell);
+#endif
 
 void ssUpdateAndDisplay(ParticleGroup *g) {
     if (g->updateType != PARTICLE_UPDATE_NONE) {
@@ -3420,4 +4287,118 @@ void ParticleUpdateFireLight(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdate);
+#include "scratch.h"
+
+extern VECTOR32 D_8011D190; /* taser gun tip */
+extern VECTOR32 D_8011D1A0;
+extern void *gSniperCam;
+extern s32 gPlayerOffset;
+
+void ParticleBreath(s32 gobj);
+void DamagePacketUpdate(void);
+void DamageExplosion(s32 id, VECTOR32 *pos, s32 arg2);
+void WeaponGetTip(GameObjectRuntime *gobj, VECTOR32 *tip);
+void EGSDisplaySetupTransformWorldToScreen(EGSFrame **display);
+void ParticleUpdateGrenadeLauncher(ParticleGroup *g);
+void ssUpdateAndDisplay(ParticleGroup *g);
+void ParticleUpdateFireLight(void);
+
+/* View of the player's per-bone frame table (GameObjectAnim + 0x18) */
+typedef struct TaserAnimView {
+    /* 0x00 */ u8 unk00[0x18];
+    /* 0x18 */ EGSFrame **frames;
+} TaserAnimView;
+
+void ParticleUpdate(void) {
+    VECTOR32 pos;
+    VECTOR32 base;
+    s32 i;
+    s32 index;
+    s32 id;
+    s32 floor;
+    ParticleGroup *g;
+    void **camera;
+
+    D_80110080 = 0;
+    D_80110084 = NULL;
+    if (particleBreathFlag && gObjPlayer->healthInfo->health > 0 &&
+        (!gSniperMode || (gCurrentWeapon != 12 && gCurrentWeapon != 13 && gCurrentWeapon != 18)) &&
+        !((gExeTick + gPlayerOffset * 4) & 0x1F)) {
+        ParticleBreath(gPlayerOffset);
+    }
+    DamagePacketUpdate();
+    ParticleUpdateFireLight();
+    if (D_80110078 > 0) {
+        for (i = 0; groupUpdateList[i] != 0xFF; i++) {
+            g = &group[groupUpdateList[i]];
+            if (g->head >= 0) {
+                if (g->unk27 == 0) {
+                    if (g->unk16 != 0) {
+                        if (g->updateType == 9) {
+                            id = g->owner;
+                            pos.vx = g->x;
+                            pos.vy = g->y;
+                            pos.vz = g->z;
+                            ParticleFree(g, &D_80119040[g->head], 0, g->head);
+                            i--;
+                            if (D_80118FE0[0].on) {
+                                EGSDisplayPointSourceOff(&D_80118FE0[0]);
+                            }
+                            DamageExplosion(id, &pos, 1);
+                        }
+                        g->unk16 = 0;
+                    }
+                } else if (g->updateType == 9) {
+                    ParticleUpdateGrenadeLauncher(g);
+                }
+            }
+        }
+        if (particleTaserState) {
+            if (!gSniperMode) {
+                WeaponGetTip(gObjPlayer, &D_8011D190);
+            } else {
+                D_8011D190.vx = ((TaserAnimView *)gObjPlayer->anim)->frames[11]->pos.vx;
+                D_8011D190.vy = ((TaserAnimView *)gObjPlayer->anim)->frames[11]->pos.vy;
+                D_8011D190.vz = ((TaserAnimView *)gObjPlayer->anim)->frames[11]->pos.vz;
+                D_8011D190.vy = -D_8011D190.vy;
+                base.vx = ((TaserAnimView *)gObjPlayer->anim)->frames[5]->pos.vx;
+                base.vy = ((TaserAnimView *)gObjPlayer->anim)->frames[5]->pos.vy;
+                base.vz = ((TaserAnimView *)gObjPlayer->anim)->frames[5]->pos.vz;
+                base.vy = -base.vy;
+                D_8011D190.vx += D_8011D190.vx - base.vx;
+                D_8011D190.vz += D_8011D190.vz - base.vz;
+                D_8011D190.vy -= 0x40;
+            }
+            EGSFrameSetPosition(D_80118FE0[0].frame, 0, &D_8011D1A0);
+        }
+        floor = ((MoveInfo *)gameObjectsInfo[gPlayerOffset].runtime->move)->unk12C;
+        if (floor > -0x7D00) {
+            D_80110088 = floor;
+        }
+        if (gCurrentWeapon == 13 && gSniperMode) {
+            camera = &gSniperCam;
+        } else {
+            camera = gCamera;
+        }
+        CameraGetDisplay(camera, (void **)&D_8011008C);
+        EGSDisplaySetupTransformWorldToScreen(D_8011008C);
+        for (i = 0; groupUpdateList[i] != 0xFF;) {
+            index = groupUpdateList[i];
+            g = &group[index];
+            if (g->head >= 0) {
+                if (g->unk27) {
+                    g->unk27--;
+                } else {
+                    SCRATCH_CALL1(ssUpdateAndDisplay, g);
+                }
+            }
+            if (index == groupUpdateList[i]) {
+                i++;
+            }
+        }
+        if (D_80110084) {
+            SysPlaySong(2, 0x17, 0, (s32)D_80110084);
+        }
+    }
+    SysPostMessage(0x10, 4, 0xFFFE, 0xFFFE, 0, 0, 0, 0);
+}
