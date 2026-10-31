@@ -200,6 +200,8 @@ segments:
       - [0xF5048, data, data_F5048]
       - [0xF6420, .data, sprite]
       - [0xF66AC, data, data_F66AC]
+      - [0xF6AC4, .data, particle]
+      - [0xF6C38, data, data_F6C38]
       - [0xF71E0, .data, damage]
       - [0xF7238, data, data_F7238]
       - [0xF72D8, .data, stream]
@@ -218,7 +220,8 @@ segments:
       - [0x100050, .sdata, sprite]
       - [0x100074, sdata, sdata_100074]
       - [0x10013C, .sdata, movement]
-      - [0x100144, sdata, sdata_100144]
+      - [0x100144, .sdata, particle]
+      - [0x10014C, sdata, sdata_10014C]
       - [0x100180, .sdata, damage]
       - [0x10018C, sdata, sdata_10018C]
       - [0x100208, .sdata, stream]
@@ -238,6 +241,8 @@ segments:
       - [0x100764, .sdata, egshog]
       - { start: 0x100768, type: .sbss, vram: 0x8010FF68, name: system }
       - { type: sbss, vram: 0x8010FF78, name: sbss_8010FF78 }
+      - { type: .sbss, vram: 0x80110030, name: particle }
+      - { type: sbss, vram: 0x80110118, name: sbss_80110118 }
       - { type: .sbss, vram: 0x80110170, name: damage }
       - { type: sbss, vram: 0x80110180, name: sbss_80110180 }
       - { type: .sbss, vram: 0x80110220, name: egsanim }
@@ -245,6 +250,8 @@ segments:
       - { type: .bss, vram: 0x801104A0, name: system }
       - { type: .bss, vram: 0x80111EB8, name: game }
       - { type: bss, vram: 0x80112D40, name: bss_80112D40 }
+      - { type: .bss, vram: 0x80118FC0, name: particle }
+      - { type: bss, vram: 0x8011D1D0, name: bss_8011D1D0 }
       - { type: .bss, vram: 0x8011E8D8, name: damage }
       - { type: bss, vram: 0x8011EB04, name: bss_8011EB04 }
       - { type: .bss, vram: 0x8011EB40, name: collision }

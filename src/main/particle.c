@@ -5,44 +5,7 @@
 #include "gobj.h"
 #include "level.h"
 
-/* particle.c's small data, still assembled from asm */
-SDATA_LOCAL(D_80110058)
-SDATA_LOCAL(D_8011005C)
-SDATA_LOCAL(D_8011009C)
-SDATA_LOCAL(D_80110060)
-SDATA_LOCAL(D_80110070)
-SDATA_LOCAL(D_80110074)
-SDATA_LOCAL(D_80110078)
-SDATA_LOCAL(D_8011007C)
-SDATA_LOCAL(D_8011006C)
-SDATA_LOCAL(D_80110064)
-SDATA_LOCAL(D_80110068)
-SDATA_LOCAL(D_80110098)
-SDATA_LOCAL(particleFireWaveFlag)
-SDATA_LOCAL(D_80110088)
-SDATA_LOCAL(D_80110090)
-SDATA_LOCAL(D_80110094)
-SDATA_LOCAL(D_801100A4)
-SDATA_LOCAL(D_801100A8)
-SDATA_LOCAL(D_801100AC)
-SDATA_LOCAL(D_801100B0)
-SDATA_LOCAL(D_801100B4)
-SDATA_LOCAL(D_801100B8)
-SDATA_LOCAL(D_801100BC)
-SDATA_LOCAL(D_801100C0)
-SDATA_LOCAL(D_801100C4)
-SDATA_LOCAL(D_801100C8)
-SDATA_LOCAL(D_801100E0)
-SDATA_LOCAL(D_801100E4)
-SDATA_LOCAL(D_801100EC)
-SDATA_LOCAL(D_8011003C)
-SDATA_LOCAL(D_80110040)
-SDATA_LOCAL(D_80110044)
-SDATA_LOCAL(D_80110048)
-SDATA_LOCAL(group)
-SDATA_LOCAL(groupUpdateList)
-SDATA_LOCAL(particleBreathFlag)
-SDATA_LOCAL(particleTaserState)
+#line 46
 
 /* A group of particles sharing an emitter (0x34 bytes, group[] has D_80110060 of them). */
 typedef struct ParticleGroup {
@@ -107,67 +70,169 @@ typedef struct Particle {
 #define PARTICLE_UPDATE_NONE 10
 #define PARTICLE_DRAW_NONE 5
 
-extern u8 D_80110058; /* fire light fade */
-extern u8 D_8011005C;
-extern s32 D_8011009C;
-extern s32 D_80110060; /* number of groups */
-extern s32 D_80110070; /* groupUpdateList count */
-extern s32 D_80110074; /* lowest possibly free particle index */
-extern s32 D_80110078; /* groups in use */
-extern s32 D_8011007C; /* particles in use */
-extern ParticleGroup *D_8011006C; /* snow group */
-extern s32 D_80110088; /* default floor height */
-extern s32 D_80110090; /* group allocation cursor */
-extern ParticleGroup *D_80110094; /* group carrying the fire light */
-extern s32 D_801100A4; /* emitter mode: 0 point, 1 mask */
-extern s32 D_801100A8;
-extern s32 D_801100AC;
-extern s32 D_801100B0;
-extern s32 D_801100B4;
-extern s32 D_801100B8; /* life */
-extern s32 D_801100BC; /* color */
-extern s32 D_801100C0; /* color fade */
-extern s32 D_801100C4; /* direction random range >> 8 */
-extern s32 D_801100C8; /* direction speed */
-extern GameObjectRuntime *D_801100E0;
-extern u8 D_801100E4; /* taser target bone */
-extern u8 D_801100EC;
-extern s32 D_8011003C; /* wind phases */
-extern s32 D_80110040;
-extern s32 D_80110044; /* rain wind phase */
-extern s32 D_80110048;
-extern ParticleGroup *group;
-extern u8 *groupUpdateList;
-extern s32 particleBreathFlag;
-extern s32 particleTaserState;
-extern u8 particleFireWaveFlag;
-extern ParticleGroup *D_80110064; /* last shell group */
-extern ParticleGroup *D_80110068; /* last tracer group */
-extern ParticleGroup *D_80110098;
+/*
+ * .sbss (0x80110030..0x80110118). Every slot is 4 bytes apart whatever its size: the
+ * original assembler gave each .lcomm word alignment (aspsx 2.56 does this, 2.77 packs
+ * by size; docs/data_migration.md). The modern build runs maspsx with the 2.7x packed
+ * layout, so it gets explicit padding statics instead.
+ */
+#ifdef _PSYQ
+#define SBSS_PAD1(n)
+#define SBSS_PAD2(n)
+#define SBSS_PAD3(n)
+#else
+#define SBSS_PAD1(n) static u8 n;
+#define SBSS_PAD2(n) static s16 n;
+#define SBSS_PAD3(n) static u8 n; static s16 n##_2;
+#endif
+static s32 D_80110030; /* wire sag amplitude */
+static s32 D_80110034; /* wire swing amplitude */
+static s32 D_80110038; /* wire swing phase */
+static s32 D_8011003C; /* wind phases */
+static s32 D_80110040;
+static s32 D_80110044; /* rain wind phase */
+static s32 D_80110048;
+static s32 D_8011004C; /* glow pulse phase */
+static s32 D_80110050; /* glow pulse counter */
+static s32 D_80110054; /* screen size shift of the current triangle group */
+static u8 D_80110058; SBSS_PAD3(D_80110058_pad) /* fire light fade */
+static u8 D_8011005C; SBSS_PAD3(D_8011005C_pad)
+static s32 D_80110060; /* number of groups */
+static ParticleGroup *D_80110064; /* last shell group */
+static ParticleGroup *D_80110068; /* last tracer group */
+static ParticleGroup *D_8011006C; /* snow group */
+static s32 D_80110070; /* groupUpdateList count */
+static s32 D_80110074; /* lowest possibly free particle index */
+static s32 D_80110078; /* groups in use */
+static s32 D_8011007C; /* particles in use */
+static s32 D_80110080; /* triangles drawn */
+static Particle *D_80110084; /* last shell that bounced */
+static s32 D_80110088; /* default floor height */
+static EGSFrame **D_8011008C; /* camera frame */
+static s32 D_80110090; /* group allocation cursor */
+static ParticleGroup *D_80110094; /* group carrying the fire light */
+static ParticleGroup *D_80110098;
+static s32 D_8011009C;
+static s32 D_801100A0; /* XZ plane emitter slope (dz << 8) / dx */
+static s32 D_801100A4; /* emitter mode: 0 point, 1 mask */
+static s32 D_801100A8;
+static s32 D_801100AC;
+static s32 D_801100B0;
+static s32 D_801100B4;
+static s32 D_801100B8; /* life */
+static s32 D_801100BC; /* color */
+static s32 D_801100C0; /* color fade */
+static s32 D_801100C4; /* direction random range >> 8 */
+static s32 D_801100C8; /* direction speed */
+static s16 D_801100CC; SBSS_PAD2(D_801100CC_pad) /* taser wire length (dist >> 8) */
+static s16 D_801100D0; SBSS_PAD2(D_801100D0_pad) /* wire segments still flying out */
+static s16 D_801100D4; SBSS_PAD2(D_801100D4_pad) /* wire sag */
+static s16 D_801100D8; SBSS_PAD2(D_801100D8_pad) /* initial sag amplitude */
+static ParticleGroup *D_801100DC; /* taser wire group */
+static GameObjectRuntime *D_801100E0;
+static u8 D_801100E4; SBSS_PAD3(D_801100E4_pad) /* taser target bone */
+static u8 D_801100E8; SBSS_PAD3(D_801100E8_pad) /* player's target info byte 0x60 when fired */
+static u8 D_801100EC; SBSS_PAD3(D_801100EC_pad)
+static s16 D_801100F0; SBSS_PAD2(D_801100F0_pad) /* glass texture mapping, set up by the pane functions: tpage */
+static s16 D_801100F4; SBSS_PAD2(D_801100F4_pad) /* clut */
+static s16 D_801100F8; SBSS_PAD2(D_801100F8_pad) /* texture VRAM x */
+static s16 D_801100FC; SBSS_PAD2(D_801100FC_pad) /* texture VRAM y */
+static s16 D_80110100; SBSS_PAD2(D_80110100_pad) /* texture width */
+static s16 D_80110104; SBSS_PAD2(D_80110104_pad) /* texture height */
+static s16 D_80110108; SBSS_PAD2(D_80110108_pad) /* pane origin x */
+static s16 D_8011010C; SBSS_PAD2(D_8011010C_pad) /* pane origin y */
+static s16 D_80110110; SBSS_PAD2(D_80110110_pad) /* pane width */
+static s16 D_80110114; SBSS_PAD2(D_80110114_pad) /* pane height */
+/* commons (psylink places them after every object; tentative definitions so aspsx
+ * reaches them through $gp) */
+ParticleGroup *group;
+u8 *groupUpdateList;
+s32 particleBreathFlag;
+s32 particleTaserState;
+u8 particleFireWaveFlag;
+#line 147
 
-extern Particle D_80119040[PARTICLE_MAX];
+
 extern VECTOR32 D_80012000; /* {0, 0, 0} */
 extern VECTOR32 D_80012010; /* {0, 0x1000, 0} */
 extern VECTOR32 D_80012030; /* {7, 7, 7} */
 extern VECTOR32 D_80012050; /* {0x3FF, 0x1FF, 0x3FF} */
-extern VECTOR32 D_8011D140; /* NPC fire position followed by the fire light */
-extern VECTOR32 D_8011D150; /* emitter position */
-extern VECTOR32 D_8011D170; /* emitter mask size */
-extern VECTOR32 D_8011D180; /* direction base */
-extern VECTOR32 D_8011D1C0; /* wind (x, z used) */
 
-extern u8 D_801062C4[]; /* per level: number of levelFloorY entries */
-extern s16 levelFloorY[][7];
 
-extern void (*updateFunc[])(ParticleGroup *);
-extern void (*drawFunc[])(ParticleGroup *);
+
+
+
+
+void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g);
+void ParticleUpdateExplosion(ParticleGroup *g);
+void ParticleDisplayRain(ParticleGroup *g);
+void ParticleUpdateSnow(ParticleGroup *g);
+void ParticleUpdateGlass(ParticleGroup *g);
+void ParticleUpdateTracer(ParticleGroup *g);
+void ParticleUpdateTaser(ParticleGroup *g);
+void ParticleUpdateShell(ParticleGroup *g);
+void ParticleUpdateLineMeter(ParticleGroup *g);
+void ParticleUpdateGrenadeLauncher(ParticleGroup *g);
+void ParticleDisplayPolyFlat(ParticleGroup *g);
+void ParticleDisplayPolyWorld(ParticleGroup *g);
+void ParticleDisplayPolyFlat4(ParticleGroup *g);
+
+/* .data (0x801062C4..0x80106438) */
+/* per level: number of levelFloorY entries */
+static u8 D_801062C4[16] = { 7, 2, 5, 1, 3, 3, 3, 1, 1, 1, 1, 2, 2, 1, 6, 1 };
+s16 levelFloorY[20][7] = {
+    { 0x8BC, 0x4B4, 0xEC, 0x66, -0x1B8, -0x3F6, -0x477 },
+    { 0xEC, -0x3F5, 0, 0, 0, 0, 0 },
+    { -0x3F5, 0, 0, 0, 0, 0, 0 },
+    { 0x6A, -0x16, -0x10A, -0x18E, -0x2CA, 0, 0 },
+    { -0x9A, 0, 0, 0, 0, 0, 0 },
+    { 0x9A6, 0x30F, 0x69, 0, 0, 0, 0 },
+    { 0x2F0, 0x1CE, -0xD9, 0, 0, 0, 0 },
+    { 0x6A, -0x19B, -0x2BC, 0, 0, 0, 0 },
+    { -0x19B, -0x2BC, 0, 0, 0, 0, 0 },
+    { 0x353, 0, 0, 0, 0, 0, 0 },
+    { 0x6A, 0, 0, 0, 0, 0, 0 },
+    { 0x150D, 0, 0, 0, 0, 0, 0 },
+    { 0x78A, 0, 0, 0, 0, 0, 0 },
+    { 0x613, 0x33E, 0, 0, 0, 0, 0 },
+    { 0x201, 0x71, 0, 0, 0, 0, 0 },
+    { 0x6A, 0, 0, 0, 0, 0, 0 },
+    { 0x8EE, 0x803, 0x6F4, 0x491, 0x320, -0xB3, 0 },
+    { 0x8EE, 0x803, 0x6F4, 0x491, 0x320, -0xB3, 0 },
+    { -0x3F5, 0, 0, 0, 0, 0, 0 },
+    { 0x8BC, 0x4B4, 0xEC, 0x66, -0x1B8, -0x3F6, -0x477 },
+};
+void (*updateFunc[])(ParticleGroup *) = {
+    ParticleUpdateFragmentMeterFrictionFloor, ParticleUpdateExplosion, ParticleDisplayRain,
+    ParticleUpdateSnow, ParticleUpdateGlass, ParticleUpdateTracer, ParticleUpdateTaser,
+    ParticleUpdateShell, ParticleUpdateLineMeter, ParticleUpdateGrenadeLauncher,
+};
+void (*drawFunc[])(ParticleGroup *) = {
+    ParticleDisplayPolyFlat, ParticleDisplayPolyWorld, NULL, NULL, ParticleDisplayPolyFlat4,
+};
+static VECTOR32 D_80106428 = { 0, 0, 0, 0 };
+#line 164
 
 typedef struct PointSourceLight {
     /* 0x00 */ s32 on;
     /* 0x04 */ u8 unk04[0x28];
     /* 0x2C */ EGSFrame *frame;
 } PointSourceLight;
-extern PointSourceLight D_80118FE0[2];
+/* .bss (0x80118FC0..0x8011D1D0) */
+static VECTOR32 D_80118FC0; /* tracer direction / shell velocity */
+static VECTOR32 D_80118FD0; /* gun tip */
+static PointSourceLight D_80118FE0[2];
+static Particle D_80119040[PARTICLE_MAX];
+static VECTOR32 D_8011D140; /* NPC fire position followed by the fire light */
+static VECTOR32 D_8011D150; /* emitter position */
+static VECTOR32 D_8011D160; /* XZ plane emitter end point */
+static VECTOR32 D_8011D170; /* emitter mask size */
+static VECTOR32 D_8011D180; /* direction base */
+static VECTOR32 D_8011D190; /* taser tip (wire start) */
+static VECTOR32 D_8011D1A0; /* wire end */
+static VECTOR32 D_8011D1B0; /* wire direction */
+static VECTOR32 D_8011D1C0; /* wind (x, z used) */
+#line 171
 
 extern s32 gSniperMode;
 extern s32 gCurrentWeapon;
@@ -432,9 +497,6 @@ void ParticleInitEmitterMask(VECTOR32 *pos, VECTOR32 *mask) {
     D_8011D150.vz = pos->vz - (D_8011D170.vz >> 1);
 }
 
-SDATA_LOCAL(D_801100A0)
-extern s32 D_801100A0;         /* XZ plane emitter slope (dz << 8) / dx */
-extern VECTOR32 D_8011D160; /* XZ plane emitter end point */
 
 void ParticleInitEmitterXZPlane(VECTOR32 *from, VECTOR32 *to, VECTOR32 *size) {
     VECTOR32 center;
@@ -532,6 +594,23 @@ void ParticleInitNegativeDirection(VECTOR32 *dir, s32 range, s32 speed) {
     D_801100C8 = speed;
     D_8011D180.vz = -dir->vz - half;
 }
+#ifndef _PSYQ
+/* splat labels inside the .bss objects above, used by the INCLUDE_ASM functions */
+__asm__(".set D_80118FC4, D_80118FC0+4\n"
+        ".set D_80118FC8, D_80118FC0+8\n"
+        ".set D_80118FD4, D_80118FD0+4\n"
+        ".set D_80118FD8, D_80118FD0+8\n"
+        ".set D_80119044, D_80119040+4\n"
+        ".set D_80119048, D_80119040+8\n"
+        ".set D_8011904C, D_80119040+0xC\n"
+        ".set D_80119060, D_80119040+0x20\n"
+        ".set D_80119064, D_80119040+0x24\n"
+        ".set D_80119066, D_80119040+0x26\n"
+        ".set D_8011D194, D_8011D190+4\n"
+        ".set D_8011D198, D_8011D190+8\n"
+        ".set D_8011D1A4, D_8011D1A0+4\n"
+        ".set D_8011D1C8, D_8011D1C0+8\n");
+#endif
 
 /* Particle sprite textures (0x80105E1C..) */
 typedef struct ParticleTextures {
@@ -787,19 +866,6 @@ void ParticleTaserGetDestination(GameObjectRuntime *target, VECTOR32 *out) {
     }
 }
 
-SDATA_LOCAL(D_801100CC)
-SDATA_LOCAL(D_801100D0)
-SDATA_LOCAL(D_801100D4)
-SDATA_LOCAL(D_801100DC)
-SDATA_LOCAL(D_801100E8)
-extern s16 D_801100CC;             /* taser wire length (dist >> 8) */
-extern s16 D_801100D0;             /* wire segments still flying out */
-extern s16 D_801100D4;             /* wire sag */
-extern ParticleGroup *D_801100DC;  /* taser wire group */
-extern u8 D_801100E8;              /* player's target info byte 0x60 when fired */
-extern VECTOR32 D_8011D190;        /* taser tip (wire start) */
-extern VECTOR32 D_8011D1A0;        /* wire end */
-extern VECTOR32 D_8011D1B0;        /* wire direction */
 
 void WeaponGetTip(GameObjectRuntime *gobj, VECTOR32 *tip);
 void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
@@ -869,14 +935,6 @@ void ParticleTaser(VECTOR32 *pos) {
     D_801100E8 = ((TargetInfo *)gObjPlayer->target)->unk60;
 }
 
-SDATA_LOCAL(D_80110030)
-SDATA_LOCAL(D_80110034)
-SDATA_LOCAL(D_80110038)
-SDATA_LOCAL(D_801100D8)
-extern s32 D_80110030; /* wire sag amplitude */
-extern s32 D_80110034; /* wire swing amplitude */
-extern s32 D_80110038; /* wire swing phase */
-extern s16 D_801100D8; /* initial sag amplitude */
 
 /* EGS display wrapper around a PsyQ LINE_G2 (Particle.prim) */
 typedef struct EGSLineG2 {
@@ -1120,8 +1178,6 @@ void ParticleUpdateTaser(ParticleGroup *unused) {
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateTaser);
 #endif
 
-extern VECTOR32 D_80118FC0; /* tracer direction / shell velocity */
-extern VECTOR32 D_80118FD0; /* gun tip */
 
 /* Per-weapon info (0x20 bytes each); flags bits 11-13: tracer every n shots */
 typedef struct WeaponInfo {
@@ -2156,8 +2212,6 @@ void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
     EGSFrameSetPosition(D_80118FE0[0].frame, 0, &v);
 }
 
-SDATA_LOCAL(D_8011008C)
-extern EGSFrame **D_8011008C; /* camera frame */
 void EGSDisplaySetFlashTime(s32 ticks);
 
 #ifdef NON_MATCHING
@@ -2628,28 +2682,7 @@ ParticleGroup *ParticleGlassPoint(s32 unused, s32 id, VECTOR32 *pos) {
     return g;
 }
 
-SDATA_LOCAL(D_801100F0)
-SDATA_LOCAL(D_801100F4)
-SDATA_LOCAL(D_801100F8)
-SDATA_LOCAL(D_801100FC)
-SDATA_LOCAL(D_80110100)
-SDATA_LOCAL(D_80110104)
-SDATA_LOCAL(D_80110108)
-SDATA_LOCAL(D_8011010C)
-SDATA_LOCAL(D_80110110)
-SDATA_LOCAL(D_80110114)
 
-/* Glass texture mapping, set up by the pane functions */
-extern s16 D_801100F0; /* tpage */
-extern s16 D_801100F4; /* clut */
-extern s16 D_801100F8; /* texture VRAM x */
-extern s16 D_801100FC; /* texture VRAM y */
-extern s16 D_80110100; /* texture width */
-extern s16 D_80110104; /* texture height */
-extern s16 D_80110108; /* pane origin x */
-extern s16 D_8011010C; /* pane origin y */
-extern s16 D_80110110; /* pane width */
-extern s16 D_80110114; /* pane height */
 
 /* Texture coordinate of one POLY_FT3 vertex plus the clut/tpage halfword that follows it */
 typedef struct GlassUV {
@@ -2988,7 +3021,6 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
 INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneWall);
 #endif
 
-extern VECTOR32 D_80106428;
 /* glass object type with a textured ceiling pane */
 #define GOBJ_TYPE_GLASS_CEILING 0x56
 
@@ -3524,10 +3556,6 @@ typedef struct ParticlePolyF3 {
     /* 0x18 */ s32 xy2;
 } ParticlePolyF3;
 
-SDATA_LOCAL(D_80110054)
-SDATA_LOCAL(D_80110080)
-extern s32 D_80110054; /* screen size shift of the current triangle group */
-extern s32 D_80110080; /* triangles drawn */
 
 /* Same layout as libgte MATRIX (egsmath.h conflicts with this file's prototypes) */
 typedef struct CameraMatrix {
@@ -3555,10 +3583,6 @@ typedef struct {
     s16 x, y;
 } ParticleScreenPos;
 extern ParticleScreenPos POSITION; /* screen centre */
-SDATA_LOCAL(D_8011004C)
-SDATA_LOCAL(D_80110050)
-extern s32 D_8011004C; /* glow pulse phase */
-extern s32 D_80110050; /* glow pulse counter */
 
 void EGSDisplayAddSprite(void *display, void *prim);
 
@@ -3959,8 +3983,8 @@ INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayRain);
 #endif
 
 
-SDATA_LOCAL(D_8010F944)
-extern s32 D_8010F944; /* snow brightness, follows the player's size */
+static s32 D_8010F944 = 0x50; /* snow brightness, follows the player's size */
+static s32 D_8010F948 = 0;    /* .sdata, unreferenced (taken as this file's) */
 
 
 /* Snow flakes: a box of flat triangles that follows the camera */
@@ -4545,8 +4569,6 @@ typedef struct ParticleLineF2 {
     /* 0x14 */ s32 xy1;
 } ParticleLineF2;
 
-SDATA_LOCAL(D_80110084)
-extern Particle *D_80110084; /* last shell that bounced */
 
 /* Spent shell casings: a spinning line segment that bounces on the floor */
 void ParticleUpdateShell(ParticleGroup *g) {
@@ -4686,8 +4708,6 @@ void ParticleUpdateFireLight(void) {
 
 #include "scratch.h"
 
-extern VECTOR32 D_8011D190; /* taser gun tip */
-extern VECTOR32 D_8011D1A0;
 extern void *gSniperCam;
 extern s32 gPlayerOffset;
 

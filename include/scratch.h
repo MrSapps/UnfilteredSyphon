@@ -35,12 +35,23 @@
  * maspsx always inserts its own nop after a `jal`, so the jal + delay slot pair is
  * hidden inside an assembler macro (defined once per file) that maspsx passes through.
  */
+#ifndef _PSYQ
 __asm__(".macro scratch_jal_ds op, fn, ds:vararg\n\t.set push\n\t.set noreorder\n\t\\op \\fn\n\t\\ds\n\t.set pop\n\t.endm");
 #define SCRATCH_CALL_DS(fn, ds)                                                        \
     __asm__ volatile(SCRATCH_ENTER "scratch_jal_ds jal, " #fn ", " ds "\n\t" SCRATCH_LEAVE \
                      :                                                                 \
                      :                                                                 \
                      : SCRATCH_CLOBBERS)
+#else
+/* aspsx (no maspsx in between) has no .macro or .set push/pop; cc1psx emits code in
+ * reorder mode, so a plain noreorder/reorder bracket gives the same instructions. */
+#define SCRATCH_CALL_DS(fn, ds)                                                        \
+    __asm__ volatile(SCRATCH_ENTER ".set noreorder\n\tjal " #fn "\n\t" ds              \
+                     "\n\t.set reorder\n\t" SCRATCH_LEAVE                             \
+                     :                                                                 \
+                     :                                                                 \
+                     : SCRATCH_CLOBBERS)
+#endif
 
 /*
  * Statement form, as the original source seems to have used it: switch to the

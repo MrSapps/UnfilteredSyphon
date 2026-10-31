@@ -79,13 +79,26 @@ so a TU's data has to come from that TU's object.
   declaration early in the file and the initialised definition later is fine.
 * **Small arrays.** An array of <= 8 bytes is `.sdata` too, so anything in `.data`
   is > 8 bytes (damage's 2-entry bone list is one object with what follows it).
-* **`.lcomm` layout.** aspsx 2.77 aligns each `.lcomm` to its size rounded up to a
-  power of two (at most 16) and packs them; cc1psx emits block-scope statics when
-  their function is compiled and file-scope ones at the end, in definition order.
-  Some TUs have small `.sbss`/`.bss` items 4 bytes apart that no such layout gives
-  (egsdev's `.sbss`/`.bss`, damage's two u8 at 0x80110180/4, cobj's 0xBA4-byte
-  object at 0x8011EBAC): their declarations must have been different (unknown);
-  leave them in the blob with `SDATA_LOCAL` for now.
+* **`.lcomm` layout: the original assembler word-aligns every `.lcomm`.** aspsx 2.77
+  (psyq_4.3/bin) packs `.lcomm`s by size (alignment = size rounded up to a power of
+  two, at most 16), but the exe's static `.sbss` has 1- and 2-byte items 4 bytes apart
+  (particle's ten s16 at 0x801100F0..0x80110114, all `lh`/`sh`; damage's two u8 at
+  0x80110180/4; egsdev). `/home/snake/dev/psyq_sdk/aspsx/2.56/aspsx.exe` gives every
+  `.lcomm` 4-byte alignment and pads its size to 4 (no 16-alignment in `.bss` either),
+  which reproduces particle's layout; it also gives the same `.text` and data for every
+  TU checked before (egsdebug..damage). So the game was most likely assembled with an
+  aspsx that has 2.56's `.lcomm` rule. To check with it, use an SDK dir whose `bin/` is
+  psyq_4.3's with `aspsx.exe` swapped for 2.56's, and set `PSYQ_SDK` to it for
+  `tools/psyq_check_tu.py` (particle's `.sbss` only passes that way). Packed small
+  items in the exe (system 0x8010FF6A, interface 0x8010FFFA, text 0x801101AA, ...) must
+  then be arrays or struct members.
+  The modern build still runs maspsx with `--aspsx-version=2.79` (power-of-two
+  layout). Until maspsx is switched to word `.lcomm` alignment (`LcommAlignment.WORD`;
+  maspsx maps every version below 2.8 to `NONE`, which is wrong for 2.56), a TU with such
+  slots pads them for the modern build only. particle.c does this with
+  `SBSS_PAD1/2/3(name)` macros that expand to nothing under `_PSYQ`. The other cases
+  (damage 0x80110180/4, egsdev `.sbss`/`.bss`, cobj's object at 0x8011EBAC) are probably
+  solvable the same way, but nobody has tried yet.
 * **Blob pieces start where the linker puts them.** An object's section is only
   4-aligned in the final image, so the blob piece after a dotted entry starts at the
   C section's end (damage `.bss` ends at 0x8011EB04, the next piece is
@@ -120,6 +133,11 @@ so a TU's data has to come from that TU's object.
   gravity y/z as the scalars `D_800FE5E8/EC`. As struct members, cc1 hoists the base
   address into a register and the code changes, so those labels stay as absolute
   symbols in `config/main.syms.ld`.
+* **`include/scratch.h`** has a `_PSYQ` variant of `SCRATCH_CALL_DS`: aspsx has no
+  `.macro` or `.set push/pop`, and without maspsx in between, a plain
+  `.set noreorder`/`.set reorder` bracket gives the same bytes (checked on game.c's
+  `func_80016690`). TUs that include it (egshmd, particle, animate, game, ...) now compile
+  under ccpsx.
 
 ## Finding the TU's data
 
@@ -170,7 +188,7 @@ stay real commons and GNU ld resolves them to splat's `.sbss`/`.bss` labels.
 `ccpsx` predefines `_PSYQ`. Under `_PSYQ`, `include/common.h` makes `INCLUDE_ASM`,
 `INCLUDE_RODATA` and `SDATA_LOCAL` no-ops and skips `include_asm.h`, because aspsx
 can't parse `.include`, `.pushsection` or the maspsx markers. `include/scratch.h`
-(`.macro`/`.set push`) still needs its own `_PSYQ` variant for the TUs that use it.
+has its own `_PSYQ` variant of the one GAS macro it used.
 
 ## Checklist for one TU
 
@@ -199,7 +217,7 @@ can't parse `.include`, `.pushsection` or the maspsx markers. `include/scratch.h
 | egsfile  | .sdata .bss                         | OK          | data OK (EGSFileOpenFog asm) |
 | egshog   | .rdata .text .sdata                 | OK          | OK |
 | egsdev   | .rdata .data .sdata (not .sbss/.bss) | OK         | data OK (EmergencyPrintNum asm) |
-| egshmd   | .data .sdata + gInfraredColor common | OK         | blocked by scratch.h |
+| egshmd   | .data .sdata + gInfraredColor common | OK         | data OK (2 asm functions) |
 | collision| .rdata .bss                         | OK          | data OK (2 asm functions) |
 | shadow   | .rdata + mShadowRequestList common  | OK          | .rdata short until its asm functions are C |
 | save     | .rdata .sdata .bss                  | OK          | data OK (SaveRestoreContinue asm) |
@@ -220,3 +238,4 @@ The TUs that include `include/scratch.h` (game, system, camera, los, movement, .
 don't compile under ccpsx yet: its `scratch_jal_ds` GAS `.macro` needs a `_PSYQ`
 form, e.g. `".set noreorder\n\tjal " #fn "\n\t" ds "\n\t.set reorder"`. With that,
 game.c matches in every section.
+| particle | .data .sdata .sbss .bss + 5 commons (.rdata still has the INCLUDE_RODATA blob) | OK | data OK with aspsx 2.56 (`.sbss` DIFF with 2.77); 16 asm functions |
