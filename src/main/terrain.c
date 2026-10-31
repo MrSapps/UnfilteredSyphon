@@ -41,7 +41,7 @@ typedef struct SectorMapEntry {
  * bit 31 is cleared (no longer a KSEG0 address) while the sector is not displayed.
  */
 typedef struct TerrainModel {
-    /* 0x00 */ u8 unk00[0x20];
+    /* 0x00 */ s32 box[8]; /* bounding box: min x, y, z, pad, max x, y, z, pad */
     /* 0x20 */ s32 data;
     /* 0x24 */ s32 unk24;
     /* 0x28 */ u32 flags;
@@ -137,6 +137,8 @@ typedef struct EMDOwner {
 typedef struct DisplayCamera {
     /* 0x00 */ u8 unk00[0x14];
     /* 0x14 */ s32 index;
+    /* 0x18 */ u8 unk18[0x74];
+    /* 0x8C */ struct TerrAnimNode *anims;
 } DisplayCamera;
 
 /* Level data header (gLevData). */
@@ -210,7 +212,7 @@ void EGSDisplayAddAnim(void *camera, void *anim);
 void EGSDisplayDeleteAnim(void *camera, void *anim);
 
 #ifdef NON_MATCHING
-/* page map addressing and an 8 byte larger frame */
+/* regalloc: map pointer in a0 instead of v0 (9 insns) */
 void VramSwap(StreamReq *req) {
     TerrainRect rect = D_8010F9E0;
     s32 tag = req->tag;
@@ -225,7 +227,7 @@ void VramSwap(StreamReq *req) {
         other = page - 6;
     }
     map = gTexturePageMap;
-    map[bank * VRAM_PAGES_PER_BANK + page] = 1;
+    (map + bank * VRAM_PAGES_PER_BANK)[page] = 1;
     /* the same page in the other bank is gone */
     if (bank == 0) {
         map += VRAM_PAGES_PER_BANK;
@@ -258,7 +260,7 @@ void AckVram(void) {
 INCLUDE_RODATA("asm/main/nonmatchings/terrain", D_8001233C);
 
 #ifdef NON_MATCHING
-/* loop strength reduction differs (page map / gVRAMMap pointers); 8 insns longer */
+/* loop counter/registers: the original steps a bank*32 induction variable (12 insns) */
 void InitStreaming(void) {
     u8 pos[0x50];
     u8 *map;
@@ -266,10 +268,10 @@ void InitStreaming(void) {
     s32 sector;
     s32 bank;
     s32 i;
+    VramMapEntry *entry;
 
     InitStreamRequests();
-    for (bank = 0; bank < 2; bank++) {
-        map = &gTexturePageMap[bank * VRAM_PAGES_PER_BANK];
+    for (bank = 0, map = gTexturePageMap; bank < 2; bank++, map += VRAM_PAGES_PER_BANK) {
         for (i = VRAM_PAGES_PER_BANK - 1; i >= 0; i--) {
             map[i] = 0;
         }
@@ -282,10 +284,11 @@ void InitStreaming(void) {
             gVramHogCount++;
             sector = CdPosToInt((void *)file) + 1;
             for (i = 0; i < VRAM_MAP_PAGES; i++, sector += 0x10) {
-                gVRAMMap[bank][i].unk0 = 0;
-                CdIntToPos(sector, gVRAMMap[bank][i].pos);
-                gVRAMMap[bank][i].page = i;
-                gVRAMMap[bank][i].page2 = i;
+                entry = &gVRAMMap[bank][i];
+                entry->unk0 = 0;
+                CdIntToPos(sector, entry->pos);
+                entry->page = i;
+                entry->page2 = i;
             }
         }
     }
@@ -728,7 +731,389 @@ u8 FindSectorInNewMap(s16 sector, u8 *map, u8 includeFar) {
     }
 }
 
+extern u8 D_8010F9FC;  /* full (re)activation pending */
+extern s32 D_8010FA00; /* sniper view active on the last update */
+extern TerrainAnim *gGabeSectorAnim;
+void EGSDisplayRegisterSectorFaceCollisionArray(u8 *sectors);
+s32 NPCActivationOK(s32 id);
+void StreamSynchronous(void);
+void CheckStreamRequests(s32 arg0);
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
+
+/* A frame as far as orienting billboards goes (egsframe.h's EGSFrame). */
+typedef struct TerrFrame {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+    /* 0x20 */ void *node; /* NULL: not in a hierarchy */
+} TerrFrame;
+
+typedef struct TerrMatrix {
+    s16 m[3][3];
+    s16 pad;
+    s32 t[3];
+} TerrMatrix;
+
+typedef struct TerrAnimNodeAnim {
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ s16 owner; /* 0x2000: a game object's anim, id in the low 10 bits */
+} TerrAnimNodeAnim;
+
+/* Anims in a display (DisplayCamera.anims). */
+typedef struct TerrAnimNode {
+    /* 0x00 */ TerrAnimNodeAnim *anim;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ struct TerrAnimNode *next;
+} TerrAnimNode;
+
+void EGSFrameSetRotationMatrix(TerrFrame *frame, s32 ref, TerrMatrix *m);
+
+#define TERR_FRAME(rt) ((TerrFrame *)(rt)->anim->frame)
+#define TERR_CAM_FRAME (**(TerrFrame ***)gCamera)
+#define ANIM_IN_DISPLAY(anim, cam) (((void **)(anim))[(cam)->index] != NULL)
+
+static inline u8 TerrInBox(TerrainModel *model, s32 x, s32 z) {
+    u8 in = x >= model->box[0] && x < model->box[4] && z >= model->box[2] && z < model->box[6];
+
+    return in;
+}
+
+static inline void TerrAxesToMatrix(VECTOR32 *x, VECTOR32 *y, VECTOR32 *z, TerrMatrix *m) {
+    m->m[0][0] = x->vx;
+    m->m[1][0] = x->vy;
+    m->m[2][0] = x->vz;
+    m->m[0][1] = y->vx;
+    m->m[1][1] = y->vy;
+    m->m[2][1] = y->vz;
+    m->m[0][2] = z->vx;
+    m->m[1][2] = z->vy;
+    m->m[2][2] = z->vz;
+}
+
+/* Track the player's sector, (de)activate terrain and objects, face billboards to the camera. */
+#ifdef NON_MATCHING
+/* regalloc: force/list vs secondCount swap s2/s4; in2 zero-extend placement (22 insns) */
+void TerrainUpdateActivation(force)
+u8 force;
+{
+    s32 sector = -1;
+    s32 best = 0;
+    s32 second = -1;
+    s32 secondCount = 0;
+    s32 sniper = gSniperMode == 2;
+    DisplayCamera *display = *gCamera;
+    DisplayCamera *sniperCam = NULL;
+    u8 done = 0;
+    u8 reset = 0; /* never set: the original tests it anyway */
+    Vec3 pos;
+    VECTOR32 x; /* object position, then the camera's x axis */
+    Gobj *rt;
+    s32 i;
+    s32 j;
+    s32 k;
+    s32 newIdx;
+    GameObjectAnim *objAnim;
+    s32 idx;
+    s16 s;
+    s16 cur;
+    u8 far;
+    u8 *oldNbr;
+    u8 *newNbr;
+    u8 *nbr;
+    ActivationList *oldList;
+    ActivationList *list;
+    TerrainAnim *anim;
+
+    if (force) {
+        D_8010F9FC = 1;
+    }
+    gTUTime++;
+    if (sniper) {
+        sniperCam = gSniperCam;
+    }
+    rt = gameObjectsInfo[gPlayerOffset].runtime;
+    pos.x = TERR_FRAME(rt)->t[0];
+    pos.y = TERR_FRAME(rt)->t[1];
+    pos.z = TERR_FRAME(rt)->t[2];
+    pos.y = -pos.y;
+    if (D_8010F9FC) {
+        for (i = 0; i < gTerrSectorCount; i++) {
+            mFaceCollisionSectors[i] = 0;
+        }
+        EGSDisplayRegisterSectorFaceCollisionArray(mFaceCollisionSectors);
+        sector = gGabeSector;
+        ActivateSector(sector, D_8010F9FC);
+        gGabeSector = -1;
+    } else if (sniper) {
+        sector = gGabeSector;
+    } else {
+        for (i = 0; i < gTerrSectorCount; i++) {
+            u8 n = mFaceCollisionSectors[i];
+
+            if (best < n) {
+                secondCount = best;
+                second = sector;
+                best = n;
+                sector = i;
+            } else if (secondCount < n && second != sector) {
+                secondCount = n;
+                second = i;
+            }
+        }
+        if (secondCount >= 2 && second >= 0) {
+            TerrainModel *m1 = gTerrSector[sector].anim->model;
+            TerrainModel *m2 = gTerrSector[second].anim->model;
+            s32 px = pos.x;
+            s32 pz = pos.z;
+            u8 in1 = TerrInBox(m1, px, pz);
+            u8 in2 = TerrInBox(m2, px, pz);
+
+            if (!in1) {
+                if (mFaceCollisionSectors[gGabeSector] != 0) {
+                    sector = gGabeSector;
+                } else if (in2 || second == gGabeSector) {
+                    sector = second;
+                }
+            }
+        }
+    }
+    if (sector < 0) {
+        CheckStreamRequests(0);
+        return;
+    }
+    D_8010FA00 = sniper;
+    far = 0;
+    if (force || reset || sector != gGabeSector) {
+        oldNbr = gLevData->sectorNeighbors[gGabeSector];
+        newNbr = gLevData->sectorNeighbors[sector];
+        if (gGabeSector >= 0) {
+            FindBadCacheEntries();
+            k = 0;
+            do {
+                s = *oldNbr;
+                if (s == 0xFF || k == 14) {
+                    s = gGabeSector;
+                }
+                if (s != 0xFE) {
+                    if (!FindSectorInNewMap(s, newNbr, 0) && s != sector) {
+                        oldList = &objActivationList[s];
+                        DeactivateSector(s);
+                        for (i = 0; i < oldList->count; i++) {
+                            Gobj *obj = oldList->infos[i]->runtime;
+
+                            if (obj->id != gPlayerOffset && *(s32 *)obj->anim != 0) {
+                                SHReq(obj->id, 0);
+                            }
+                        }
+                    }
+                    mFaceCollisionSectors[s] = 0;
+                }
+                oldNbr++;
+                k++;
+            } while (s != gGabeSector);
+        }
+        ActivateSector(sector, D_8010F9FC);
+        for (newIdx = 0; newIdx < 14; newIdx++, newNbr++) {
+            u8 n = *newNbr;
+
+            if (n == 0xFF) {
+                break;
+            }
+            if (n == 0xFE) {
+                far = 1;
+                continue;
+            }
+            anim = gTerrSector[n].anim;
+            if (anim->unk00 == 0) {
+                ActivateSector(n, D_8010F9FC);
+            }
+            if (far && anim->unk00 != 0) {
+                DeactivateSector(n);
+            }
+        }
+        gGabeSector = sector;
+        gGabeSectorAnim = gTerrSector[sector].anim;
+    }
+    idx = 0;
+    nbr = gLevData->sectorNeighbors[sector];
+    secondCount = gTUTime;
+nextNeighbor:
+    cur = *nbr;
+    if (cur == 0xFE || cur == 0xFF || idx == 14) {
+        done = 1;
+        cur = sector;
+    }
+    list = &objActivationList[cur];
+    if (gTerrSector[cur].anim->unk00 != 0) {
+        for (j = 0; j < list->count; j++) {
+            Gobj *obj = list->infos[j]->runtime;
+
+            if (obj == NULL) {
+                continue;
+            }
+            if (!(obj->flags23 & 4) && obj->npcState != 2 && (j & 1) == (secondCount & 1)) {
+                continue;
+            }
+            objAnim = obj->anim;
+            if (objAnim != NULL) {
+                s32 dist;
+                s32 range;
+
+                x.vx = ((TerrFrame *)objAnim->frame)->t[0];
+                x.vy = ((TerrFrame *)objAnim->frame)->t[1];
+                x.vz = ((TerrFrame *)objAnim->frame)->t[2];
+                x.vy = -x.vy;
+                dist = GameSysFuzzyDistPt2Pt(&pos, (Vec3 *)&x);
+                if (obj->unk20[1]) {
+                    range = obj->unk20[1] << 5;
+                } else {
+                    range = gActivationDistance;
+                }
+                if (range >= dist && obj->anim != NULL && !(obj->flags23 & 2)) {
+                    SHReq(obj->id, 1);
+                } else if (obj->id != gPlayerOffset && obj->anim != NULL && *(s32 *)obj->anim != 0) {
+                    SHReq(obj->id, 0);
+                }
+            }
+        }
+    }
+    if (done) {
+        TerrAnimNode *node = display->anims;
+
+        if (node != NULL) {
+            TerrMatrix face;
+            TerrMatrix upright;
+            TerrMatrix cam;
+            VECTOR32 y;
+            VECTOR32 z;
+
+            cam.m[0][0] = TERR_CAM_FRAME->m[0][0];
+            cam.m[0][1] = -TERR_CAM_FRAME->m[0][1];
+            cam.m[0][2] = TERR_CAM_FRAME->m[0][2];
+            cam.m[1][0] = -TERR_CAM_FRAME->m[1][0];
+            cam.m[1][1] = TERR_CAM_FRAME->m[1][1];
+            cam.m[1][2] = -TERR_CAM_FRAME->m[1][2];
+            cam.m[2][0] = TERR_CAM_FRAME->m[2][0];
+            cam.m[2][1] = -TERR_CAM_FRAME->m[2][1];
+            cam.m[2][2] = TERR_CAM_FRAME->m[2][2];
+            cam.t[0] = TERR_CAM_FRAME->t[0];
+            cam.t[1] = -TERR_CAM_FRAME->t[1];
+            cam.t[2] = TERR_CAM_FRAME->t[2];
+            x.vx = cam.m[0][0];
+            x.vy = cam.m[1][0];
+            x.vz = cam.m[2][0];
+            y.vx = cam.m[0][1];
+            y.vy = cam.m[1][1];
+            y.vz = cam.m[2][1];
+            z.vx = cam.m[0][2];
+            z.vy = cam.m[1][2];
+            z.vz = cam.m[2][2];
+            x.vx = -x.vx;
+            x.vy = -x.vy;
+            x.vz = -x.vz;
+            z.vx = -z.vx;
+            z.vy = -z.vy;
+            z.vz = -z.vz;
+            TerrAxesToMatrix(&x, &y, &z, &face);
+            if (x.vy != 0) {
+                x.vy = 0;
+                GTEMath_VectorNormal(&x, &x);
+            }
+            y.vx = 0;
+            y.vy = 0x1000;
+            y.vz = 0;
+            z.vx = -x.vz;
+            z.vy = 0;
+            z.vz = x.vx;
+            TerrAxesToMatrix(&x, &y, &z, &upright);
+            for (; node != NULL; node = node->next) {
+                s32 owner = node->anim->owner;
+                Gobj *obj;
+
+                if (!(owner & 0x2000)) {
+                    continue;
+                }
+                obj = gameObjectsInfo[owner & 0x3FF].runtime;
+                if (obj->unk20[0] & 0x40) {
+                    SysPostMessage(0xA, 2, 0xFFFE, obj->id, 0, 0, 0, 0);
+                }
+                if (obj->unk20[0] & 8) {
+                    if (TERR_FRAME(obj)->node == NULL) {
+                        TERR_FRAME(obj)->m[0][0] = face.m[0][0];
+                        TERR_FRAME(obj)->m[0][1] = -face.m[0][1];
+                        TERR_FRAME(obj)->m[0][2] = face.m[0][2];
+                        TERR_FRAME(obj)->m[1][0] = -face.m[1][0];
+                        TERR_FRAME(obj)->m[1][1] = face.m[1][1];
+                        TERR_FRAME(obj)->m[1][2] = -face.m[1][2];
+                        TERR_FRAME(obj)->m[2][0] = face.m[2][0];
+                        TERR_FRAME(obj)->m[2][1] = -face.m[2][1];
+                        TERR_FRAME(obj)->m[2][2] = face.m[2][2];
+                    } else {
+                        EGSFrameSetRotationMatrix(TERR_FRAME(obj), 0, &face);
+                    }
+                } else if (obj->unk20[0] & 0x20) {
+                    if (TERR_FRAME(obj)->node == NULL) {
+                        TERR_FRAME(obj)->m[0][0] = upright.m[0][0];
+                        TERR_FRAME(obj)->m[0][1] = -upright.m[0][1];
+                        TERR_FRAME(obj)->m[0][2] = upright.m[0][2];
+                        TERR_FRAME(obj)->m[1][0] = -upright.m[1][0];
+                        TERR_FRAME(obj)->m[1][1] = upright.m[1][1];
+                        TERR_FRAME(obj)->m[1][2] = -upright.m[1][2];
+                        TERR_FRAME(obj)->m[2][0] = upright.m[2][0];
+                        TERR_FRAME(obj)->m[2][1] = -upright.m[2][1];
+                        TERR_FRAME(obj)->m[2][2] = upright.m[2][2];
+                    } else {
+                        EGSFrameSetRotationMatrix(TERR_FRAME(obj), 0, &upright);
+                    }
+                }
+            }
+        }
+    } else {
+        nbr++;
+        idx++;
+        goto nextNeighbor;
+    }
+    for (i = 0; i < gSHCount; i++) {
+        SHRequest *req = &gSHArray[i];
+        Gobj *obj = gameObjectsInfo[req->id].runtime;
+        void *objAnim = obj->anim;
+
+        if (req->activate && !ANIM_IN_DISPLAY(objAnim, display)) {
+            if (obj->id != gPlayerOffset && (obj->npcState != 2 || NPCActivationOK(obj->id))) {
+                if (obj->unk20[0] & 2) {
+                    SysPostMessage(6, 1, 0xFFFE, req->id, 0, 0, 0, 0);
+                }
+                EGSDisplayAddAnim(display, objAnim);
+                if (sniperCam != NULL && !ANIM_IN_DISPLAY(objAnim, sniperCam)) {
+                    EGSDisplayAddAnim(sniperCam, objAnim);
+                }
+            }
+        } else if (req->activate && sniperCam != NULL && !ANIM_IN_DISPLAY(objAnim, sniperCam)) {
+            EGSDisplayAddAnim(sniperCam, objAnim);
+        } else if (!req->activate && ANIM_IN_DISPLAY(objAnim, display)) {
+            if (obj->unk20[0] & 4) {
+                SysPostMessage(5, 4, 0xFFFE, req->id, 0, 0, 0, 0);
+            }
+            EGSDisplayDeleteAnim(display, objAnim);
+            if (sniperCam != NULL && ANIM_IN_DISPLAY(objAnim, sniperCam)) {
+                EGSDisplayDeleteAnim(sniperCam, objAnim);
+            }
+            if (obj->flags23 & 8) {
+                obj->flags23 = (obj->flags23 & ~8) | 2;
+            }
+        }
+    }
+    gSHCount = 0;
+    if (D_8010F9FC) {
+        StreamSynchronous();
+        D_8010F9FC = 0;
+    } else {
+        CheckStreamRequests(0);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/terrain", TerrainUpdateActivation);
+#endif
 
 void SHReq(s32 id, u8 activate) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
@@ -763,6 +1148,7 @@ void GSDeactivateGameObject(Gobj *gobj) {
 
 void DeactivateCurrentTerrain(void) {
     u8 *lev = gLevData->unk6C; /* the original indexes from 0x6C */
+    ActivationList *oldList;
     ActivationList *list;
     GameObjectRuntime *rt;
     s32 sector;
