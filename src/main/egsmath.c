@@ -689,17 +689,12 @@ int EGSMathINT_SolveLinear3VectorEquationForParameters(VECTOR *v, s32 *out)
     return EGSMathINT_Solve3LinearEquationsIn3Unknowns(m, out);
 }
 
-#ifdef NON_MATCHING
-/* original copies a to a2 and returns straight in v0; regalloc */
 s32 EGSMath_VectorIsEqual(VECTOR *a, VECTOR *b) {
-    if (a != NULL && b != NULL && a->vx == b->vx && a->vy == b->vy) {
-        return a->vz == b->vz;
+    if (a != NULL && b != NULL) {
+        if (a->vx == b->vx && a->vy == b->vy && a->vz == b->vz) return 1;
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsmath", EGSMath_VectorIsEqual);
-#endif
 
 /*
  * Recomputes frame->matrix from the parent chain and flags the children dirty.

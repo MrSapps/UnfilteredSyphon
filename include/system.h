@@ -218,7 +218,7 @@ void SYSGameInit(void);
 void ShadowInit(void);
 
 void EGSDebugInit(s32);
-void EGSMemInit(u32 top);
+u32 EGSMemInit(u32 top);
 s32 EGSDeviceGraphicsInit(s32 w, s32 h, s32);
 void EGSDeviceCounterInitSystemClock(void);
 void EGSDeviceCdInit(void);

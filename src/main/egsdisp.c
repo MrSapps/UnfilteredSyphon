@@ -2568,7 +2568,7 @@ void InitPointSources(void *anim) {
 }
 
 #ifdef NON_MATCHING
-/* frame loads: original reloads a->frame after the unk28 store (if) and does not CSE the two a2->frame loads (else); t[2] load scheduled before the sum clears */
+/* volatile casts reproduce the frame reloads (real cause unknown); t[2] load still after the sum clears (a block temp fixes it but swaps t/f regs) */
 void FinalizePointSources(void) {
     VECTOR v;
     EGSPointSource *ps;
@@ -2586,13 +2586,13 @@ void FinalizePointSources(void) {
             continue;
         }
         if (i == 1) {
-            a->unk28 = 0;
-            t = a->frame->matrix.t;
-            f = a->frame;
+            t = ((volatile EGSAnim *)a)->frame->matrix.t;
+            ((volatile EGSAnim *)a)->unk28 = 0;
+            f = ((volatile EGSAnim *)a)->frame;
         } else {
-            f = a2->frame;
-            a2->unk28 = 0;
-            t = a2->frame->matrix.t;
+            t = ((volatile EGSAnim *)a2)->frame->matrix.t;
+            f = ((volatile EGSAnim *)a2)->frame;
+            ((volatile EGSAnim *)a2)->unk28 = 0;
         }
         ps->frame = f;
         ps->color = 0;
@@ -3321,7 +3321,7 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 
 #ifdef NON_MATCHING
-/* dead ret=0 in s2 (loop-invariant hoist) now matches; only the 450 path still returns s2 instead of literal 0 and the init schedules earlier */
+/* dead ret=0 in s2 kept; original returns literal 0 on the count path too (ours copies s2) and schedules the s2 init after a1=0 */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
@@ -3331,12 +3331,12 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
     s32 count;
     s32 ret;
 
-    ret = 0;
     frame = anim->frame;
     acc.pos[0] = frame->matrix.t[0];
     acc.pos[1] = frame->matrix.t[1];
-    acc.count = acc.sum[0] = acc.sum[1] = acc.sum[2] = 0;
     acc.pos[2] = frame->matrix.t[2];
+    acc.count = acc.sum[0] = acc.sum[1] = acc.sum[2] = 0;
+    ret = 0;
     EGSFrameGetPosition(anim->frame, NULL, &p);
     for (; node != NULL; node = node->next) {
         ret = 0;
@@ -3351,10 +3351,10 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
         out->vx = acc.sum[0] / count * 16;
         out->vy = acc.sum[1] / count * 16;
         out->vz = acc.sum[2] / count * 16;
-        return 0;
+        return ret;
     }
     out->vx = out->vy = out->vz = 450;
-    return ret;
+    return 0;
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayCalculateHMDTerrainLighting);

@@ -12,10 +12,8 @@ extern u8 *gStaticChunk;        /* lowest usable address of the static heap */
 extern u8 *gStaticChunkCurrent; /* heap grows down from the top */
 extern u8 *gStaticChunkEnd;
 
-#ifdef NON_MATCHING
-/* GCC folds base + (top - base) back to top; the original keeps the
- * subu/addu pair. */
-void EGSMemInit(u32 top) {
+/* Returns the heap size (v0 is left holding it; the caller ignores it). */
+u32 EGSMemInit(u32 top) {
     u32 size;
 
     gEndOfMemory = (u8 *)top;
@@ -23,10 +21,8 @@ void EGSMemInit(u32 top) {
     gStaticChunk = D_80145BF0;
     gStaticChunkCurrent = D_80145BF0 + size;
     gStaticChunkEnd = D_80145BF0 + size;
+    return size;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsmem", EGSMemInit);
-#endif
 
 /* .sdata, in original order */
 u8 *gStaticChunk = NULL;
