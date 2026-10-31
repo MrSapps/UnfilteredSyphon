@@ -249,7 +249,7 @@ void func_80082E70(TextString *text, s32 x, s32 y) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc of width/room/arrow (a1/a0/a2 vs a2/a1/a3), (x - 6) + arrow reassociated, &line[1] not kept in s0 */
+/* regalloc of the frame/arrow temps (a1/a2 vs a2/a3); the original loads line[0].tag after the colour stores and keeps &line[1] in s0; endTick < -1 compares against a register */
 /*
  * Place marker string s (index-th marker) over the object it labels: project
  * the object (or the top of its model) to the screen, move the string there
@@ -372,7 +372,7 @@ void func_80082F20(TextString *s, s32 index) {
             line[0].xy0 = (u16)head.vx | (-head.vy << 16);
             line[0].xy1 = (x & 0xFFFF) | (-at.vy << 16);
             line[1].xy0 = ((x + arrow) & 0xFFFF) | (-at.vy << 16);
-            line[1].xy1 = ((x - 6 + arrow) & 0xFFFF) | (-at.vy << 16);
+            line[1].xy1 = ((x - (6 - arrow)) & 0xFFFF) | (-at.vy << 16);
             color = ((chars[0].b << 16) + (chars[0].g << 8) + chars[0].r) | 0x40000000;
             line[1].color = color;
             line[0].color = color;
@@ -1426,24 +1426,24 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: original spills str and keeps sum in s7; logic matches */
+/* scheduling only: the original stores s->serial after the (u8)sum << 8 / id load (3 insns differ) */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;
     TextChar *ch;
-    TextChar *last;
     s32 x;
     s32 y;
     s32 x0;
     s32 len;
     s32 i;
     s32 n;
-    u8 sum;
+    s32 sum;
+    s32 c;
 
     TEXT_GET_STRING(s, id & 0xFF);
     n = 0;
     sum = 0;
-    if (s == NULL || gSystemTick >= s->endTick) {
+    if (s == NULL || s->endTick <= gSystemTick) {
         return 0;
     }
     ch = s->chars;
@@ -1465,16 +1465,17 @@ u16 TextReplaceString(u16 id, char *str) {
                 y += ch->h;
                 break;
             default:
+                c = str[i];
                 ch->x = x;
                 ch->y = y;
-                if (str[i] == '%') {
+                if (c == '%') {
                     i++;
                     x += func_80086710(&str[i], ch);
                     if (str[i] == 'l' || str[i] == 'r' || str[i] == 's') {
                         i++;
                     }
                 } else {
-                    x += (u8)func_80086474(str[i], ch, s->flags >> 7);
+                    x += (u8)func_80086474(c, ch, s->flags >> 7);
                 }
                 n++;
                 ch++;
@@ -1487,27 +1488,27 @@ u16 TextReplaceString(u16 id, char *str) {
         ch++;
     }
     while (s->length < n) {
-        last = &s->chars[s->length];
-        if (last->unk28 == 0) {
-            last->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gTextCamera + 0x90), last);
+        ch = &s->chars[s->length];
+        if (ch->unk28 == 0) {
+            ch->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gTextCamera + 0x90), ch);
         }
-        last->y = y;
+        ch->y = y;
         if (s->length != 0) {
-            last->r = last[-1].r;
-            last->g = last[-1].g;
-            last->b = last[-1].b;
+            ch->r = ch[-1].r;
+            ch->g = ch[-1].g;
+            ch->b = ch[-1].b;
         } else {
-            last->r = s->r;
-            last->g = s->g;
-            last->b = s->b;
+            ch->r = s->r;
+            ch->g = s->g;
+            ch->b = s->b;
         }
-        last->scalex = 0x1000;
-        last->scaley = 0x1000;
+        ch->scalex = 0x1000;
+        ch->scaley = 0x1000;
         s->length++;
     }
     func_80082CE8(s);
     s->serial = sum;
-    return (sum << 8) | (id & 0xFF);
+    return ((u8)sum << 8) | (id & 0xFF);
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/text", TextReplaceString);
@@ -1532,9 +1533,8 @@ static void func_80085F24(TextString *s) {
 }
 
 /* Move a colour channel a quarter of the way to its target (at least one step). */
-#define TEXT_FADE(cur, target)                    \
-    d = ((target) - (cur)) / 4;                   \
-    if ((u8)d) {                                  \
+#define TEXT_FADE(cur, target, d)                 \
+    if (d) {                                      \
         cur += d;                                 \
     } else if ((cur) < (target)) {                \
         cur++;                                    \
@@ -1542,8 +1542,6 @@ static void func_80085F24(TextString *s) {
         cur--;                                    \
     }
 
-#ifdef NON_MATCHING
-/* regalloc: original keeps t in s0 and rematerialises shown after the click */
 /* Typewriter reveal; returns 1 while the string is still appearing. */
 s32 func_80085F98(TextString *s) {
     s32 t;
@@ -1552,22 +1550,26 @@ s32 func_80085F98(TextString *s) {
     s32 count;
     s32 i;
     s32 j;
-    s32 d;
+    u8 dr;
+    u8 dg;
+    u8 db;
     TextChar *ch;
 
-    t = gSystemTick - s->startTick;
+    t = gSystemTick;
+    t -= s->startTick;
     if (!(s->flags & 2)) {
         t = t * s->speed;
         t = (t >= 0) ? t >> 12 : -(-t >> 12);
     }
-    shown = s->length;
-    if (s->length >= t) {
-        shown = t;
+    if (s->length < t) {
+        shown = s->length;
+    } else {
         if (s->length != 0 && gSystemTick != D_8010FAAC &&
             ((s->flags & 4) || gSystemState == 7 || gSystemState == 4)) {
             D_8010FAAC = gSystemTick;
             SysPlaySong(1, 10, 0, 0);
         }
+        shown = t;
     }
     lead = s->speed >> 12;
     if (shown + lead >= 0 && shown < s->length) {
@@ -1578,17 +1580,21 @@ s32 func_80085F98(TextString *s) {
                 break;
             }
             if (j >= 0) {
-                s->chars[j].r = 0xFF;
-                s->chars[j].g = 0xFF;
-                s->chars[j].b = 0xFF;
+                ch = &s->chars[j];
+                ch->r = 0xFF;
+                ch->g = 0xFF;
+                ch->b = 0xFF;
             }
         }
     }
     ch = s->chars;
     for (i = 0; i < shown; i++, ch++) {
-        TEXT_FADE(ch->r, s->r)
-        TEXT_FADE(ch->g, s->g)
-        TEXT_FADE(ch->b, s->b)
+        dr = (s->r - ch->r) / 4;
+        dg = (s->g - ch->g) / 4;
+        db = (s->b - ch->b) / 4;
+        TEXT_FADE(ch->r, s->r, dr)
+        TEXT_FADE(ch->g, s->g, dg)
+        TEXT_FADE(ch->b, s->b, db)
     }
     ch--;
     /* the original compares b with g and g with b */
@@ -1597,15 +1603,8 @@ s32 func_80085F98(TextString *s) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_80085F98);
-#endif
 
-#ifdef NON_MATCHING
-/*
- * Move each character's colour 1/8 of the way (at least 1) towards the string's.
- * Same length; register allocation and scheduling of the three divisions differ.
- */
+/* Move each character's colour 1/8 of the way (at least 1) towards the string's. */
 static void func_800862B0(TextString *s) {
     TextChar *ch;
     s32 i;
@@ -1615,9 +1614,15 @@ static void func_800862B0(TextString *s) {
 
     ch = s->chars;
     for (i = 0; i < s->length; i++, ch++) {
-        dr = (s->r - ch->r) / 8;
-        dg = (s->g - ch->g) / 8;
-        db = (s->b - ch->b) / 8;
+        dr = s->r;
+        dr -= ch->r;
+        dr /= 8;
+        dg = s->g;
+        dg -= ch->g;
+        dg /= 8;
+        db = s->b;
+        db -= ch->b;
+        db /= 8;
         if (dr != 0) {
             ch->r += dr;
         } else if (ch->r < s->r) {
@@ -1641,9 +1646,6 @@ static void func_800862B0(TextString *s) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_800862B0);
-#endif
 
 static void func_800863E8(TextString *s) {
     s32 n;
@@ -1825,13 +1827,15 @@ INCLUDE_ASM("asm/main/nonmatchings/text", func_80086474);
 #define D_8001250D ((u8 *)D_80012504 + 9)
 #define D_80012519 ((u8 *)D_80012510 + 9)
 
-#ifdef NON_MATCHING
 /*
  * Set up ch for the escape code at str; returns its advance, 0 if unknown.
  * Same code except that the original keeps glyph in a1 (moving ch to a2 on entry).
  */
 static s32 func_80086710(u8 *str, TextChar *ch) {
     u8 *glyph;
+    u8 u;
+    u8 v;
+    u8 w;
 
     glyph = NULL;
     switch (str[0]) {
@@ -1879,18 +1883,18 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
             }
             break;
     }
-    if (glyph == NULL) {
-        return 0;
+    if (glyph != NULL) {
+        w = glyph[2];
+        u = glyph[0];
+        v = glyph[1];
+        ch->w = w;
+        ch->h = 8;
+        ch->u = u;
+        ch->v = v;
+        return w + 2;
     }
-    ch->w = glyph[2];
-    ch->h = 8;
-    ch->u = glyph[0];
-    ch->v = glyph[1];
-    return glyph[2] + 2;
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_80086710);
-#endif
 
 /* .sdata, the part the original reaches with lui: defined after its users */
 static u8 D_8010FA54[3] = { 0x10, 0x10, 0x02 }; /* : */

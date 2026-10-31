@@ -1246,14 +1246,59 @@ void func_8003C3F4(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* stack: the original's blend colour sits at sp+0x20 (frame 0x30); regalloc of the >>12 temp */
-void func_8003C4F8(s32 slot, s32 level) {
+/* Steps each channel of colour from toward to by at most 10. */
+static inline s32 iFadeColor(s32 from, s32 to) {
     IfaceColor cur;
     IfaceColor want;
-    IfaceColor mix;
-    IfacePoly24 *blip;
+    s32 c;
+
+    want.w = to;
+    cur.w = from;
+    for (c = 0; c < 3; c++) {
+        if (want.c[c] < cur.c[c]) {
+            want.c[c] = (want.c[c] < cur.c[c] - 10) ? cur.c[c] - 10 : want.c[c];
+        } else {
+            want.c[c] = (cur.c[c] + 10 < want.c[c]) ? cur.c[c] + 10 : want.c[c];
+        }
+    }
+    return want.w;
+}
+
+/* k/256 of colour a plus the rest of b, per channel. */
+static inline s32 iBlendColor(IfaceColor *a, IfaceColor *b, s32 k) {
+    u8 unused[8];
+    u8 mix[4];
     s32 i;
+
+    mix[3] = 0;
+    for (i = 0; i < 3; i++) {
+        mix[i] = (k * a->c[i] + (0x100 - k) * b->c[i]) >> 8;
+    }
+    return *(s32 *)mix;
+}
+
+/* Pulses between colour words from and to with the system tick. */
+static inline s32 iPulseColor(s32 from, s32 to) {
+    IfaceColor a;
+    IfaceColor b;
+    u8 mix[4];
+    s32 k;
+    s32 i;
+
+    a.w = from;
+    b.w = to;
+    k = (rcos(gSystemTick << 8) + 0x1000) >> 5;
+    mix[3] = 0;
+    for (i = 0; i < 3; i++) {
+        mix[i] = (k * a.c[i] + (0x100 - k) * b.c[i]) >> 8;
+    }
+    return *(s32 *)mix;
+}
+
+#ifdef NON_MATCHING
+/* stack slots: the fade's cur/want and the pulse's a/b both sit at sp+0x10/0x14 with mix at 0x20 in the original (here fade 0x10, pulse mix 0x18 a/b 0x20), and the fade compare's v1/a1 swap */
+void func_8003C4F8(s32 slot, s32 level) {
+    IfacePoly24 *blip;
     s32 k;
 
     D_80117C58[slot] = level;
@@ -1277,25 +1322,10 @@ void func_8003C4F8(s32 slot, s32 level) {
     } else {
         level = 0xFF;
     }
-    want.w = level;
-    cur.w = blip->color;
-    for (i = 0; i < 3; i++) {
-        if (cur.c[i] > want.c[i]) {
-            want.c[i] = (want.c[i] < cur.c[i] - 10) ? cur.c[i] - 10 : want.c[i];
-        } else {
-            want.c[i] = (cur.c[i] + 10 < want.c[i]) ? cur.c[i] + 10 : want.c[i];
-        }
-    }
-    blip->color = want.w | 0x28000000;
+    level = iFadeColor(blip->color, level);
+    blip->color = level | 0x28000000;
     if (gObjPlayer->target->targetId == D_80117B2C[slot] && gTargetModeFlag) {
-        cur.w = want.w;
-        want.w = 0x503028;
-        k = (rcos(gSystemTick << 8) + 0x1000) >> 5;
-        mix.c[3] = 0;
-        for (i = 0; i < 3; i++) {
-            mix.c[i] = (k * cur.c[i] + (0x100 - k) * want.c[i]) >> 8;
-        }
-        D_80117B14 = mix.w | 0x28000000;
+        D_80117B14 = iPulseColor(level, 0x503028) | 0x28000000;
     }
 }
 #else
@@ -1711,24 +1741,6 @@ static inline void iRadarScale(GOBJ_MATRIX *out) {
     *out = tmp;
 }
 
-/* Steps each channel of colour from toward to by at most 10. */
-static inline s32 iFadeColor(s32 from, s32 to) {
-    IfaceColor want;
-    IfaceColor cur;
-    s32 c;
-
-    cur.w = from;
-    want.w = to;
-    for (c = 0; c < 3; c++) {
-        if (want.c[c] < cur.c[c]) {
-            want.c[c] = (want.c[c] < cur.c[c] - 10) ? cur.c[c] - 10 : want.c[c];
-        } else {
-            want.c[c] = (cur.c[c] + 10 < want.c[c]) ? cur.c[c] + 10 : want.c[c];
-        }
-    }
-    return want.w;
-}
-
 static inline s32 iXYAdd(s32 xy, s32 d) {
     IfacePointW pt;
     IfacePointW delta;
@@ -1896,19 +1908,6 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003DF74);
 extern const u8 D_80011C10[];
 extern const s32 D_80011BD4, D_80011BD8, D_80011BDC; /* meter colours */
 extern char *gHealthMsg, *gArmorMsg, *gTargetMsg, *gDangerMsg;
-
-/* k/256 of colour a plus the rest of b, per channel. */
-static inline s32 iBlendColor(IfaceColor *a, IfaceColor *b, s32 k) {
-    u8 unused[8];
-    u8 mix[4];
-    s32 i;
-
-    mix[3] = 0;
-    for (i = 0; i < 3; i++) {
-        mix[i] = (k * a->c[i] + (0x100 - k) * b->c[i]) >> 8;
-    }
-    return *(s32 *)mix;
-}
 
 /* Moves a meter quad's left or right edge (xy[0]/xy[2] or xy[1]/xy[3]). */
 static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
@@ -2889,10 +2888,7 @@ u8 func_80040F08(u8 up, s32 *level) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* regalloc in the sprite block copies (the original keeps a copy of the sprite base in t2) */
 inline void iSetupDirectionSprites(s32 mode) {
-    IfaceSprite *spr;
     IfaceSprite *src;
     s32 i;
     s32 x;
@@ -2912,17 +2908,11 @@ inline void iSetupDirectionSprites(s32 mode) {
     }
     D_8010F8B8 = SpriteGetTemporary(5);
     src = SpriteGet(0x35);
-    spr = D_8010F8B8;
-    spr[4] = *src;
-    *spr = spr[4];
+    D_8010F8B8[0] = D_8010F8B8[4] = *src;
     src = SpriteGet(0x34);
-    spr = D_8010F8B8;
-    spr[3] = *src;
-    spr = D_8010F8B8;
-    spr[1] = spr[3];
+    D_8010F8B8[1] = D_8010F8B8[3] = *src;
     src = SpriteGet(0x33);
-    spr = D_8010F8B8;
-    spr[2] = *src;
+    D_8010F8B8[2] = *src;
     for (i = 0; i < 5; i++) {
         D_8010F8B8[i].unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &D_8010F8B8[i]);
         D_8010F8B8[i].x = x;
@@ -2932,9 +2922,6 @@ inline void iSetupDirectionSprites(s32 mode) {
         D_8010F8BC[i].y = y;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", iSetupDirectionSprites);
-#endif
 
 inline void iDestroyDirectionSprites(void) {
     s32 i;
