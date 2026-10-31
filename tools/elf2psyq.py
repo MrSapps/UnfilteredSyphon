@@ -154,25 +154,36 @@ def sext16(v):
 def convert(b, renames=None, keep_locals=False, stats=None, symrename=None, truncate=None,
             commons_as_xrefs=False):
     """ELF bytes -> OBJ bytes.  `symrename` {old: new} renames global symbols
-    (definitions and references).  `truncate` {ELF section: size} keeps only the
-    start of a section: relocations and symbols past the cut are dropped, and
-    globals defined there become external references.  `commons_as_xrefs` turns
+    (definitions and references).  `truncate` {ELF section: size or (start, end)}
+    keeps only that part of a section (a start > 0 only for bss): relocations and
+    symbols outside it are dropped, and globals defined there become external
+    references.  `commons_as_xrefs` turns
     common declarations into plain references (see docs/psyq_build.md)."""
     secs, syms, rels, gp0 = read_elf(b)
     renames = renames or {}
     symrename = symrename or {}
     for s in secs:
-        n = (truncate or {}).get(s.name)
-        if n is None or n >= s.size:
+        keep = (truncate or {}).get(s.name)
+        if keep is None:
             continue
-        s.size = n
-        s.data = s.data[:n] if s.type != SHT_NOBITS else b""
+        lo, hi = (0, keep) if isinstance(keep, int) else keep
+        hi = min(hi, s.size)
+        lo = min(lo, hi)
+        if (lo, hi) == (0, s.size):
+            continue
+        if lo and (s.type != SHT_NOBITS or s.index in rels):
+            raise ValueError("%s: can only drop the start of a bss section" % s.name)
+        s.size = hi - lo
+        s.data = s.data[lo:hi] if s.type != SHT_NOBITS else b""
         if s.index in rels:
-            rels[s.index] = [r for r in rels[s.index] if r[0] < n]
+            rels[s.index] = [r for r in rels[s.index] if r[0] < hi]
         for y in syms:
-            if y["shndx"] == s.index and y["value"] >= n and y["type"] != STT_SECTION:
-                y["shndx"] = SHN_UNDEF if y["bind"] != STB_LOCAL else SHN_ABS
-                y["value"] = 0
+            if y["shndx"] == s.index and y["type"] != STT_SECTION:
+                if lo <= y["value"] < hi or y["value"] == hi == lo:
+                    y["value"] -= lo
+                else:
+                    y["shndx"] = SHN_UNDEF if y["bind"] != STB_LOCAL else SHN_ABS
+                    y["value"] = 0
     for y in syms:
         if y["bind"] != STB_LOCAL and y["name"] in symrename:
             y["name"] = symrename[y["name"]]

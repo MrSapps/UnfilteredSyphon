@@ -61,7 +61,13 @@ The tools run under wine through `tools/psyq_wine.sh`. Set `PSYQ_WINEPREFIX` to 
   *first object that declares it*. Within one object, commons are laid out in
   symbol-table order:
   * Each common is aligned by its size: 1, 2, 4, and 8 for 8 bytes or more.
-  * A contribution that holds commons starts 8-aligned.
+  * A contribution that holds commons starts 8-aligned. Once a section has any commons
+    at all (main `.sbss`/`.bss` always do), *every* object's contribution to it starts
+    8-aligned. So in the original, no TU's `.sbss`/`.bss` can start at an address
+    ending in 4. A splat bss blob that does start at one is really the previous TU's
+    padding. `gen_psylink.py` drops those 4 bytes from the blob and turns any names
+    defined there into equates; it warns if a *C* object's bss starts unaligned.
+    That warning means the TU boundary in the yaml is wrong.
   * Some commons can fall after `__sbss_orgend`, as in the original.
 
   In the original, every common (game and library alike) sits after all `.sbss`/`.bss` in
@@ -99,13 +105,14 @@ The tools run under wine through `tools/psyq_wine.sh`. Set `PSYQ_WINEPREFIX` to 
   | `.sbss` | 0x80110228 | SNMAIN, right after egsanim |
   | `.bss`  | 0x80125278 | 0x29E0 bytes of library bss |
 
-  `gen_psylink.py` truncates the splat blobs that run past these addresses.
+  `gen_psylink.py` truncates the splat blobs that run past these addresses. It works
+  out the cuts from the modern build's map (`blob_cuts`), so newly migrated TUs need no
+  changes here.
 
 ## Known issues / remaining work
 
-* **Hog split.** The yaml splits the hogs 0x200 bytes off: the SPFX hog header is at file
-  offset 0x1689C0, and the map says INTRFACEHog is 0x281C0 bytes long.
-  `gen_psylink.py` re-splits them from the raw assets.
+* **Hog split (fixed).** The yaml used to split the hogs 0x200 bytes too early. SPFXHog
+  now starts at file offset 0x1689C0, as siphon.map says (INTRFACEHog is 0x281C0 bytes).
 * **Data blobs.**
   * chopper.data is 0xA4 bytes in the map, but the splat blob is 0xA8. The bytes still
     match, because chopper.bss holds commons and starts 8-aligned.

@@ -273,7 +273,7 @@ segments:
     vram: 0x80150000
     subsegments:
       - [0x140800, bin, INTRFACEHog]
-      - [0x1687C0, bin, SPFXHog]
-      - [0x1A723C, bin, tail_pad]
+      - [0x1689C0, bin, SPFXHog]   # siphon.map: INTRFACEHog is 0x281C0 bytes
+      - [0x1A743C, bin, tail_pad]   # cpe2exe pads the exe to 2 KB
 
   - [0x1A7800]

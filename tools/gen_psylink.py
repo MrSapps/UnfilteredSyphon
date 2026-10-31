@@ -49,7 +49,6 @@ AREAS = [["tcache", "menu", "movie"],
          ["levspec", "baseext", "cave", "chopper", "subway", "subway2", "park", "park2",
           "museum", "whouse", "title"],
          ["init"]]
-HOGS = [("INTRFACEHog", 0x281C0), ("SPFXHog", 0x3EA7C)]
 SECTIONS = [".rodata", ".text", ".data", ".sdata", ".sbss", ".bss"]
 SN = {".rodata": ".rdata"}
 
@@ -123,19 +122,32 @@ def lib_raw_modules(b):
 
 
 def blob_cuts():
-    """{ELF object: {section: keep size}} for main objects whose section runs into
-    the library data (from the modern build's map)."""
+    """{ELF object: {section: (keep start, keep end)}} for main objects that need cutting
+    (from the modern build's map):
+      * a section that runs into the library data is cut where that starts;
+      * in .sbss/.bss psylink starts every object's contribution 8-aligned (the
+        sections hold commons), so a splat bss blob that starts 4 bytes past an
+        8-byte boundary loses those 4 bytes - psylink's padding after the previous
+        object recreates them.  Names defined there become equates."""
     cuts = {}
     for l in open(os.path.join(ROOT, "build/scus_942.40.map")):
         m = re.match(r"\s(\.(?:data|sbss|bss))\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+(build/\S+)", l)
-        if not m or m.group(1) not in LIB_DATA:
+        if not m:
             continue
         sec, start, size, obj = m.group(1), int(m.group(2), 16) & 0xFFFFFFFF, int(m.group(3), 16), m.group(4)
-        cut = LIB_DATA[sec]
-        if size and start + size > cut:
-            if "/asm/main/lib_" in obj:
-                continue
-            cuts.setdefault(obj, {})[sec] = max(0, cut - start)
+        if not size or "/asm/main/lib_" in obj or "/assets/" in obj or not 0x80010000 <= start < 0x801377E0:
+            continue
+        lo, hi = 0, size
+        if sec in LIB_DATA and start + size > LIB_DATA[sec]:
+            hi = max(0, LIB_DATA[sec] - start)
+        if sec in (".sbss", ".bss") and start & 7:
+            if "/asm/" not in obj:
+                print("warning: %s %s starts at %08x, not 8-aligned; psylink will move it"
+                      % (obj, sec, start), file=sys.stderr)
+            else:
+                lo = min(hi, -start & 7)
+        if (lo, hi) != (0, size):
+            cuts.setdefault(obj, {})[sec] = (lo, hi)
     return cuts
 
 
@@ -297,8 +309,8 @@ def main():
     for mod, ld, _ in mods:
         order, info = module_objects(mod, ld)
         for o in order:
-            if "/assets/main/" in o and o.endswith("Hog.bin.o") or o.endswith("/tail_pad.bin.o"):
-                continue                       # built from the raw assets below
+            if o.endswith("/tail_pad.bin.o"):
+                continue                       # cpe2exe pads the exe to 2 KB itself
             if mod == "tcache":
                 continue
             if a.libs and ("/asm/main/lib_" in o or "/asm/main/data/lib_" in o):
@@ -415,17 +427,6 @@ def main():
                                 commons_as_xrefs=a.libs and mod == "main")
         open(absdst, "wb").write(data)
 
-    # The hogs: siphon.map's section sizes (the yaml split is 0x200 bytes off: the
-    # SPFX hog header is at file offset 0x1689C0).  cpe2exe pads the exe itself.
-    blob = b"".join(open(os.path.join(ROOT, "assets/main", f), "rb").read()
-                    for f in ("INTRFACEHog.bin", "SPFXHog.bin", "tail_pad.bin"))
-    pos = 0
-    for name, size in HOGS:
-        dst = os.path.join(a.out, "obj", "hogs", name + ".obj")
-        os.makedirs(os.path.dirname(os.path.join(ROOT, dst)), exist_ok=True)
-        open(os.path.join(ROOT, dst), "wb").write(elf2psyq.bin_obj([(name, blob[pos:pos + size])]))
-        plan.append(("main", None, dst, {}, {}))
-        pos += size
     # tcache.ovl: the overlay id word, then 0x97F8 bytes of bss at +8 (siphon.map).
     # The 4 bytes in between are uninitialised psylink padding in the original
     # (efefefe4), which a link here can't reproduce, so they are given as data in
