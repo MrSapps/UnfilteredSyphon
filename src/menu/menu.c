@@ -1128,7 +1128,7 @@ void func_80139710(void) {
 
 
 #ifdef NON_MATCHING
-/* gObjectives/0xFF swap v0/v1 and gMissionFailed store is scheduled early */
+/* gMissionFailed as a struct member fixes the store order; the D_8013F7C4 reload is not hoisted above the last three stores and gObjectives/0xFF swap v0/v1 */
 void func_80139738(void) {
     Gobj *player;
 
@@ -1139,7 +1139,7 @@ void func_80139738(void) {
         case 1:
         case 2:
             gObjectives->unk24 = gObjectives->completed = gObjectives->unk18 = gObjectives->unk1C = 0xFF;
-            gObjectives->unk20 = gObjectives->unk14 = gMissionFailed = 0;
+            gObjectives->unk20 = gObjectives->unk14 = ((struct { u8 v; } *)&gMissionFailed)->v = 0;
             if (D_8013F7C4 == 1 && LevelZoom(0) && gSysInfo.level == 13) {
                 func_801417AC();
             }

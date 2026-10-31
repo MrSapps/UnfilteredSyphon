@@ -1019,8 +1019,6 @@ static void func_80143220(s32 item) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: table entry loaded into s0 instead of v1 */
 static void func_8014335C(s32 item) {
     TitleMenuEntry *entry;
     TitleRect *rect;
@@ -1030,8 +1028,10 @@ static void func_8014335C(s32 item) {
     } else if (item >= D_801448DC[TITLE_MODE_SLOTS]) {
         item = 1;
     }
-    TextSetStringIntensity(*D_80144884[0].textIds, 0xA0, 0xC0, 0xF0);
-    TextSetStringIntensity(*D_80144884[mCurItem].textIds, 0x70, 0x70, 0x90);
+    entry = &D_80144884[0];
+    TextSetStringIntensity(*entry->textIds, 0xA0, 0xC0, 0xF0);
+    entry = &D_80144884[mCurItem];
+    TextSetStringIntensity(*entry->textIds, 0x70, 0x70, 0x90);
     entry = &mTitleMenuTable[mTitleMode][item];
     mCurItem = item;
     TextSetStringIntensity(*entry->textIds, 0xA0, 0xC0, 0xF0);
@@ -1042,9 +1042,6 @@ static void func_8014335C(s32 item) {
     rect->h += 4;
     func_80141CE0(rect->x, rect->y, rect->w, rect->h);
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", func_8014335C);
-#endif
 
 /* Main menu shown: title movie behind it. */
 static void func_801434B0(void) {

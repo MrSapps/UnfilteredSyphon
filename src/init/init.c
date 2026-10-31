@@ -1208,24 +1208,22 @@ void COMPUTERObjInit(InitRuntime *rt, s32 type) {
     UseObjectTeleportCameraSetup(rt);
 }
 
-#ifdef NON_MATCHING
-/* 3 insns short: the (s16)id sign extension is CSE'd around the loop (id<<16 kept in a register); the original keeps only the raw id and re-extends */
 /* Finds the camera an object is linked to through at most two pass-through objects. */
 static void func_801482D4(InitRuntime *rt) {
     GameObjectInfo *info = gameObjectsInfo;
     GameObjectRuntime *runtime;
-    s32 id;
+    s16 id;
     s32 type;
     s32 depth;
 
     rt->unk04 = -1;
     id = info[rt->id].refId;
     depth = 1;
-    while ((s16)id != -1) {
-        runtime = info[(s16)id].runtime;
-        type = (s16)id != GOBJ_ID_666 ? gameObjectsModelInfo[info[(s16)id].modelIndex].type : GOBJ_ID_666;
+    while (id != -1) {
+        runtime = info[id].runtime;
+        type = id != GOBJ_ID_666 ? gameObjectsModelInfo[info[id].modelIndex].type : GOBJ_ID_666;
         if (type == 0x22) {
-            rt->unk04 = (s16)id;
+            rt->unk04 = id;
             return;
         }
         if (runtime != NULL && type != 6 && type != 0x49 && type != 0x71 && type != 0x76 && type != 0x3E &&
@@ -1236,12 +1234,9 @@ static void func_801482D4(InitRuntime *rt) {
             return;
         }
         info = gameObjectsInfo;
-        id = info[(s16)id].refId;
+        id = info[id].refId;
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", func_801482D4);
-#endif
 
 #ifdef NON_MATCHING
 /* flags0 &0xD0 value is CSE'd into the clear branch instead of reloaded; 0x3E andi scheduled late */
