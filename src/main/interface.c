@@ -74,7 +74,14 @@ typedef union IfacePointW {
 typedef struct IfaceSprite {
     /* 0x00 */ u32 attribute;
     /* 0x04 */ s16 x, y;
-    /* 0x08 */ u8 unk08[0x1C];
+    /* 0x08 */ u16 w, h;
+    /* 0x0C */ u16 tpage;
+    /* 0x0E */ u8 u, v;
+    /* 0x10 */ s16 cx, cy;
+    /* 0x14 */ u8 r, g, b;
+    /* 0x18 */ s16 mx, my;
+    /* 0x1C */ s16 scalex, scaley;
+    /* 0x20 */ s32 rotate;
     /* 0x24 */ s32 unk24;
     /* 0x28 */ s32 unk28;
 } IfaceSprite;
@@ -548,7 +555,215 @@ INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011C18);
 
 INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D10);
 
+/* The status meter quads (armor, health, target, danger), flat-shaded. */
+typedef struct IfaceMeter {
+    /* 0x00 */ s32 link;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ u32 tag;
+    /* 0x0C */ IfaceColor color;
+    /* 0x10 */ IfacePoint xy[4];
+    /* 0x20 */ s32 unk20;
+} IfaceMeter;
+
+extern IfaceMeter D_801175CC[4];
+
+static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
+    pt->p.vx += d->p.vx;
+    pt->p.vy += d->p.vy;
+}
+
+/* Offsets a packed screen point to the radar centre. */
+static inline s32 iRadarXY(s32 xy) {
+    IfacePointW pt;
+    IfacePointW center;
+
+    center.w = 0x50FF67;
+    pt.w = xy;
+    iPointAdd(&pt, &center);
+    {
+        u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
+    }
+    return pt.w;
+}
+
+#ifdef NON_MATCHING
+/* loop induction variables and the frame (0x88 vs 0x90) differ throughout */
+INCLUDE_PART1("asm/main/nonmatchings/interface", InterfaceSetup)
+
+extern const VECTOR32 D_80011D2C;
+extern char D_8010F874[], D_8010F8D0[];
+extern u8 D_8010F8C8[];
+extern IfaceSprite D_801174E8;          /* radar background sprite */
+extern char D_80117FFC[];               /* rounds text sprites */
+extern char D_8011765C[], D_80117764[], D_8011786C[]; /* meter caption buffers */
+extern IfacePoly24 D_8011896C[2];       /* POLY_F3 */
+extern const IfacePoint D_80011BE0[];   /* meter origins */
+extern const s32 D_80011BD0[];          /* meter colours */
+void EGSDeviceGraphicsGetResolution(u16 *w, u16 *h);
+void EGSCameraCreate(s32 arg0, VECTOR32 *pos, s32 arg2, void *arg3, s32 arg4, s32 arg5, s32 arg6, void **out);
+void EGSDisplayAddSprite(void *window, IfaceSprite *sprite);
+void EGSDisplayBuildPoly3F(void *prim, s32 color, s32 xy0, s32 xy1, s32 xy2);
+void EGSDisplayBuildPoly3G(void *prim, s32 c0, s32 xy0, s32 xy1, s32 xy2, s32 c1, s32 c2);
+void EGSDisplayBuildPoly4G(void *prim, s32 c0, s32 xy0, s32 xy1, s32 xy2, s32 xy3, s32 c1, s32 c2, s32 c3);
+void LoadImage(IfaceRect *rect, void *pixels);
+void SniperInit(void);
+void SpriteInitTemporary(void);
+void SpriteSuperSetXY(IfaceSprite *sprites, s32 count, s32 x, s32 y);
+void TextSpriteInitialize(void *buf, s32 count);
+s32 InterfaceSetMode(s32 mode);
+void InterfaceSetRadarWorldRadius(s32 radius);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
+
+#define OFFSCREEN 0x04000400
+
+void InterfaceSetup(void) {
+    VECTOR32 pos;
+    u16 w;
+    u16 h;
+    s32 i;
+    s32 j;
+    IfaceSprite *spr;
+    s32 n;
+
+    pos = D_80011D2C;
+    D_8010F88C = 0;
+    D_80117490.vx = 0;
+    D_80117490.vy = 0;
+    D_80117490.vz = 0;
+    EGSDeviceGraphicsGetResolution(&w, &h);
+    EGSCameraCreate(0, &pos, 1, D_8010F8C8, 3, 3, 0x12C, &gInterfaceWindow);
+    ((u16 *)gInterfaceWindow)[3] |= 1;
+    for (i = 1; i < 23; i++) {
+        spr = SpriteGet(D_80011BA0[i].first);
+        n = D_80011BA0[i].count;
+        SpriteSuperSetXY(spr, n, 400, 400);
+        SpriteCreateMulti(&D_80117514[i], n, spr);
+        for (j = 0; j < n; j++) {
+            spr[j].unk24 = 0;
+            spr[j].unk28 = 0;
+        }
+    }
+    D_801174E8 = *SpriteGet(0);
+    D_801174E8.unk24 = 7;
+    EGSTextureSetSpriteTransparency(&D_801174E8, 1);
+    EGSDisplayAddSprite(gInterfaceWindow, &D_801174E8);
+    D_801174E8.h = 1;
+    D_801174E8.w = 1;
+
+    for (i = 0; i < 2; i++) {
+        EGSDisplayBuildPoly4F(&D_80117C70[i], 0x503028, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
+        D_80117C70[i].unk04 = 3;
+        SET_SEMI_TRANS(&D_80117C70[i].tag);
+        D_80117C70[i].link = 0;
+    }
+    EGSDisplayBuildPoly3G(&D_80117D00, 0, 0x50FF67, OFFSCREEN, OFFSCREEN, 0x503028, 0x503028);
+    D_80117D00.unk04 = 4;
+    D_80117D00.link = 0;
+    SET_SEMI_TRANS(&D_80117D00.tag);
+    for (i = 0; i < 5; i++) {
+        EGSDisplayBuildLineF(&D_80117D24[i], 0xE77E6B, OFFSCREEN, OFFSCREEN);
+        D_80117D24[i].unk04 = 2;
+        SET_SEMI_TRANS(&D_80117D24[i].tag);
+        D_80117D24[i].link = 0;
+    }
+    for (i = 0; i < 2; i++) {
+        EGSDisplayBuildPoly4F(&D_80117CB8[i], 0xE77E6B, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
+        D_80117CB8[i].link = 0;
+        SET_SEMI_TRANS(&D_80117CB8[i].tag);
+    }
+    for (i = 0; i < 4; i++) {
+        EGSDisplayBuildLineF(&D_80117D9C[i], 0xE77E6B, OFFSCREEN, OFFSCREEN);
+        D_80117D9C[i].unk04 = 2;
+        SET_SEMI_TRANS(&D_80117D9C[i].tag);
+        D_80117D9C[i].link = 0;
+    }
+    for (i = 0; i < 6; i++) {
+        EGSDisplayBuildPoly4F(&D_80117A30[i], 0, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
+        D_80117A30[i].link = 0;
+        D_80117B2C[i] = -1;
+        EGSDisplayBuildPoly4G(&D_80117B38[i], 0x400040, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF);
+        D_80117B38[i].unk04 = 3;
+        SET_SEMI_TRANS(&D_80117B38[i].tag);
+        D_80117C58[i] = 0;
+    }
+    EGSDisplayBuildPoly4F(&D_80117B08, 0xFFFFFF, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
+    D_80117B08.unk04 = 1;
+    D_80117B08.link = 0;
+    EGSDisplayBuildPoly3G(&D_801174A0, 0xFEC4C4, iRadarXY(0), 0, 0, 0x75583E, 0x75583E);
+    D_801174A0.link = 0;
+    EGSDisplayBuildPoly3G(&D_801174C4, 0xFEC4C4, 0, 0, 0, 0x75583E, 0x75583E);
+    D_801174C4.link = 0;
+    D_8010FFEC = 0;
+    SniperInit();
+    SpriteInitTemporary();
+    D_80110008 = 0x7FFFFFFF;
+    D_8011000C = 0x7FFFFFFF;
+    D_80110000 = 0;
+    TextSpriteInitialize(D_80117FFC, 6);
+    D_8010F890 = TextAddPersistentString(D_8010F8D0, D_80117FFC, 400, 400);
+    D_8010F890 = TextReplaceString(D_8010F890, D_8010F874);
+    TextSetStringIntensity(D_8010F890, 0xD0, 0xD0, 0xD0);
+    D_8010F892 = 0xFFFF;
+    TextSpriteInitialize(D_80118104, 8);
+    TextSpriteInitialize(D_8011765C, 0x13);
+    D_8010F880 = 0xFFFF;
+    D_8010F882 = 0xFFFF;
+    D_8010F884 = 0xFFFF;
+    for (i = 0; i < 4; i++) {
+        s32 top = (u16)D_80011BE0[i].vx | (D_80011BE0[i].vy << 16);
+        s32 bottom = (u16)D_80011BE0[i].vx | ((D_80011BE0[i].vy + 4) << 16);
+
+        EGSDisplayBuildPoly4F(&D_801175CC[i], D_80011BD0[i], top, top, bottom, bottom);
+        D_801175CC[i].color.c[3] |= 2;
+        D_801175CC[i].unk04 = 1;
+        D_801175CC[i].link = 0;
+        EGSDisplayAddPoly(gInterfaceWindow, &D_801175CC[i]);
+        if (i > 0) {
+            for (j = 0; j < 2; j++) {
+                IfaceLine *line = &D_801179A0[(i - 1) * 2 + j];
+
+                EGSDisplayBuildLineF(line, 0xE77E6B, OFFSCREEN, OFFSCREEN);
+                D_801179A0[i].link = 0;
+                EGSDisplayAddPoly(gInterfaceWindow, line);
+                SET_SEMI_TRANS(&line->tag);
+                line->unk04 = 0;
+            }
+        }
+    }
+    for (i = 0; i < 36; i++) {
+        EGSDisplayBuildLineF(&D_80118264[i], 0x106010, OFFSCREEN, OFFSCREEN);
+        SET_SEMI_TRANS(&D_80118264[i].tag);
+    }
+    for (i = 0; i < 26; i++) {
+        EGSDisplayBuildPoly4F(&((IfacePoly4 *)&D_801185C4)[i], 0x40FF40, 0, 0, 0, 0);
+    }
+    for (i = 0; i < 2; i++) {
+        EGSDisplayBuildPoly3F(&((u8 *)D_8011896C)[i * 0x1C], 0x106010, 0, 0, 0);
+    }
+    for (i = 0x2D; i < 0x3B; i++) {
+        spr = SpriteGet(i);
+        EGSTextureSetSpriteTransparency(SpriteGet(i), 1);
+        spr->b = 0x40;
+        spr->g = 0x40;
+        spr->r = 0x40;
+        spr->unk28 = 0;
+    }
+    D_8010F8B8 = NULL;
+    D_8010F8BC = SpriteGet(0x33);
+    InterfaceSetMode(0);
+    D_80110020 = 1;
+    for (i = 7; i >= 0; i--) {
+        D_80105F30[i - 1] = -1;
+    }
+    D_8010F8C0 = -5;
+    InterfaceSetAddLevelSpecificNPCCallback(NULL);
+    InterfaceSetRadarWorldRadius(0x3C);
+    SysPostMessage(0xE, 4, -2, -2, 0, 0, 0, 0);
+    LoadImage(&D_8010FFF8, D_80117DFC);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceSetup);
+#endif
 
 void func_8003C3F4(void) {
     s32 phase = (u32)gSystemTick % 6;
@@ -628,24 +843,6 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003C4F8);
 
 INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D3C);
 
-static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
-    pt->p.vx += d->p.vx;
-    pt->p.vy += d->p.vy;
-}
-
-/* Offsets a packed screen point to the radar centre. */
-static inline s32 iRadarXY(s32 xy) {
-    IfacePointW pt;
-    IfacePointW center;
-
-    center.w = 0x50FF67;
-    pt.w = xy;
-    iPointAdd(&pt, &center);
-    {
-        u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
-    }
-    return pt.w;
-}
 
 int rsin(int a);
 
@@ -1014,7 +1211,185 @@ void InterfaceAddNPC(s32 id) {
     }
 }
 
+/* Radar scale matrix pieces. */
+typedef struct IfaceSV3 {
+    s16 vx, vy, vz;
+} IfaceSV3;
+
+typedef struct IfaceRows {
+    IfaceSV3 r[3];
+} IfaceRows;
+
+typedef struct IfaceT3 {
+    s32 t[3];
+} IfaceT3;
+
+extern IfaceSV3 D_8010F8D8;            /* radar scale matrix, last row */
+extern const IfaceT3 D_80011D3C;
+extern u8 copKilledByPCFlag;
+void MatrixNormal_0(GOBJ_MATRIX *in, GOBJ_MATRIX *out);
+GOBJ_MATRIX *TransposeMatrix(GOBJ_MATRIX *m0, GOBJ_MATRIX *m1);
+GOBJ_MATRIX *MulMatrix0(GOBJ_MATRIX *m0, GOBJ_MATRIX *m1, GOBJ_MATRIX *m2);
+void func_8003E894(GOBJ_MATRIX *m);
+extern s32 D_80110004; /* danger, 0x1000 = none */
+void func_8003C3F4(void);
+
+/* The radar's scale matrix (x by D_8010FFF0, z by D_8010FFF4). */
+static inline void iRadarScale(GOBJ_MATRIX *out) {
+    GOBJ_MATRIX tmp;
+    IfaceRows rows;
+    IfaceSV3 r0;
+    IfaceSV3 r1;
+
+    r0.vy = 0;
+    r0.vz = 0;
+    r0.vx = D_8010FFF0;
+    rows.r[0] = r0;
+    r1.vx = 0;
+    r1.vy = 0;
+    r1.vz = D_8010FFF4;
+    rows.r[1] = r1;
+    rows.r[2] = D_8010F8D8;
+    *(IfaceRows *)tmp.m = rows;
+    *(IfaceT3 *)tmp.t = D_80011D3C;
+    *out = tmp;
+}
+
+/* Steps each channel of colour from toward to by at most 10. */
+static inline s32 iFadeColor(s32 from, s32 to) {
+    IfaceColor want;
+    IfaceColor cur;
+    s32 c;
+
+    cur.w = from;
+    want.w = to;
+    for (c = 0; c < 3; c++) {
+        if (want.c[c] < cur.c[c]) {
+            want.c[c] = (want.c[c] < cur.c[c] - 10) ? cur.c[c] - 10 : want.c[c];
+        } else {
+            want.c[c] = (cur.c[c] + 10 < want.c[c]) ? cur.c[c] + 10 : want.c[c];
+        }
+    }
+    return want.w;
+}
+
+static inline s32 iXYAdd(s32 xy, s32 d) {
+    IfacePointW pt;
+    IfacePointW delta;
+
+    delta.w = d;
+    pt.w = xy;
+    iPointAdd(&pt, &delta);
+    return pt.w;
+}
+
+#ifdef NON_MATCHING
+/* loop: the box/colour addresses get hoisted into s4-s6; a self-copy of m.t before func_8003E894 is missing */
+/* Radar update: NPC boxes and blips (with the danger level they add), the target box and
+ * the bomb pointer, all in the player's frame scaled to the radar. */
+void func_8003D76C(void) {
+    VECTOR32 pos;
+    GOBJ_MATRIX m;
+    GOBJ_MATRIX scale;
+    IfacePoly4 *box;
+    s32 i;
+    s32 id;
+    s32 type;
+    s32 level;
+    Gobj *obj;
+
+    iRadarScale(&scale);
+    m.m[0][0] = (*(EGSFrame **)*gCamera)->m[0][0];
+    m.m[0][1] = -(*(EGSFrame **)*gCamera)->m[0][1];
+    m.m[0][2] = (*(EGSFrame **)*gCamera)->m[0][2];
+    m.m[1][0] = -(*(EGSFrame **)*gCamera)->m[1][0];
+    m.m[1][1] = (*(EGSFrame **)*gCamera)->m[1][1];
+    m.m[1][2] = -(*(EGSFrame **)*gCamera)->m[1][2];
+    m.m[2][0] = (*(EGSFrame **)*gCamera)->m[2][0];
+    m.m[2][1] = -(*(EGSFrame **)*gCamera)->m[2][1];
+    m.m[2][2] = (*(EGSFrame **)*gCamera)->m[2][2];
+    m.t[0] = (*(EGSFrame **)*gCamera)->pos.vx;
+    m.t[1] = -(*(EGSFrame **)*gCamera)->pos.vy;
+    m.t[2] = (*(EGSFrame **)*gCamera)->pos.vz;
+    /* keep only the heading */
+    m.m[2][1] = 0;
+    m.m[1][2] = 0;
+    m.m[1][0] = 0;
+    m.m[0][1] = 0;
+    m.m[1][1] = 0x1000;
+    MatrixNormal_0(&m, &m);
+    TransposeMatrix(&m, &m);
+    func_8003E894(&m);
+    MulMatrix0(&scale, &m, &m);
+    for (i = 0, box = D_80117A30; i < 6; i++, box++) {
+        id = D_80117B2C[i];
+        if (id == -1) {
+            if (box->link != 0) {
+                if (box->color.word != 0x28503028) {
+                    box->color.word = iFadeColor(box->color.word, 0x503028) | 0x28000000;
+                } else {
+                    EGSDisplayDeletePoly(gInterfaceWindow, box);
+                }
+            }
+            continue;
+        }
+        obj = gameObjectsInfo[id].runtime;
+        type = GOBJ_TYPE(id);
+        if ((type == 0x35 && !copKilledByPCFlag) || type == 0x4C || type == 0x5C || type == 0x65) {
+            level = -1;
+        } else {
+            level = obj->target->threat;
+            if ((u32)level > 0x1000) {
+                level = (level > 0x1000) << 12;
+            }
+            if (obj->target->targetId != gPlayerOffset) {
+                level = 0;
+            }
+        }
+        pos.vx = obj->move->pos.vx - gObjPlayer->move->pos.vx;
+        pos.vy = obj->move->pos.vy - gObjPlayer->move->pos.vy;
+        pos.vz = obj->move->pos.vz - gObjPlayer->move->pos.vz;
+        ApplyMatrixLV(&m, &pos, &pos);
+        func_8003C724(i, &pos);
+        if (type == 0x35) {
+            func_8003C4F8(i, -1);
+            D_80117C58[i] = level;
+        } else {
+            func_8003C4F8(i, level);
+        }
+        D_80110004 = EGSMathFIXMul(D_80110004, 0x1000 - level);
+        if (box->link == 0) {
+            EGSDisplayAddPoly(gInterfaceWindow, box);
+            box->color.word = 0x28FFFFFF;
+            box->xy[0] = iXYAdd(box->xy[0], XY(-2, -2));
+            box->xy[1] = iXYAdd(box->xy[1], XY(2, -2));
+            box->xy[2] = iXYAdd(box->xy[2], XY(-2, 2));
+            box->xy[3] = iXYAdd(box->xy[3], XY(2, 2));
+        }
+    }
+    if (gTargetModeFlag && gObjPlayer->target->targetId >= 0) {
+        if (D_80117B08.link == 0) {
+            EGSDisplayAddPoly(gInterfaceWindow, &D_80117B08);
+        }
+    } else if (D_80117B08.link != 0) {
+        EGSDisplayDeletePoly(gInterfaceWindow, &D_80117B08);
+    }
+    if (D_8010F88C != 0) {
+        if (mBombPosition.vx != 0 || mBombPosition.vy != 0 || mBombPosition.vz != 0) {
+            pos.vx = mBombPosition.vx - gObjPlayer->move->pos.vx;
+            pos.vy = mBombPosition.vy - gObjPlayer->move->pos.vy;
+            pos.vz = mBombPosition.vz - gObjPlayer->move->pos.vz;
+            ApplyMatrixLV(&m, &pos, &pos);
+            func_8003D53C(&pos);
+        } else {
+            func_8003D53C(NULL);
+        }
+    }
+    func_8003C3F4();
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003D76C);
+#endif
 
 #ifdef NON_MATCHING
 /* delay-slot/regalloc: the hide constant lands in the first branch's delay slot in the original */
@@ -1062,7 +1437,193 @@ s32 func_8003DF74(s32 idx, u8 grow) {
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003DF74);
 #endif
 
+extern const u8 D_80011C10[];
+extern const s32 D_80011BD4, D_80011BD8, D_80011BDC; /* meter colours */
+extern char *gHealthMsg, *gArmorMsg, *gTargetMsg, *gDangerMsg;
+
+/* k/256 of colour a plus the rest of b, per channel. */
+static inline s32 iBlendColor(IfaceColor *a, IfaceColor *b, s32 k) {
+    u8 unused[8];
+    u8 mix[4];
+    s32 i;
+
+    mix[3] = 0;
+    for (i = 0; i < 3; i++) {
+        mix[i] = (k * a->c[i] + (0x100 - k) * b->c[i]) >> 8;
+    }
+    return *(s32 *)mix;
+}
+
+/* Moves a meter quad's left or right edge (xy[0]/xy[2] or xy[1]/xy[3]). */
+static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
+    xy[0].vx = top;
+    xy[2].vx = bottom;
+}
+
+#define MAX(a, b) ((a) < (b) ? (b) : (a))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+/* cur moved toward want by at most 5 */
+#define IFACE_STEP(n, want, cur) \
+    n = MAX(want, (cur) - 5);     \
+    n = MIN(n, (cur) + 5)
+
+#ifdef NON_MATCHING
+/* regalloc: health lands in s0 not s1; 6 insns longer overall */
+/* Status meters: armor/health, target health and danger, each with its caption. The bars
+ * move at most 5 pixels a frame toward their value; an empty armor bar or a full danger
+ * bar pulses. */
+void func_8003E13C(void) {
+    IfaceColor from;
+    IfaceColor to;
+    char *msg;
+    s32 health;
+    s32 armor;
+    s32 armorShown;
+    s32 healthShown;
+    s32 k;
+    s32 level;
+    s32 shown;
+    u16 str;
+
+    msg = NULL;
+    if (D_80011C10[D_8010F8AC] == 0) {
+        GameObjectHealth *h = gObjPlayer->healthInfo;
+
+        armor = h->armor;
+        armor /= 12;
+        health = h->health;
+        health /= 3;
+        if (armor == 0) {
+            from.w = 0xFF;
+            to.w = 0;
+            k = iBlendColor(&from, &to, (rcos(gSystemTick << 8) + 0x1000) >> 5);
+            msg = gHealthMsg;
+            D_801175CC[1].color.w = k | 0x28000000;
+        } else {
+            D_801175CC[1].color.w = D_80011BD4 | 0x28000000;
+            msg = gArmorMsg;
+            D_801175CC[1].color.c[3] |= 2;
+        }
+    } else {
+        health = 0;
+        armor = 0;
+    }
+    armorShown = D_801175CC[0].xy[1].vx - D_801175CC[0].xy[0].vx;
+    healthShown = D_801175CC[1].xy[1].vx - D_801175CC[0].xy[0].vx;
+    if (msg != NULL) {
+        str = D_8010F880;
+        if (str != 0xFFFF) {
+            if (armorShown > 0 && armor == 0) {
+                D_8010F880 = TextReplaceString(str, msg);
+            } else if (armorShown == 0 && armor > 0) {
+                D_8010F880 = TextReplaceString(D_8010F880, msg);
+            }
+        } else if (health > 0) {
+            D_8010F880 = TextAddPersistentString(msg, D_8011765C, -0xAC, -0x66);
+            if (D_8010F880 != str) {
+                TextSetStringIntensity(D_8010F880, D_8010F8B0, D_8010F8B1, D_8010F8B2);
+            }
+        }
+    } else if (D_8010F880 != 0xFFFF) {
+        TextRemoveString(D_8010F880);
+        D_8010F880 = 0xFFFF;
+    }
+    func_8003DF74(0, health > 0);
+    if (armor != armorShown) {
+        s32 n;
+        s32 top;
+        s32 bottom;
+
+        IFACE_STEP(n, armor, armorShown);
+        top = D_801175CC[0].xy[0].vx + n;
+        bottom = D_801175CC[0].xy[2].vx + n;
+        iMeterEdge(&D_801175CC[1].xy[0], top, bottom);
+        iMeterEdge(&D_801175CC[0].xy[1], top, bottom);
+        health = MAX(health, n);
+    } else {
+        health = MAX(health, armor);
+    }
+    if (health != healthShown) {
+        IFACE_STEP(health, health, healthShown);
+        iMeterEdge(&D_801175CC[1].xy[1], D_801175CC[0].xy[0].vx + health, D_801175CC[0].xy[2].vx + health);
+    }
+
+    level = -1;
+    if (D_80011C10[D_8010F8AC] == 0) {
+        TargetInfo *target = gObjPlayer->target;
+
+        if (target->targetId >= 0 && gTargetModeFlag) {
+            level = target->unk58;
+            if (level > 100) {
+                level = 100;
+            }
+            level /= 2;
+        }
+    }
+    str = D_8010F882;
+    D_801175CC[2].color.w = D_80011BD8 | 0x28000000;
+    D_801175CC[2].color.c[3] |= 2;
+    shown = D_801175CC[2].xy[1].vx - D_801175CC[2].xy[0].vx;
+    if (str == 0xFFFF) {
+        if (level >= 0) {
+            D_8010F882 = TextAddPersistentString(gTargetMsg, D_80117764, -0xAC, -0x48);
+            if (D_8010F882 != str) {
+                TextSetStringIntensity(D_8010F882, D_8010F8B0, D_8010F8B1, D_8010F8B2);
+            }
+        }
+    } else if (level < 0) {
+        TextRemoveString(str);
+        D_8010F882 = 0xFFFF;
+    }
+    func_8003DF74(1, level != -1);
+    if (level < 0) {
+        level = 0;
+    }
+    if (level != shown) {
+        IFACE_STEP(level, level, shown);
+        iMeterEdge(&D_801175CC[2].xy[1], D_801175CC[2].xy[0].vx + level, D_801175CC[2].xy[2].vx + level);
+    }
+
+    level = 0;
+    if (D_80011C10[D_8010F8AC] == 0) {
+        level = 50 - FIX12(D_80110004 * 50);
+        if (level < 3) {
+            level = 0;
+        } else if (level > 50) {
+            level = 50;
+        }
+    }
+    if (level >= 49) {
+        from.w = 0;
+        to.w = 0xFF;
+        D_801175CC[3].color.w = iBlendColor(&from, &to, (rcos(gSystemTick << 8) + 0x1000) >> 5) | 0x28000000;
+    } else {
+        D_801175CC[3].color.w = D_80011BDC | 0x28000000;
+        D_801175CC[3].color.c[3] |= 2;
+    }
+    str = D_8010F884;
+    shown = D_801175CC[3].xy[1].vx - D_801175CC[3].xy[0].vx;
+    if (str == 0xFFFF) {
+        if (level > 0) {
+            D_8010F884 = TextAddPersistentString(gDangerMsg, D_8011786C, -0xAC, -0x57);
+            if (D_8010F884 != str) {
+                TextSetStringIntensity(D_8010F884, D_8010F8B0, D_8010F8B1, D_8010F8B2);
+            }
+        }
+    } else if (level == 0) {
+        TextRemoveString(str);
+        D_8010F884 = 0xFFFF;
+    }
+    func_8003DF74(2, level);
+    if (level != shown) {
+        IFACE_STEP(level, level, shown);
+        iMeterEdge(&D_801175CC[3].xy[1], D_801175CC[3].xy[0].vx + level, D_801175CC[3].xy[2].vx + level);
+    }
+    D_80110004 = 0x1000;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003E13C);
+#endif
 
 /* Radar: the player's arrow (rotated into view space by m) and the compass letters. */
 void func_8003E894(GOBJ_MATRIX *m) {
@@ -2103,7 +2664,6 @@ void TextRemoveWindow(u8 window);
 void EGSDisplayInfraredOn(void *camera, s32 mode);
 void EGSDisplayInfraredOff(void *camera, s32 mode);
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 static inline s32 iMax(s32 a, s32 b) {
     return a < b ? b : a;

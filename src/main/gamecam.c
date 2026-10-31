@@ -92,9 +92,7 @@ typedef struct GameCamState {
     /* 0x0A0 */ s8 scrimOn;    /* -1: no scrim */
     /* 0x0A4 */ EGSListNode *shakeList;
     /* 0x0A8 */ GameCamShake shakes[5];
-    /* 0x1FC */ u8 unk1FC;
-    /* 0x1FD */ u8 unk1FD;
-    /* 0x1FE */ u8 unk1FE;
+    /* 0x1FC */ s8 shakeSign[3]; /* +-1 per axis, flipped every frame */
     /* 0x200 */ s32 transitionTime;
     /* 0x204 */ EGSListNode *slotList;
     /* 0x208 */ GameCamSlot slots[4];
@@ -211,9 +209,17 @@ typedef struct GameCamPlane {
     /* 0x00 */ s32 count;    /* vertices */
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ GameCamSVec *normal;
-    /* 0x0C */ u8 unk0C[8];
+    /* 0x0C */ u8 unk0C[6];
+    /* 0x12 */ u16 flags; /* bits 4-13: gameObjectsInfo index + 1, 0 for none */
     /* 0x14 */ GameCamSVec *verts[5];
 } GameCamPlane;
+
+/* Collision face list node (D_80128990, GameObjectAnim.faceList). */
+typedef struct GameCamFace {
+    /* 0x00 */ u8 unk00[4];
+    /* 0x04 */ struct GameCamFace *next;
+    /* 0x08 */ GameCamPlane plane;
+} GameCamFace;
 
 typedef struct GameCamTrack {
     /* 0x00 */ VECTOR32 pos;
@@ -251,7 +257,8 @@ typedef struct GameCamAnim {
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
 void func_8001E76C(void);
-void func_8001D91C(void);
+s32 func_8001D91C(void);
+void EGSGeometryINT_VectorGetAngleFromXZPlane(VECTOR32 *dir, VECTOR32 *angle);
 void func_8001E1DC(void);
 void func_8001AF98(void);
 s32 func_8001E218(s32 arg0);
@@ -900,7 +907,197 @@ void func_8001D89C(VECTOR32 *pos) {
     pos->vx = out.vx;
 }
 
+#ifdef NON_MATCHING
+/* regalloc: the pitch dead-zone bound 'up' lands in a2 instead of v1 */
+/* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
+ * scaled by the fov. The fov fetch copies a whole vector into one word (as the
+ * original does, spilling over the saved registers above it). */
+s32 func_8001D91C(void) {
+    VECTOR32 dir;
+    VECTOR32 angle;
+    VECTOR32 scale;
+    EGSFrame *frames[2];
+    VECTOR32 at;
+    VECTOR32 from;
+    VECTOR32 eye;
+    VECTOR32 cur;
+    VECTOR32 diff;
+    s32 fov;
+    s32 lim;
+    s32 down;
+    s32 up;
+
+    angle = D_800101F4;
+    scale = D_800101F4;
+    CameraAccessFrameInfo(gCamera, 0, 1, 0);
+    frames[0] = CAM->accessFrame;
+    CameraAccessFrameInfo(gCamera, 0, 2, 0);
+    frames[1] = CAM->accessFrame;
+    if (frames[1] != NULL) {
+        if ((GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) ||
+             GameCameraCheckMode(3) || GameCameraCheckMode(8)) &&
+            D_80113B2C.action == 5) {
+            goto aim_lead;
+        }
+        if ((u32)D_80113B2C.mode < 2 || D_80113B2C.mode == 8 || D_80113B2C.unk05C == 3 ||
+            D_80113B2C.unk05C == 1) {
+            if (CAM->angle.mode == 0) {
+                angle.vx = CAM->angle.target.vx;
+            } else {
+                angle = CAM->angle.target;
+            }
+            scale.vx = 1;
+            scale.vy = 1;
+            scale.vz = 0;
+            func_8001D89C(&angle);
+        } else if (frames[0] == frames[1] || D_80113B2C.mode == 4) {
+            if (D_80113B2C.mode == 2) {
+                at.vx = (*(EGSFrame **)CAM->display)->pos.vx;
+                at.vy = (*(EGSFrame **)CAM->display)->pos.vy;
+                at.vz = (*(EGSFrame **)CAM->display)->pos.vz;
+                at.vy = -at.vy;
+                CameraAccessFrameInfo(gCamera, 0, 1, 1);
+                from = CAM->unkD1C;
+                from.vx += D_80113B2C.unk088;
+                from.vy += D_80113B2C.unk08C;
+                from.vz += D_80113B2C.unk090;
+                dir.vx = from.vx - at.vx;
+                dir.vy = from.vy - at.vy;
+                dir.vz = from.vz - at.vz;
+            } else {
+            aim_lead:
+                CameraAccessFrameInfo(gCamera, 0, 1, 7);
+                dir = CAM->unkD1C;
+            }
+            angle.vy = ratan2(dir.vx, dir.vz);
+            EGSGeometryINT_VectorGetAngleFromXZPlane(&dir, &angle);
+            angle.vz = 0;
+            scale.vx = 1;
+            scale.vy = 1;
+            scale.vz = 0;
+            func_8001D89C(&angle);
+        } else {
+            CameraAccessFrameInfo(gCamera, 0, 2, 1);
+            at = CAM->unkD1C;
+            if (!D_80113B2C.cut) {
+                if (CAM->eye.mode == 0) {
+                    eye.vx = CAM->eye.target.vx;
+                } else {
+                    eye = CAM->eye.target;
+                }
+            } else {
+                CameraAccessFrameInfo(gCamera, 0, 1, 1);
+                eye = CAM->unkD1C;
+            }
+            dir.vx = at.vx - eye.vx;
+            dir.vz = at.vz - eye.vz;
+            dir.vy = at.vy - eye.vy;
+            angle.vy = ratan2(dir.vx, dir.vz);
+            EGSGeometryINT_VectorGetAngleFromXZPlane(&dir, &angle);
+            angle.vz = 0;
+            if (CAM->angle.mode == 0) {
+                cur.vx = CAM->angle.target.vx;
+            } else {
+                cur = CAM->angle.target;
+            }
+            diff.vx = angle.vx - cur.vx;
+            if (diff.vx > 0x800) {
+                diff.vx -= 0x1000;
+            } else if (diff.vx < -0x800) {
+                diff.vx += 0x1000;
+            }
+            diff.vy = angle.vy - cur.vy;
+            if (diff.vy > 0x800) {
+                diff.vy -= 0x1000;
+            } else if (diff.vy < -0x800) {
+                diff.vy += 0x1000;
+            }
+            diff.vz = angle.vz - cur.vz;
+            if (diff.vz > 0x800) {
+                diff.vz -= 0x1000;
+            } else if (diff.vz < -0x800) {
+                diff.vz += 0x1000;
+            }
+            if (CAM->fov.mode == 0) {
+                fov = CAM->fov.target.vx;
+            } else {
+                *(VECTOR32 *)&fov = CAM->fov.target;
+            }
+            if (D_80113B2C.mode == 13 || D_80113B2C.mode == 19) {
+                lim = 0;
+            } else if (D_80113B2C.mode == 20) {
+                lim = fov * 7 / 50;
+            } else if (D_80113B2C.mode != 9) {
+                lim = 0;
+            } else {
+                lim = fov * 3 / 8;
+            }
+            if (diff.vy >= lim) {
+                angle.vy = cur.vy + (diff.vy - lim);
+            } else if (diff.vy <= -lim) {
+                angle.vy = cur.vy + (diff.vy + lim);
+            } else {
+                angle.vy = cur.vy;
+            }
+            up = 0;
+            if (D_80113B2C.mode == 19 || D_80113B2C.mode == 20) {
+                down = 0;
+            } else {
+                s32 neg = -fov;
+
+                up = neg * 3 / 64;
+                down = neg / 8;
+            }
+            if (diff.vx >= up) {
+                angle.vx = cur.vx + (diff.vx - up);
+            } else if (diff.vx <= down) {
+                angle.vx = (diff.vx - down) + cur.vx;
+            } else {
+                angle.vx = cur.vx;
+            }
+            scale.vx = 1;
+            scale.vy = 1;
+            scale.vz = 0;
+        }
+        CAM->unkD1C = angle;
+    } else if (D_80113B2C.unk05C == 3) {
+        if (CAM->angle.mode == 0) {
+            angle.vx = CAM->angle.target.vx;
+        } else {
+            angle = CAM->angle.target;
+        }
+        scale.vx = 1;
+        scale.vy = 1;
+        scale.vz = 0;
+        CAM->unkD1C = angle;
+    } else if (D_80113B2C.unk05C == 9) {
+        if (CAM->angle.mode == 0) {
+            angle.vx = CAM->angle.target.vx;
+        } else {
+            angle = CAM->angle.target;
+        }
+        angle.vy += 0x22;
+        if (CAM->unkA90.mode == 0) {
+            cur.vx = CAM->unkA90.value.vx;
+        } else {
+            cur = CAM->unkA90.value;
+        }
+        scale.vx = 1;
+        scale.vy = 1;
+        scale.vz = 0;
+        angle.vx = cur.vx;
+        CAM->unkD1C = angle;
+    } else {
+        return 1;
+    }
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 0;
+    CameraAccessMoveInfo(gCamera, 1, 6, 1);
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001D91C);
+#endif
 
 /* As func_8001D89C: only the copy of a zero vector is left. */
 void func_8001E1DC(void) {
@@ -1157,7 +1354,202 @@ s32 func_8001ECC8(void) {
     return 1;
 }
 
+int rand(void);
+int SquareRoot0(int a);
+s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
+
+/* Shake strength left at a distance from its source (none past 0xF00). */
+#define SHAKE_FADE(dist) ((dist) + 0x100 <= 0x1000 ? 0xF00 - (dist) : 0)
+/* Halves toward zero. */
+#define SHAKE_HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+/* out = sign of x (-1, 0, 1) */
+#define SHAKE_SIGN(out, x) \
+    {                       \
+        s32 p_ = (x);       \
+        s32 r_;             \
+        if (p_ > 0) {       \
+            r_ = 1;         \
+        } else {            \
+            r_ = p_ >> 31;  \
+        }                   \
+        out = r_;           \
+    }
+
+#ifdef NON_MATCHING
+/* scheduling/regalloc in the distance-fade block (d.vx kept live in a1) */
+/* Applies the active camera shakes to the display frame: each shake jitters along the
+ * camera's right and side axes, fading with distance from its source frame, and the
+ * total drives the pad's rumble. */
+void func_8001EF10(void) {
+    VECTOR32 pos;
+    VECTOR32 offset;
+    VECTOR32 right;
+    VECTOR32 side;
+    VECTOR32 alongRight;
+    VECTOR32 alongSide;
+    VECTOR32 amp;
+    VECTOR32 base;
+    VECTOR32 total;
+    EGSListNode *node;
+    EGSListNode *next;
+    GameCamShake *shake;
+    s32 len;
+    u8 any;
+    s32 inRange;
+    s32 v;
+    s32 r;
+
+    offset = D_800101F4;
+    pos.vx = (*(EGSFrame **)CAM->display)->pos.vx;
+    pos.vy = (*(EGSFrame **)CAM->display)->pos.vy;
+    pos.vz = (*(EGSFrame **)CAM->display)->pos.vz;
+    pos.vy = -pos.vy;
+    any = 0;
+    node = D_80113B2C.shakeList;
+    if (node != NULL) {
+        any = 1;
+        do {
+            shake = node->data;
+            next = node->next;
+            if (shake->magnitude == 0) {
+                shake->axis.vx = EGSMathFIXMul(shake->axis.vx, 0xD99);
+                shake->axis.vy = EGSMathFIXMul(shake->axis.vy, 0xD99);
+                shake->axis.vz = EGSMathFIXMul(shake->axis.vz, 0xD99);
+            }
+            {
+                GOBJ_MATRIX m;
+
+                m.m[0][0] = (*(EGSFrame **)CAM->display)->m[0][0];
+                m.m[0][1] = -(*(EGSFrame **)CAM->display)->m[0][1];
+                m.m[0][2] = (*(EGSFrame **)CAM->display)->m[0][2];
+                m.m[1][0] = -(*(EGSFrame **)CAM->display)->m[1][0];
+                m.m[1][1] = (*(EGSFrame **)CAM->display)->m[1][1];
+                m.m[1][2] = -(*(EGSFrame **)CAM->display)->m[1][2];
+                m.m[2][0] = (*(EGSFrame **)CAM->display)->m[2][0];
+                m.m[2][1] = -(*(EGSFrame **)CAM->display)->m[2][1];
+                m.m[2][2] = (*(EGSFrame **)CAM->display)->m[2][2];
+                right.vx = m.m[0][0];
+                right.vy = m.m[1][0];
+                right.vz = m.m[2][0];
+                side.vx = -m.m[2][0];
+                side.vy = 0;
+                side.vz = m.m[0][0];
+            }
+            amp.vx = D_80113B2C.shakeSign[0] * shake->axis.vx * (rand() % 4096) / 4096;
+            amp.vy = D_80113B2C.shakeSign[1] * shake->axis.vy;
+            amp.vz = D_80113B2C.shakeSign[2] * shake->axis.vz * (rand() % 4096) / 4096;
+            base = amp;
+            if (shake->frame != NULL) {
+                VECTOR32 src;
+                VECTOR32 unused;
+                VECTOR32 d;
+                VECTOR32 a;
+                s32 t;
+                s32 dist;
+
+                src.vx = shake->frame->pos.vx;
+                d.vx = src.vx - pos.vx;
+                a.vx = abs(d.vx);
+                src.vy = shake->frame->pos.vy;
+                src.vy = -src.vy;
+                d.vy = src.vy - pos.vy;
+                a.vy = abs(d.vy);
+                src.vz = shake->frame->pos.vz;
+                d.vz = src.vz - pos.vz;
+                a.vz = abs(d.vz);
+                if (a.vx < a.vy) {
+                    t = a.vx;
+                    a.vx = a.vy;
+                    a.vy = t;
+                }
+                if (a.vx < a.vz) {
+                    t = a.vx;
+                    a.vx = a.vz;
+                    a.vz = t;
+                }
+                dist = a.vx + ((a.vy + a.vz) >> 2);
+                amp.vx = EGSMathFIXMul(amp.vx, SHAKE_FADE(dist));
+                amp.vy = EGSMathFIXMul(amp.vy, SHAKE_FADE(dist));
+                amp.vz = EGSMathFIXMul(amp.vz, SHAKE_FADE(dist));
+            }
+            alongRight.vx = EGSMathFIXMul(right.vx, amp.vx);
+            alongRight.vy = EGSMathFIXMul(right.vy, amp.vx);
+            alongRight.vz = EGSMathFIXMul(right.vz, amp.vx);
+            alongRight.vx = SHAKE_HALF(alongRight.vx);
+            alongRight.vy = SHAKE_HALF(alongRight.vy);
+            alongRight.vz = SHAKE_HALF(alongRight.vz);
+            if (alongRight.vx == 0 && base.vx > 0) {
+                SHAKE_SIGN(alongRight.vx, right.vx * base.vx);
+            }
+            if (alongRight.vz == 0 && base.vx < 0) {
+                SHAKE_SIGN(alongRight.vz, right.vz * base.vx);
+            }
+            alongSide.vx = EGSMathFIXMul(side.vx, amp.vz);
+            alongSide.vy = EGSMathFIXMul(side.vy, amp.vz);
+            alongSide.vz = EGSMathFIXMul(side.vz, amp.vz);
+            alongSide.vx = SHAKE_HALF(alongSide.vx);
+            alongSide.vy = SHAKE_HALF(alongSide.vy);
+            alongSide.vz = SHAKE_HALF(alongSide.vz);
+            if (alongSide.vx == 0 && base.vz < 0) {
+                SHAKE_SIGN(alongSide.vx, right.vx * base.vz);
+            }
+            if (alongSide.vz == 0 && base.vz > 0) {
+                SHAKE_SIGN(alongSide.vz, right.vz * base.vz);
+            }
+            total.vx = alongRight.vx + alongSide.vx;
+            total.vy = alongRight.vy + alongSide.vy;
+            total.vz = alongRight.vz + alongSide.vz;
+            total.vy = SHAKE_HALF(amp.vy);
+            if (total.vy == 0 && base.vy > 0) {
+                total.vy = 1;
+            }
+            offset.vx += total.vx;
+            offset.vy += total.vy;
+            offset.vz += total.vz;
+            if (shake->magnitude > 0) {
+                shake->magnitude--;
+            }
+            if (shake->magnitude == 0 && shake->axis.vx == 0 && shake->axis.vy == 0 &&
+                shake->axis.vz == 0) {
+                shake->active = 0;
+                EGSListRemove(&D_80113B2C.shakeList, node);
+            }
+            node = next;
+        } while (node != NULL);
+    }
+    pos.vx += offset.vx;
+    pos.vy += offset.vy;
+    pos.vz += offset.vz;
+    if ((*(EGSFrame **)CAM->display)->pos.pad == 0) {
+        (*(EGSFrame **)CAM->display)->pos.vx = pos.vx;
+        (*(EGSFrame **)CAM->display)->pos.vy = -pos.vy;
+        (*(EGSFrame **)CAM->display)->pos.vz = pos.vz;
+    } else {
+        EGSFrameSetPosition(*(EGSFrame **)CAM->display, 0, &pos);
+    }
+    if (any) {
+        offset.vx = (offset.vx << 11) + (offset.vx << 9) + (offset.vx << 8);
+        offset.vy = (offset.vy << 11) + (offset.vy << 9) + (offset.vy << 8);
+        offset.vz = (offset.vz << 11) + (offset.vz << 9) + (offset.vz << 8);
+        EGSMath_VectorModulus(&offset, &len);
+        r = SquareRoot0(len);
+        len = r;
+        inRange = r < 0x100;
+        if (inRange && r < 0x39) {
+            v = 0x38;
+        } else {
+            v = inRange ? r : 0xFF;
+        }
+        len = v;
+        EGSDeviceControllerVibrate(1, (u8)v, 2);
+    }
+    D_80113B2C.shakeSign[0] = -D_80113B2C.shakeSign[0];
+    D_80113B2C.shakeSign[1] = -D_80113B2C.shakeSign[1];
+    D_80113B2C.shakeSign[2] = -D_80113B2C.shakeSign[2];
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001EF10);
+#endif
 
 /* The fov fetch copies a whole vector into a single word (as the original does,
  * spilling over the saved registers above it); only the first word is used. */
@@ -1249,9 +1641,9 @@ void GameCameraInit(void) {
         ((GameCamShake *)((u8 *)D_80113B2C.shakes + j))->active = 0;
     }
     D_80113B2C.shakeList = NULL;
-    D_80113B2C.unk1FC = 1;
-    D_80113B2C.unk1FD = 1;
-    D_80113B2C.unk1FE = 1;
+    D_80113B2C.shakeSign[0] = 1;
+    D_80113B2C.shakeSign[1] = 1;
+    D_80113B2C.shakeSign[2] = 1;
     D_80113B2C.transitionTime = 0;
     none = -1;
     for (k = 3 * sizeof(GameCamSlot); k >= 0; k -= sizeof(GameCamSlot)) {
@@ -1596,7 +1988,182 @@ u8 func_80020E90(GameCamBox *box, GameCamPlane *plane) {
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020E90);
 #endif
 
+extern GameCamFace *D_80128990; /* static collision faces */
+u8 func_80020E90(GameCamBox *box, GameCamPlane *plane);
+
+/* Rough length of a face edge (vertex j - vertex i): the largest axis plus a quarter of the other two. */
+static inline s32 iEdgeLength(GameCamPlane *plane, s32 i, s32 j, VECTOR32 *d, VECTOR32 *a) {
+    s32 t;
+
+    d->vx = plane->verts[j]->vx - plane->verts[i]->vx;
+    a->vx = abs(d->vx);
+    d->vy = plane->verts[j]->vy - plane->verts[i]->vy;
+    a->vy = abs(d->vy);
+    d->vz = plane->verts[j]->vz - plane->verts[i]->vz;
+    a->vz = abs(d->vz);
+    if (a->vx < a->vy) {
+        t = a->vx;
+        a->vx = a->vy;
+        a->vy = t;
+    }
+    if (a->vx < a->vz) {
+        t = a->vx;
+        a->vx = a->vz;
+        a->vz = t;
+    }
+    return a->vx + ((a->vy + a->vz) >> 2);
+}
+
+#define FACE_GOBJ(plane) ((u32)((plane)->flags << 18) >> 22)
+extern s32 gCASJoystickGobjID;
+
+static inline void iDotSV(GameCamSVec *a, VECTOR32 *b, s32 *out) {
+    *out = a->vx * b->vx + a->vy * b->vy + a->vz * b->vz;
+}
+
+#ifdef NON_MATCHING
+/* the clamp folds differently (orig keeps 0x1000 in fp), the edge loop gets strength-reduced */
+/* Moves a sphere from cur by d against the collision faces (static, then the player's),
+ * leaving the result in pos; a second pass pushes pos out of whatever it still touches.
+ * Returns whether anything was hit. */
+u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
+    VECTOR32 ndir;
+    GameCamTrack track;
+    GameCamBox box;
+    VECTOR32 push;
+    s32 dot;
+    u8 hit;
+    u32 pass;
+    u32 list;
+    s32 count;
+    GameCamFace *face;
+    s32 r;
+
+    hit = 0;
+    GTEMath_VectorNormal(d, &ndir);
+    pass = 0;
+    count = 0;
+    do {
+        push.vx = 0;
+        push.vy = 0;
+        push.vz = 0;
+        if (pass == 0) {
+            track.pos = *cur;
+            track.unk10 = 0;
+            track.vel.vx = d->vx << 12;
+            track.vel.vy = d->vy << 12;
+            track.vel.vz = d->vz << 12;
+            track.unk28 = 0;
+            track.unk2C = 0;
+            track.unk30 = 0x10000;
+            track.unk34 = 0;
+            pos->vx = cur->vx + d->vx;
+            pos->vy = cur->vy + d->vy;
+            pos->vz = cur->vz + d->vz;
+            r = MAX(abs(track.unk28), MAX(abs(track.unk2C), abs(track.unk30)));
+            func_80020BB8(&track.pos, track.unk10, track.pos.vy - track.unk10, track.pos.vy + track.unk10,
+                          &track.vel, r, r, &box);
+        } else {
+            track.pos = *pos;
+            track.unk10 = 0x50;
+            track.unk28 = 0x8000;
+            track.unk2C = 0x20000;
+            track.unk30 = 0x10000;
+            track.vel.vx = 0;
+            track.vel.vy = 0;
+            track.vel.vz = 0;
+            track.unk34 = 0;
+            func_80020BB8(&track.pos, track.unk10, track.pos.vy - 0x50, track.pos.vy + 0x50, &track.vel,
+                          0x20000, 0x20000, &box);
+        }
+        for (list = 0; list < 2; list++) {
+            if (pass == 1 && list == pass && !GameCameraCheckMode(0xE) && !GameCameraCheckMode(0xF) &&
+                !GameCameraCheckMode(0x10) && !GameCameraCheckMode(0xA)) {
+                continue;
+            }
+            if (list == 0) {
+                face = D_80128990;
+            } else {
+                face = NULL;
+                if (D_80113B2C.primary != NULL && D_80113B2C.primary->id == gCASJoystickGobjID) {
+                    face = D_80113B2C.primary->anim->faceList;
+                }
+            }
+            if ((s32)face >= 0) {
+                continue;
+            }
+            for (; face != NULL; face = face->next) {
+                s32 idx;
+
+                track.plane = &face->plane;
+                idx = FACE_GOBJ(&face->plane) - 1;
+                if (!(idx < 0 || (u32)(gameObjectsInfo[idx].runtime->npcState - 1) >= 2 ||
+                      (D_80113B2C.mode == 0x14 && D_80113B2C.unk05C == 2))) {
+                    continue;
+                }
+                if (!func_80020E90(&box, track.plane)) {
+                    continue;
+                }
+                if (pass == 1) {
+                    iDotSV(track.plane->normal, dir, &dot);
+                    dot = FIX12(dot);
+                    track.unk10 = FIX12((0x1000 - MAX(dot, -0x1000)) * 0x48);
+                    iDotSV(track.plane->normal, &ndir, &dot);
+                    dot = -FIX12(dot);
+                    track.unk2C = FIX12((MAX(dot, -0x1000) + 0x199) * 0xE8B) << 5;
+                }
+                func_80020B58(&track);
+                if (track.moving == 1) {
+                    VECTOR32 edge;
+                    VECTOR32 a;
+                    s32 i;
+
+                    for (i = 0; i < track.plane->count; i++) {
+                        s32 next;
+                        s32 t;
+
+                        next = i == track.plane->count - 1 ? 0 : i + 1;
+                        t = iEdgeLength(track.plane, i, next, &edge, &a);
+                        if (t > 0 && t < 0x18) {
+                            track.moving = 0;
+                            break;
+                        }
+                    }
+                }
+                if (track.moving) {
+                    hit = 1;
+                    if (pass == 0) {
+                        track.vel.vx += track.unk54.vx;
+                        track.vel.vy += track.unk54.vy;
+                        track.vel.vz += track.unk54.vz;
+                    } else {
+                        count++;
+                    }
+                    track.unk54.vx = FIX12(track.unk54.vx);
+                    track.unk54.vy = FIX12(track.unk54.vy);
+                    track.unk54.vz = FIX12(track.unk54.vz);
+                    push.vx += track.unk54.vx;
+                    push.vy += track.unk54.vy;
+                    push.vz += track.unk54.vz;
+                }
+            }
+        }
+        if (pass == 1 && count != 0) {
+            push.vx /= count;
+            push.vy /= count;
+            push.vz /= count;
+        }
+        pos->vx += push.vx;
+        pos->vy += push.vy;
+        pos->vz += push.vz;
+        pass++;
+        count = 0;
+    } while (pass < 2);
+    return hit;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
+#endif
 
 #ifdef NON_MATCHING
 /* the CameraAccessFrameInfo mode select: original loads gCamera after the arms (shared call tail) */
@@ -1862,7 +2429,6 @@ typedef struct GameCamPath {
 s32 LevelGetPathInfo(s32 id, s32 *start, GameCamPath **path);
 s32 EGSFrameTransformVector(VECTOR32 *in, EGSFrame *frame, EGSFrame *ref, VECTOR32 *out);
 void ApplyMatrixLV(GOBJ_MATRIX *m, VECTOR32 *in, VECTOR32 *out);
-extern s32 gCASJoystickGobjID;
 s32 PathGetNumPoints(Gobj *obj);
 void PathGetPoint(Gobj *obj, s32 index, VECTOR32 *out);
 void EGSGeometryINT_GetDistancePointToPoint(VECTOR32 *a, VECTOR32 *b, s32 *dist);
