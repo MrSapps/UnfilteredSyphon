@@ -27,11 +27,13 @@ SDATA_LOCAL(D_8010FA00)
 /* Terrain sector table (gSectorMap[], 0x10 bytes each). */
 typedef struct SectorMapEntry {
     /* 0x00 */ char *name;
-    /* 0x04 */ u8 unk04[4];
+    /* 0x04 */ u8 unk04[4]; /* CdlLOC of the sector's data */
     /* 0x08 */ u8 numParts; /* streamed parts (sectors on disc) */
     /* 0x09 */ u8 id;
     /* 0x0A */ u8 originalId;
-    /* 0x0B */ u8 unk0B[5];
+    /* 0x0B */ u8 unk0B;
+    /* 0x0C */ s16 size;
+    /* 0x0E */ u8 unk0E[2];
 } SectorMapEntry;
 
 /*
@@ -41,6 +43,8 @@ typedef struct SectorMapEntry {
 typedef struct TerrainModel {
     /* 0x00 */ u8 unk00[0x20];
     /* 0x20 */ s32 data;
+    /* 0x24 */ s32 unk24;
+    /* 0x28 */ u32 flags;
 } TerrainModel;
 
 /* Header of a sector's first streamed part. */
@@ -56,7 +60,8 @@ typedef struct TerrainPartHeader {
 typedef struct StreamReq {
     /* 0x00 */ u8 unk00[0x18];
     /* 0x18 */ s32 tag;
-} StreamReq;
+    /* 0x1C */ u8 unk1C[8];
+} StreamReq; /* size 0x24, see stream.c */
 
 typedef struct TerrainRect {
     s16 x, y, w, h;
@@ -291,7 +296,193 @@ INCLUDE_ASM("asm/main/nonmatchings/terrain", InitStreaming);
 
 INCLUDE_RODATA("asm/main/nonmatchings/terrain", D_80012360);
 
+/* Level header fields used to preload terrain (levelLoadHeader). */
+typedef struct TerrLoadHeader {
+    /* 0x00 */ u8 unk00[8];
+    /* 0x08 */ s32 cacheOffset; /* terrain cache start, relative to base */
+    /* 0x0C */ u8 unk0C[0x24];
+    /* 0x30 */ u8 *base;
+    /* 0x34 */ u32 preloadCount;
+    /* 0x38 */ u8 preload[1]; /* sector of each preloaded cache block */
+} TerrLoadHeader;
+
+/* The terrain hog's directory (egshog.c's HogHeader). */
+typedef struct TerrHogDir {
+    /* 0x00 */ s32 unk0;
+    /* 0x04 */ s32 numBlocks;
+    /* 0x08 */ s32 offsetTable;
+    /* 0x0C */ s32 names;
+    /* 0x10 */ s32 dataStart;
+} TerrHogDir;
+
+typedef struct TerrCdlFILE {
+    /* 0x00 */ u8 pos[4];
+    /* 0x04 */ u32 size;
+    /* 0x08 */ char name[16];
+} TerrCdlFILE;
+
+extern TerrLoadHeader *levelLoadHeader;
+extern char gTerrainFileName[];
+extern TerrHogDir *gTerrainDirectory;
+extern u8 *gCache;
+extern s32 gActivationDistance;
+extern u8 gEGSIdentityMatrix[];
+s32 EGSHogOpenDirectoryOnly(char *path, s32 unused, TerrHogDir **out);
+s32 EGSAnimSimpleCreate(void *model, void *frame, u32 flags, TerrainAnim **out);
+void TerrainStreamCallback(StreamReq *req);
+u32 strlen(const char *s);
+char *strchr(const char *s, int c);
+
+#ifdef NON_MATCHING
+/* regalloc: start/end swap s1/s2; struct stores scheduled differently (71 insns) */
+/* Build the sector map from the level's WLDEMD.HOG and set up the stream cache. */
+void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
+    TerrCdlFILE file;
+    TerrHogDir *dir = NULL;
+    TerrHogDir *hdr;
+    s32 base;
+    s32 maxBlocks = 0;
+    TerrCdlFILE *found;
+    u8 big;
+    char *names;
+    s32 *offsets;
+    s32 count;
+    SectorMapEntry *map;
+    s32 i;
+    s32 start;
+    s32 end;
+    s32 size;
+    u8 c;
+    char *dot;
+    TerrainModel *model;
+    s32 j;
+    s16 blocks;
+    u8 *neighbor;
+    u8 *cache;
+    TerrainCacheEntry *entry;
+    u8 sector;
+    u8 last;
+    s32 part;
+    TerrLoadHeader *lh;
+    u8 *ids;
+
+    gSectorsPerBlock = sectorsPerBlock;
+    gActivationDistance = 5;
+    sprintf(gTerrainFileName, "\\%s\\WLDEMD.HOG;1", gLevelNames[gSysInfo.level]);
+    found = (TerrCdlFILE *)EGSFileSearchCD(&file, gTerrainFileName);
+    TASSERT(found != NULL, 0x174);
+    base = CdPosToInt(found);
+    TASSERT(EGSHogOpenDirectoryOnly(gTerrainFileName, 0, &dir) == 0, 0x178);
+    gTerrainDirectory = dir;
+    hdr = gTerrainDirectory;
+    names = (char *)hdr + hdr->names;
+    count = hdr->numBlocks;
+    offsets = (s32 *)((u8 *)hdr + hdr->offsetTable);
+    gSectorMap = EGSMemMalloc(count * sizeof(SectorMapEntry));
+    gTerrSector = EGSMemMalloc(count * sizeof(TerrSector));
+    gTerrSectorCount = count;
+    for (i = 0; i < count; i++) {
+        map = &gSectorMap[i];
+        big = 0;
+        start = offsets[i];
+        if (i == count - 1) {
+            end = found->size - hdr->dataStart;
+        } else {
+            end = offsets[i + 1];
+        }
+        CdIntToPos(base + ((u32)(start + hdr->dataStart) >> 11), map->unk04);
+        size = start + 1;
+        size = end - size;
+        map->name = names;
+        map->size = size;
+        map->id = i;
+        map->originalId = i;
+        map->numParts = ((u32)size / (gSectorsPerBlock << 11) + 1) * gSectorsPerBlock;
+        c = names[0];
+        if (c == 'O') {
+            big = 1;
+        }
+        names += strlen(names) + 1;
+        dot = strchr(map->name, '.');
+        if (dot != NULL) {
+            *dot = 0;
+        }
+        EGSAnimSimpleCreate((void *)-1, gEGSIdentityMatrix, 0x1000000, &gTerrSector[i].anim);
+        if (big) {
+            gTerrSector[i].anim->model->flags |= 0x20000;
+        }
+        if (c == '8' || c == '9') {
+            model = gTerrSector[i].anim->model;
+            if (c == '9') {
+                model->flags |= 0x200000;
+            } else {
+                model->flags |= 0x100000;
+            }
+        }
+    }
+    for (i = 0; i < count; i++) {
+        neighbor = gLevData->sectorNeighbors[i];
+        blocks = gSectorMap[i].numParts / gSectorsPerBlock;
+        for (j = 0; *neighbor != 0xFF && j < 14; j++, neighbor++) {
+            if (*neighbor != 0xFE) {
+                blocks += gSectorMap[*neighbor].numParts / gSectorsPerBlock;
+            }
+        }
+        if (maxBlocks < blocks) {
+            maxBlocks = blocks;
+        }
+    }
+    gNumTerrainDataBlocks = maxBlocks;
+    gTerrainCacheFreeBlocks = maxBlocks;
+    gTerrainCacheInactiveBlocks = maxBlocks;
+    gTerrainCache = EGSMemMalloc(maxBlocks * sizeof(TerrainCacheEntry));
+    gCache = levelLoadHeader->base + levelLoadHeader->cacheOffset;
+    cache = gCache;
+    for (i = 0; i < maxBlocks; i++) {
+        gTerrainCache[i].data = cache;
+        cache += sectorsPerBlock << 11;
+        gTerrainCache[i].owner = NULL;
+        gTerrainCache[i].map = NULL;
+        gTerrainCache[i].sector = -1;
+        gTerrainCache[i].state = 1;
+    }
+    if (preload) {
+        StreamReq req;
+
+        last = 0xFE;
+        part = 0;
+        lh = levelLoadHeader;
+        ids = lh->preload;
+        for (i = 0; i < lh->preloadCount; i++, ids++) {
+            sector = *ids;
+            entry = &gTerrainCache[i];
+            entry->state = -1;
+            gTerrainCacheFreeBlocks--;
+            entry->sector = sector;
+            entry->map = &gSectorMap[sector];
+            entry->owner = gTerrSector[sector].anim;
+            gTerrainCacheInactiveBlocks--;
+            if (sector != last) {
+                if (last != 0xFE) {
+                    req.tag = last;
+                    TerrainStreamCallback(&req);
+                }
+                part = 0;
+                gTerrSector[sector].anim->model->data = (s32)entry->data & 0x7FFFFFFF;
+                last = sector;
+            } else {
+                part++;
+            }
+            gTerrSector[sector].parts[part] = entry->data;
+        }
+        req.tag = last;
+        TerrainStreamCallback(&req);
+    }
+    SysLoadTextureCacheOverlay(0, 0);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/terrain", SetupTerrain);
+#endif
 
 /* Cheap 3D distance: largest axis plus a quarter of the other two. */
 s32 GameSysFuzzyDistPt2Pt(Vec3 *a, Vec3 *b) {

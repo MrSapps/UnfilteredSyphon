@@ -170,13 +170,13 @@ extern s32 gCurrentWeapon;
 
 extern DamagePacket D_8011E8E8[DAMAGE_PACKET_NONE];
 
-void DamageGobjCAS2(s16 target, s16 from, s16 arg2, s16 arg3, s32 kind, s32 arg5, VECTOR32 *pos, VECTOR32 *normal);
+void DamageGobjCAS2(s16 target, s16 from, s16 by, s32 amount, s32 kind, s32 aimed, VECTOR32 *pos, VECTOR32 *normal);
 void func_800667C4(DamagePacket *packet, s32 prev); /* frees a packet */
 void ParticleGrenadeLauncher(s16 id, VECTOR32 *pos);
 void ParticleTracer(Gobj *gobj, VECTOR32 *pos, s32 arg2);
 DamagePacket *func_80066714(void); /* allocates a damage packet */
 s32 ParticleDamageDelay(s32 id, VECTOR32 *pos);
-void iDamageShowParticle(s32 id, s32 arg1, s32 kind, VECTOR32 *pos, VECTOR32 *normal);
+void iDamageShowParticle(s32 id, Gobj *gobj, s32 kind, VECTOR32 *pos, VECTOR32 *normal);
 extern VECTOR32 D_80012174; /* explosion camera shake vector (rodata) */
 extern u32 D_801061C0;      /* gWeaponInfo[0x13] word 0x14: bits 6..15 = blast damage */
 
@@ -299,6 +299,25 @@ void iDamageShowParticleGlassSpark(void *arg0, void *arg1, void *arg2) {
     ParticleHitWall(arg0, arg1, arg2, 0xC0FFFF);
 }
 
+extern VECTOR32 D_80012154; /* zero vector (rodata) */
+extern u8 gTargetModeFlag;
+extern u8 gPlayerOnFireFlag;
+void NPCDamagedByPC(s32 id);
+void DamageShowObjectBulletHole(s16 id, void *pos, void *normal);
+s32 NPCDebugGetNoDamageFlag(void);
+s32 NPCKill(s32 id, VECTOR32 *dir);
+void EGSMathFIX_VectorScaleToLength(VECTOR32 *v, s32 length, VECTOR32 *out);
+void DamageDeathCAS(s16 id, s32 action);
+void AnimateGobjRequestHit(Gobj *gobj, VECTOR32 *dir, u8 mode);
+void AnimateGobjElectrocute(Gobj *gobj);
+void DamageShowFlakJacketMsg();
+
+/* MoveInfo fields used here */
+typedef struct DamageMoveInfo {
+    /* 0x00 */ u8 unk00[0x70];
+    /* 0x70 */ VECTOR32 impulse;
+} DamageMoveInfo;
+
 INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012144);
 
 INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012154);
@@ -328,11 +347,163 @@ void DamageInit(void) {
     D_80110180 = 0x10;
 }
 
-void DamageShowFlakJacketMsg(u16 id) {
+void DamageShowFlakJacketMsg(id)
+    u16 id;
+{
     TextAddMarker(id, gSysInfo.level != 4 ? D_801077F4 : gBodyArmorHitMsg, 0x28, 0);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS2);
+/* The object has a flak jacket (the player always does). */
+#define GOBJ_HAS_FLAK(g) ((g)->id == gPlayerOffset || (GOBJINFO_WORD24(&gameObjectsInfo[(g)->id]) & 0x4000))
+
+#define DAMAGE_KIND_FLAK 0x17
+
+/* Apply a hit: flak jacket, health, then the death or hit reaction, and tell everyone. */
+void DamageGobjCAS2(s16 id, s16 from, s16 by, s32 amount, s32 kind, s32 aimed, VECTOR32 *pos, VECTOR32 *normal) {
+    VECTOR32 dir;
+    VECTOR32 push;
+    VECTOR32 hitDir;
+    Gobj *gobj = gameObjectsInfo[id].runtime;
+    GobjHealth *health = GOBJ_HEALTH(gobj);
+    s32 type = health->damageType;
+    u8 hurt = 1;
+    s32 weapon;
+    s32 armor;
+    s32 action;
+    s32 killed;
+    DamageCallback cb;
+
+    if (from == gPlayerOffset && gobj->npcState == 2) {
+        NPCDamagedByPC(id);
+    }
+    if (aimed) {
+        DamageShowObjectBulletHole(id, pos, normal);
+    }
+    weapon = gameObjectsInfo[from].runtime->id != gPlayerOffset
+                 ? GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gameObjectsInfo[from].runtime->id])
+                 : gCurrentWeapon;
+    if (GOBJ_HEALTH(gobj)->armor != 0 && (GOBJ_HAS_FLAK(gobj) || id == gPlayerOffset) &&
+        (from != gPlayerOffset || gSniperMode == 0 || amount < 0) && (from != -1 || type == 0x4C) &&
+        (u32)(weapon - 0x10) >= 2 && weapon != 0x13 && amount != 0x7FFF) {
+        kind = DAMAGE_KIND_FLAK;
+    } else if (gobj->npcState == 2 && GOBJ_HAS_FLAK(gobj) && type == 0x11) {
+        GOBJ_HEALTH(gobj)->armor = 0;
+    }
+    if (type != 0x4C && type != 0x51) {
+        iDamageShowParticle(from, gobj, kind, pos, normal);
+    }
+    if ((u16)(GOBJ_HEALTH(gobj)->health + 1) < 2) {
+        return;
+    }
+    if (GOBJ_HEALTH(gobj)->health != 0x7FFF) {
+        if (kind == DAMAGE_KIND_FLAK) {
+            armor = GOBJ_HEALTH(gobj)->armor;
+            if (amount < 0) {
+                amount = -amount;
+            }
+            if (from == gPlayerOffset) {
+                DamageShowFlakJacketMsg(id);
+            }
+            armor -= amount;
+            hurt = 0;
+            if (armor < 0) {
+                armor = 0;
+            }
+            GOBJ_HEALTH(gobj)->armor = armor;
+        }
+        if (hurt) {
+            if (amount < GOBJ_HEALTH(gobj)->health) {
+                health->health -= amount;
+            } else if (NPCDebugGetNoDamageFlag() && id == gPlayerOffset) {
+                GOBJ_HEALTH(gobj)->health = 150;
+            } else {
+                health->health = 0;
+            }
+        }
+        if (GOBJ_HEALTH(gobj)->health == 0) {
+            if (gobj->cas != NULL) {
+                killed = 0;
+                if (id != gPlayerOffset) {
+                    action = NPCKill(id, &dir);
+                    if (action) {
+                        type = action;
+                        killed = 1;
+                    }
+                } else {
+                    CASRequestAction(id, 0xD);
+                    gTargetModeFlag = 0;
+                }
+                CASRequestAction(id, type);
+                if ((killed || type == 0x11) && (u32)(gobj->npcState - 1) < 2) {
+                    if (killed) {
+                        if (type == 0x11) {
+                            EGSMathFIX_VectorScaleToLength(&dir, 0x18000, &dir);
+                            dir.vy += 0x18000;
+                        } else {
+                            EGSMathFIX_VectorScaleToLength(&dir, 0xB320, &dir);
+                            dir.vy += 0xB320;
+                        }
+                        push = dir;
+                    } else if (from != -1) {
+                        func_800669B0(pos, gameObjectsInfo[from].runtime, &dir);
+                        dir.vx = -dir.vx;
+                        dir.vy = -dir.vy;
+                        dir.vz = -dir.vz;
+                        dir.vy = 0;
+                        GTEMath_VectorNormal((VECTOR *)&dir, (VECTOR *)&dir);
+                        push.vx = EGSMathFIXMul(dir.vx, -0x18000);
+                        push.vy = EGSMathFIXMul(dir.vy, -0x18000);
+                        push.vz = EGSMathFIXMul(dir.vz, -0x18000);
+                        push.vy += 0x1C000;
+                    } else {
+                        func_800669B0(&gExplosionPosition, gobj, &dir);
+                        dir.vy = 0;
+                        GTEMath_VectorNormal((VECTOR *)&dir, (VECTOR *)&dir);
+                        push.vx = EGSMathFIXMul(dir.vx, -0x18000);
+                        push.vy = EGSMathFIXMul(dir.vy, -0x18000);
+                        push.vz = EGSMathFIXMul(dir.vz, -0x18000);
+                        push.vy += 0x20000;
+                    }
+                    ((DamageMoveInfo *)gobj->move)->impulse.vx += push.vx;
+                    ((DamageMoveInfo *)gobj->move)->impulse.vy += push.vy;
+                    ((DamageMoveInfo *)gobj->move)->impulse.vz += push.vz;
+                }
+                if ((u32)(gobj->npcState - 1) < 2 && gobj->id != gPlayerOffset && type != 0x58 && rand() % 10 >= 7) {
+                    SysPlaySong(1, 0x17, (s32)gobj, NULL);
+                }
+            } else {
+                DamageDeathCAS(id, type);
+            }
+            cb = D_8010F984;
+        } else {
+            if ((u32)(gobj->npcState - 1) < 2) {
+                hitDir = D_80012154;
+                if (from != -1) {
+                    func_800669B0(pos, gameObjectsInfo[from].runtime, &hitDir);
+                }
+                if (gobj->id == gPlayerOffset && !gPlayerOnFireFlag) {
+                    SysPlaySong(1, 0x16, (s32)gobj, NULL);
+                }
+                if (gobj->id == gPlayerOffset) {
+                    if (!gPlayerOnFireFlag) {
+                        if (hitDir.vx != 0 || hitDir.vy != 0 || hitDir.vz != 0) {
+                            AnimateGobjRequestHit(gobj, &hitDir, 0);
+                        } else {
+                            AnimateGobjElectrocute(gobj);
+                        }
+                    }
+                } else if (hitDir.vx != 0 || hitDir.vy != 0 || hitDir.vz != 0) {
+                    AnimateGobjRequestHit(gobj, &hitDir, 1);
+                }
+            }
+            cb = D_8010F980;
+        }
+        if (cb != NULL) {
+            cb(id, by);
+        }
+    }
+    SysPostMessage(0xD, 4, by, id, 0, 0, 0, 0);
+}
 
 #ifdef NON_MATCHING
 /* Register allocation: the original keeps the raw id in fp and re-extends it per use (all ten callee-saved registers busy) */
@@ -436,7 +607,7 @@ void DamageGobjCAS(s16 id, s32 action) {
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS);
 #endif
 
-void DamageDeathCAS(s16 id) {
+void DamageDeathCAS(s16 id, s32 action) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
 
     gobj->healthInfo->health = -1;

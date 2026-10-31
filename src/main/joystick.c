@@ -4,9 +4,12 @@
 #include "level.h"
 
 SDATA_LOCAL(D_8010F84C)
+SDATA_LOCAL(D_8010FFE0)
 
 #define JOY_BUTTONS 16
 #define JOY_MAPPED_BUTTONS 9 /* buttons remapped through gJoyMap, the rest are cleared */
+
+#define JOY_ABS(x) ((x) >= 0 ? (x) : -(x))
 
 /* Per mode, per button action (mJoyBtnInfo[mode][button], 0x1C bytes). */
 typedef struct JoyBtnInfo {
@@ -14,9 +17,9 @@ typedef struct JoyBtnInfo {
     /* 0x04 */ s32 action; /* CAS action requested on release */
     /* 0x08 */ u8 unk08;
     /* 0x09 */ u8 pad09[3];
-    /* 0x0C */ s32 unk0C;
-    /* 0x10 */ s32 unk10;
-    /* 0x14 */ s32 unk14;
+    /* 0x0C */ s32 unk0C;     /* reaction table (ReactionSet.entries), 0: none */
+    /* 0x10 */ u32 holdDelay; /* frames to hold before the press action fires, 0: at once */
+    /* 0x14 */ u32 holdCount; /* JOY_HOLD_FIRED once fired */
     /* 0x18 */ s16 relTicks;
     /* 0x1A */ u8 pad1A[2];
 } JoyBtnInfo;
@@ -36,7 +39,10 @@ typedef struct JoyDirInfo {
 typedef struct JoyMoveView {
     /* 0x000 */ u8 unk000[0x24];
     /* 0x024 */ s32 velY;
-    /* 0x028 */ u8 unk028[0x17C];
+    /* 0x028 */ u8 unk028[0x98];
+    /* 0x0C0 */ VECTOR32 nextRot;      /* rotation.next.pos */
+    /* 0x0D0 */ VECTOR32 nextRotDelta; /* rotation.next.delta, << 12 */
+    /* 0x0E0 */ u8 unk0E0[0xC4];
     /* 0x1A4 */ u32 edgeFlags;
 } JoyMoveView;
 
@@ -66,9 +72,16 @@ typedef struct JoyStickState {
     /* 0x38 */ u8 unk38[4];
 } JoyStickState;
 
-/* Per-object joystick controller state. */
+/* Joystick controller state (the one instance is D_801056C8). */
 typedef struct JoyController {
-    /* 0x000 */ u8 unk000[0x14];
+    /* 0x000 */ u8 initialized;
+    /* 0x001 */ u8 pad001[3];
+    /* 0x004 */ s32 mode;     /* D_801056CC */
+    /* 0x008 */ s32 prevMode; /* D_801056D0 */
+    /* 0x00C */ struct JoyBtnInfo *btns; /* D_801056D4: mJoyBtnInfo[mode] */
+    /* 0x010 */ u8 deactivated;     /* D_801056D8 */
+    /* 0x011 */ u8 menuDeactivated; /* D_801056D9 */
+    /* 0x012 */ u8 pad012[2];
     /* 0x014 */ s32 bitA;
     /* 0x018 */ u8 downA;
     /* 0x019 */ u8 pad019[3];
@@ -80,11 +93,13 @@ typedef struct JoyController {
     /* 0x038 */ JoyDirInfo *dirs;
     /* 0x03C */ JoyStickState sticks[4];
     /* 0x12C */ struct JoyDirDefault *dirDefaults; /* 4 per set, indexed by JoyDirInfo.type */
-    /* 0x130 */ s32 prevAimState;
+    /* 0x130 */ u32 prevAimState;
     /* 0x134 */ u32 aimState; /* 0..5 */
     /* 0x138 */ s32 unk138;
     /* 0x13C */ s32 unk13C;
     /* 0x140 */ u8 dirActive;
+    /* 0x141 */ u8 pad141[0xB];
+    /* 0x14C */ s32 runTicks; /* 10 after a type 7 move, then counts down */
 } JoyController;
 
 typedef struct JoyDirDefault {
@@ -215,7 +230,7 @@ void func_80035434(s32 mode) {
         btn->unk00 = 0;
         btn->action = 0;
         btn->unk08 = 0;
-        btn->unk10 = 0;
+        btn->holdDelay = 0;
         btn->relTicks = 0;
         btn->unk0C = 0;
     }
@@ -385,7 +400,138 @@ void GameSysJoystickInit(void) {
 INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystickInit);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", GameSysJoystick);
+extern u8 gPlayerRadioFlag;
+extern int gSystemState;
+extern s32 gSystemTick;
+extern u16 D_8010FFE0; /* pad buttons of the previous frame */
+extern s32 D_801056D0;  /* previous joystick mode */
+void SysStatePush(int state);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
+void SysStopMovie(void);
+void EGSDisplayQueueInterrupt(void (*fn)(), s32 delay, void *arg);
+void PlayerConfirmOrders(void);
+Gobj *GameCameraGetPrimaryGobj(void);
+void func_8003915C(JoyController *joy, u8 *pad);
+s32 func_80039B24(JoyController *joy);
+
+#define JOY_CTRL ((JoyController *)&D_801056C8)
+
+/* The movement stick is pushed. */
+static inline u8 JoyIsMoving(void) {
+    u8 moving = 0;
+
+    if (JOY_CTRL->sticks[0].unit.vx != 0 || JOY_CTRL->sticks[0].unit.vy != 0 || JOY_CTRL->sticks[0].unit.vz != 0) {
+        moving = 1;
+    }
+    return moving;
+}
+#define JOY_HOLD_FIRED 666
+
+/* Per-frame joystick handling: movie skip, radio orders, button actions, pause. */
+void GameSysJoystick(void) {
+    Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    u8 *pad;
+    u16 buttons;
+    s32 i;
+    JoyBtnInfo *btn;
+    s32 action;
+    Gobj *primary;
+    JoyController *joy;
+    JoyBtnInfo **tbl;
+    s32 *mode;
+
+    if (JOY_CTRL->initialized == 0 || (u32)gSystemTick < 4 || gobj == NULL) {
+        return;
+    }
+    EGSDeviceControllerRead(&pad, 0);
+    buttons = *(u16 *)(pad + 4);
+    if (gSystemState == 3) {
+        if (D_8010F84C[0]++ > 0x14 && JoyTestBit((u8 *)&buttons, 6)) {
+            D_8010F84C[0] = 0;
+            SysStopMovie();
+        }
+        return;
+    }
+    if (gPlayerRadioFlag) {
+        if (D_8010F84C[0]++ > 0x14 && buttons != D_8010FFE0) {
+            if (D_8010FFE0 < buttons && JoyTestBit((u8 *)&buttons, 6)) {
+                D_8010F84C[0] = 0;
+                PlayerConfirmOrders();
+                return;
+            }
+            /* reorg puts this store in a delay slot, so it also happens when buttons > D_8010FFE0 */
+            if (buttons != D_8010FFE0 && buttons < D_8010FFE0) {
+                D_8010FFE0 = buttons;
+            }
+        }
+        return;
+    }
+    if (JOY_CTRL->mode == 5 && GameCameraGetMode() == 19 && buttons != 0 && buttons != D_8010FFE0 &&
+        D_8010F84C[0]++ > 0x14) {
+        if (D_8010FFE0 < buttons && buttons != 0) {
+            primary = GameCameraGetPrimaryGobj();
+            SysPostMessage(0x13, 4, primary->id, primary->id, 0, 0, 0, 0);
+            D_8010F84C[0] = 0;
+        } else if (buttons != D_8010FFE0 && buttons < D_8010FFE0) {
+            D_8010FFE0 = buttons;
+        }
+    }
+    joy = JOY_CTRL;
+    func_8003915C(joy, pad);
+    if (D_801056CC == 5 || D_801056D8 != 0) {
+        return;
+    }
+    i = 0;
+    tbl = &joy->btns; /* the original keeps &joy->btns in a register across the loop */
+    for (; i < JOY_BUTTONS; i++) {
+        btn = &(*tbl)[i];
+        if (JoyTestBit((u8 *)&buttons, i)) {
+            if (btn->unk08 && JoyTestBit((u8 *)&D_8010FFE0, i) && btn->holdDelay < btn->holdCount) {
+                continue;
+            }
+            action = 0;
+            if (btn->unk0C != 0) {
+                action = func_80035328((ReactionSet *)btn, JoyIsMoving(), buttons, gobj);
+            }
+            if (action == 0) {
+                action = btn->unk00;
+            }
+            if (btn->holdDelay == 0 || btn->holdCount >= btn->holdDelay) {
+                if (btn->holdDelay == 0 || btn->holdCount != JOY_HOLD_FIRED) {
+                    btn->holdCount = JOY_HOLD_FIRED;
+                    btn->relTicks = -JOY_ABS(btn->relTicks);
+                    CASRequestAction(gobj->id, action);
+                }
+            } else if (btn->holdCount != JOY_HOLD_FIRED) {
+                btn->holdCount++;
+            }
+        } else if (JoyTestBit((u8 *)&D_8010FFE0, i)) {
+            if (btn->holdCount < btn->holdDelay) {
+                CASRequestAction(gobj->id, btn->unk00);
+            }
+            btn->holdCount = 0;
+            if (btn->relTicks != 0) {
+                btn->relTicks = JOY_ABS(btn->relTicks);
+                EGSDisplayQueueInterrupt(iJoystickRelTimerCB, btn->relTicks, &(*tbl)[i]);
+            } else {
+                CASRequestAction(gobj->id, btn->action);
+            }
+        }
+    }
+    mode = &JOY_CTRL->mode; /* addressed through &mode in the original */
+    if (*mode == 6) {
+        func_80039B24(JOY_CTRL);
+    }
+    if (*mode != 5 && D_801056D9 == 0) {
+        if ((JoyTestBit((u8 *)&buttons, 11) && !JoyTestBit((u8 *)&D_8010FFE0, 11)) || pad[0] == 0xFF) {
+            D_8010FFE0 |= 0x800;
+            SysStatePush(7);
+        } else {
+            D_8010FFE0 = buttons;
+        }
+    }
+    JOY_CTRL->prevMode = D_801056CC;
+}
 
 s32 GameSysJoystickSetMode(s32 mode) {
     s32 i;
@@ -396,7 +542,7 @@ s32 GameSysJoystickSetMode(s32 mode) {
     D_801056C8.mode = mode;
     D_801056D4 = mJoyBtnInfo[mode];
     for (; i < JOY_BUTTONS; i++) {
-        *(s32 *)((u8 *)D_801056D4 + i * sizeof(JoyBtnInfo) + 0x14) = mJoyBtnInfo[old][i].unk14;
+        *(s32 *)((u8 *)D_801056D4 + i * sizeof(JoyBtnInfo) + 0x14) = mJoyBtnInfo[old][i].holdCount;
     }
     return old;
 }
@@ -660,13 +806,82 @@ typedef struct JoyCameraDisplay {
 } JoyCameraDisplay;
 
 typedef struct JoyCamera {
-    /* 0x00 */ JoyCameraDisplay *display;
+    /* 0x000 */ JoyCameraDisplay *display;
+    /* 0x004 */ u8 unk004[0x948];
+    /* 0x94C */ s32 angleFull; /* 0: only angle.vx is meaningful */
+    /* 0x950 */ u8 unk950[0x34];
+    /* 0x984 */ VECTOR32 angle;
+    /* 0x994 */ u8 unk994[0x388];
+    /* 0xD1C */ VECTOR32 unkD1C;
+    /* 0xD2C */ u8 unkD2C[0x14];
+    /* 0xD40 */ u8 unkD40;
 } JoyCamera;
 
 extern JoyCamera *gCamera;
 s32 EGSMathFIXMul(s32 a, s32 b);
 
-#define JOY_ABS(x) ((x) >= 0 ? (x) : -(x))
+
+/* Joystick-side view of a CharacterMovement (movement.c) for turning. */
+typedef struct JoyTurnMove {
+    /* 0x00 */ s32 turnSpeedStill;
+    /* 0x04 */ s32 turnSpeedMoving;
+    /* 0x08 */ VECTOR32 input; /* stick direction, character relative */
+    /* 0x18 */ VECTOR32 vel;
+    /* 0x28 */ s32 speed;
+    /* 0x2C */ VECTOR32 dir; /* overrides vel when nonzero */
+    /* 0x3C */ s32 type;     /* 5, 8, 9: standing still */
+} JoyTurnMove;
+
+#define JOY_TURNMOVE(gobj) (*(JoyTurnMove **)((u8 *)(gobj)->move + 0x1A8))
+
+typedef struct JoySVector {
+    s16 vx, vy, vz, pad;
+} JoySVector;
+
+extern VECTOR32 D_800114C8; /* zero vector */
+void RotMatrixYXZ(JoySVector *r, GOBJ_MATRIX *m);
+s32 ratan2(s32 y, s32 x);
+void EGSGeometry_AngleInterpolate(s32 from, s32 to, s32 step, u8 mode, s32 *out, s32 *remain);
+
+#define JOY_FIX_TO_INT(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+
+static inline void JoyAngleToMatrixYXZ(VECTOR32 *angle, GOBJ_MATRIX *m) {
+    JoySVector r;
+
+    r.vx = -angle->vx;
+    r.vy = angle->vy;
+    r.vz = -angle->vz;
+    RotMatrixYXZ(&r, m);
+    m->m[0][1] = -m->m[0][1];
+    m->m[1][0] = -m->m[1][0];
+    m->m[1][2] = -m->m[1][2];
+    m->m[2][1] = -m->m[2][1];
+}
+
+static inline u8 JoyGobjIsStill(Gobj *gobj) {
+    s32 type = JOY_TURNMOVE(gobj)->type;
+    s32 still = 0;
+
+    if ((gobj->cas->flags & 2) || type == 5 || type == 8 || type == 9) {
+        still = 1;
+    }
+    return still;
+}
+
+/* Facing direction (matrix column 2) for YXZ angles. */
+static inline void JoyAngleToForward(VECTOR32 *angle, VECTOR32 *fwd) {
+    GOBJ_MATRIX m;
+
+    JoyAngleToMatrixYXZ(angle, &m);
+    fwd->vx = m.m[0][2];
+    fwd->vy = m.m[1][2];
+    fwd->vz = m.m[2][2];
+}
+
+static inline void JoyArctan(s32 y, s32 x, s32 *out) {
+    *out = ratan2(y, x);
+}
+
 
 /* Convert between camera-relative stick input and world XZ (toWorld: 1). */
 void func_800369AC(VECTOR32 *local, VECTOR32 *world, u8 toWorld) {
@@ -739,11 +954,185 @@ void func_800369AC(VECTOR32 *local, VECTOR32 *world, u8 toWorld) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80036D24);
+s32 MovementGobjRegisterCharacterMovement(Gobj *gobj, VECTOR32 *vel, s32 type);
+u8 GameCameraCheckMode(s32 mode);
+u8 GameCameraCheckJoystickMode(s32 mode);
+Gobj *GameCameraGetPrimaryGobj(void);
+s32 GameCameraGetAction(void);
+void GameCameraSetAction(s32 action);
+void GameCameraCurrentModeGetDefaultDistance(s32 *dist);
+void CameraAccessMoveInfo(void *camera, s32 op, s32 index, s32 arg3);
+
+typedef struct JoyCollInfo {
+    /* 0x00 */ s32 mode; /* 1: grabbing */
+} JoyCollInfo;
+
+#define JOY_GRABBING(gobj)                                                                     \
+    ((gobj) != NULL && (gobj)->move != NULL && (gobj)->move->coll != NULL &&                   \
+     ((JoyCollInfo *)(gobj)->move->coll)->mode == 1)
+
+#define JOY_VEC_NONZERO(v) ((v).vx != 0 || (v).vy != 0 || (v).vz != 0)
+
+
+#define JOY_WRAP_ANGLE(a)          \
+    if ((a) > 0x800) {             \
+        (a) -= 0x1000;             \
+    } else if ((a) < -0x800) {     \
+        (a) += 0x1000;             \
+    }
+
+static inline void JoyDot(VECTOR32 *a, VECTOR32 *b, s32 *out) {
+    *out = EGSMathFIXMul(a->vx, b->vx) + EGSMathFIXMul(a->vy, b->vy) + EGSMathFIXMul(a->vz, b->vz);
+}
+
+/* The rotation angles the movement update will produce next. */
+static inline void JoyGobjGetNextAngle(Gobj *gobj, VECTOR32 *angle) {
+    VECTOR32 d;
+
+    d.vx = JOY_FIX_TO_INT(((JoyMoveView *)gobj->move)->nextRotDelta.vx);
+    d.vy = JOY_FIX_TO_INT(((JoyMoveView *)gobj->move)->nextRotDelta.vy);
+    d.vz = JOY_FIX_TO_INT(((JoyMoveView *)gobj->move)->nextRotDelta.vz);
+    angle->vx = ((JoyMoveView *)gobj->move)->nextRot.vx + d.vx;
+    JOY_WRAP_ANGLE(angle->vx);
+    angle->vy = ((JoyMoveView *)gobj->move)->nextRot.vy + d.vy;
+    JOY_WRAP_ANGLE(angle->vy);
+    angle->vz = ((JoyMoveView *)gobj->move)->nextRot.vz + d.vz;
+    JOY_WRAP_ANGLE(angle->vz);
+}
+
+/* Movement stick to a character movement request (type 5: still, 6/7: moving). */
+s32 func_80036D24(JoyController *joy) {
+    VECTOR32 world = D_800114C8;
+    Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    JoyStickState *stick = &joy->sticks[0];
+    JoyTurnMove *cm;
+    s32 type;
+    VECTOR32 fwd;
+    VECTOR32 local;
+    VECTOR32 angle;
+    s32 speed;
+    s32 moveType;
+    u8 fpsCam;
+    u8 notAhead;
+    s32 dot;
+
+    if (gobj == NULL || gobj->move == NULL || JOY_TURNMOVE(gobj) == NULL) {
+        return 0;
+    }
+    cm = JOY_TURNMOVE(gobj);
+    type = cm->type;
+    JoyGobjGetNextAngle(gobj, &angle);
+    {
+        GOBJ_MATRIX m;
+
+        JoyAngleToMatrixYXZ(&angle, &m);
+        fwd.vx = m.m[0][2];
+        fwd.vy = m.m[1][2];
+        fwd.vz = m.m[2][2];
+    }
+    fpsCam = 0;
+    if (GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) || GameCameraCheckMode(3) ||
+        GameCameraCheckMode(8)) {
+        fpsCam = 1;
+    }
+    if (JoystickIsDirInputDeactivated()) {
+        world.vx = 0;
+        world.vy = 0;
+        world.vz = 0;
+        MovementGobjRegisterCharacterMovement(gobj, &world, 5);
+        local.vx = 0;
+        local.vy = 0;
+        local.vz = 0;
+        cm->input = local;
+        CASRequestAction(gobj->id, 4);
+        return 1;
+    }
+    local = stick->unit;
+    if (stick->unit.vx != 0 || stick->unit.vy != 0 || stick->unit.vz != 0) {
+        func_800369AC(&stick->unit, &world, 1);
+        speed = stick->len;
+    } else {
+        speed = 0;
+        world.vx = 0;
+        world.vy = 0;
+        world.vz = 0;
+    }
+    if (joy->unk138 == 3 || (joy->unk138 == 4 && local.vx == 0 && local.vy == 0 && local.vz == 0)) {
+        if (type == 5 || type == 8 || type == 9) {
+            speed = 0;
+            world.vx = 0;
+            world.vy = 0;
+            world.vz = 0;
+            local.vx = 0;
+            local.vy = 0;
+            local.vz = 0;
+        } else {
+            speed = 0x1000;
+            world.vx = gobj->anim->frame->m[0][2];
+            world.vy = gobj->anim->frame->m[1][2];
+            world.vz = gobj->anim->frame->m[2][2];
+            world.vy = -world.vy;
+            func_800369AC(&local, &world, 0);
+        }
+        moveType = type;
+    } else if (GameCameraCheckMode(16)) {
+        moveType = 5;
+    } else if (((JoyCollInfo *)gobj->move->coll)->mode == 1 && gobj->cas->active != 8) {
+        moveType = 5;
+    } else if (!(gobj->cas->active == 4 || gobj->cas->active == 10 || gobj->cas->active == 12) &&
+               (world.vx != 0 || world.vy != 0 || world.vz != 0)) {
+        if (gobj->cas->active == 8) {
+            if (JOY_ABS(local.vz) < 0xF0A) {
+                moveType = 6;
+            } else {
+                moveType = 5;
+            }
+        } else if (!(gobj->cas->active == 1 || gobj->cas->active == 2 || gobj->cas->active == 9)) {
+            moveType = 5;
+        } else {
+            JoyDot(&fwd, &world, &dot);
+            if (joy->aimState >= 2) {
+                dot = -dot;
+            }
+            notAhead = dot < 0xDDC;
+            if ((type == 5 || type == 8 || type == 9) &&
+                ((fpsCam && joy->unk030 == 0) ? (local.vz >= -0xA49 && local.vz <= 0xA49) : notAhead)) {
+                moveType = 5;
+            } else if (joy->prevAimState >= 2 && joy->aimState < 2) {
+                moveType = 5;
+            } else if (joy->prevAimState < 2 && joy->aimState >= 2) {
+                moveType = 5;
+            } else if (joy->aimState >= 2) {
+                moveType = 6;
+            } else {
+                moveType = 7;
+            }
+        }
+    } else {
+        moveType = 5;
+    }
+    if ((moveType == 6 && joy->aimState < 2) ||
+        (moveType == 7 && (gobj->cas->active == 2 || (gobj->cas->flags & 0x100000)))) {
+        if (((JoyMoveView *)gobj->move)->edgeFlags & 8) {
+            moveType = 5;
+        }
+    }
+    MovementGobjRegisterCharacterMovement(gobj, &world, moveType);
+    CASRequestAction(gobj->id, 4);
+    cm->speed = speed;
+    cm->input = local;
+    if (moveType == 7) {
+        joy->runTicks = 10;
+    } else if (joy->runTicks > 0) {
+        joy->runTicks--;
+    } else {
+        joy->runTicks = 0;
+    }
+    return 1;
+}
 
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800374E8);
 
-u8 GameCameraCheckMode(s32 mode);
 
 /* Joystick-side view of MovementInfo.charMove (movement.c's CharacterMovement). */
 typedef struct JoyCharMove {
@@ -755,7 +1144,7 @@ typedef struct JoyCharMove {
 /* branch layout of the aim-height test and the still flag copy differ */
 /* Update the aim state machine from the aiming stick. */
 void func_80038720(JoyController *joy) {
-    u8 still = 0;
+    s32 still = 0;
     u32 state = joy->aimState;
     Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
     VECTOR32 v = joy->sticks[3].unit;
@@ -818,9 +1207,109 @@ void func_80038720(JoyController *joy) {
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80038720);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800389E0);
+/* Pick the camera action and the character's facing override from the sticks. */
+void func_800389E0(JoyController *joy) {
+    JoyStickState *move = &joy->sticks[0];
+    JoyStickState *strafe = &joy->sticks[1];
+    Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    JoyStickState *look = &joy->sticks[2];
+    JoyTurnMove *cm;
+    u8 fpsCam;
+    s32 action;
+    VECTOR32 angle;
+    VECTOR32 fwd;
+    s32 dist;
 
-void func_80036D24(JoyController *joy);
+    if (gobj == NULL || gobj->move == NULL || JOY_TURNMOVE(gobj) == NULL) {
+        return;
+    }
+    cm = JOY_TURNMOVE(gobj);
+    fpsCam = 0;
+    if (GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) || GameCameraCheckMode(3) ||
+        GameCameraCheckMode(8)) {
+        fpsCam = 1;
+    }
+    action = GameCameraGetAction();
+    if (gCamera->angleFull == 0) {
+        angle.vx = gCamera->angle.vx;
+    } else {
+        angle = gCamera->angle;
+    }
+    angle.vx = 0;
+    angle.vz = 0;
+    JoyAngleToForward(&angle, &fwd);
+    if ((action == 7 || action == 5) &&
+        (JOY_VEC_NONZERO(move->unit) || JOY_VEC_NONZERO(strafe->unit) || JOY_VEC_NONZERO(look->unit))) {
+        action = 0;
+    }
+    if (!(gobj->cas->flags & 0x1000) && !JOY_GRABBING(gobj)) {
+        if (action == 5) {
+            goto clear;
+        }
+        if (action == 7) {
+            goto done;
+        }
+        if (!(gobj->cas->active == 1 || gobj->cas->active == 2 || gobj->cas->active == 9)) {
+            goto clear;
+        }
+        if ((GameCameraCheckMode(14) || GameCameraCheckMode(15) || GameCameraCheckMode(16) ||
+             GameCameraCheckMode(17) || fpsCam) &&
+            cm->type == 5 && (gobj->cas->flags & 2) && gobj->cas->active != 9 && !(gobj->cas->flags & 0x400) &&
+            strafe->dir.vx != 0) {
+            cm->type = strafe->dir.vx > 0 ? 9 : 8;
+        }
+        if (joy->aimState >= 2 && GameCameraCheckMode(9)) {
+            cm->dir.vx = -cm->vel.vx;
+            cm->dir.vy = -cm->vel.vy;
+            cm->dir.vz = -cm->vel.vz;
+            goto done;
+        }
+        if ((GameCameraCheckMode(14) || GameCameraCheckMode(15) || GameCameraCheckMode(16) ||
+             GameCameraCheckMode(17)) &&
+            JoyGobjIsStill(gobj) && !JOY_VEC_NONZERO(move->dir) && strafe->dir.vx != 0) {
+            goto faceFwd;
+        }
+        if (GameCameraCheckJoystickMode(1) || GameCameraGetPrimaryGobj() != gameObjectsInfo[gCASJoystickGobjID].runtime) {
+            if (JOY_VEC_NONZERO(cm->vel)) {
+                goto followVel;
+            }
+            goto done;
+        }
+        if (!fpsCam || joy->unk138 == 3) {
+            goto clear;
+        }
+        if (joy->unk030 != 0) {
+        followVel:
+            cm->dir = cm->vel;
+            goto done;
+        }
+        if ((JoyGobjIsStill(gobj) && gobj->cas->active != 9 && !(gobj->cas->flags & 0x400)) ||
+            JOY_VEC_NONZERO(look->dir)) {
+        faceFwd:
+            cm->dir = fwd;
+        }
+        goto done;
+    clear:
+        cm->dir.vx = 0;
+        cm->dir.vy = 0;
+        cm->dir.vz = 0;
+    }
+done:
+    if (joy->aimState == 3) {
+        action = 7;
+        cm->dir = fwd;
+    }
+    if (joy->aimState >= 2 && (fpsCam || GameCameraCheckMode(9))) {
+        GameCameraCurrentModeGetDefaultDistance(&dist);
+        dist = dist >= 0 ? dist >> 1 : -(-dist >> 1);
+        gCamera->unkD1C.vx = dist;
+        gCamera->unkD40 = 0;
+        CameraAccessMoveInfo(gCamera, 1, 5, 1);
+    }
+    GameCameraSetAction(action);
+}
+
+s32 func_80036D24(JoyController *joy);
 void func_800374E8(JoyController *joy);
 void func_800389E0(JoyController *joy);
 void func_80038720(JoyController *joy);
@@ -907,15 +1396,93 @@ void func_8003915C(JoyController *joy, u8 *pad) {
     func_800389E0(joy);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/joystick", JoystickGobjTurn);
+/* Turn the joystick character towards its movement direction (returned in out). */
+void JoystickGobjTurn(VECTOR32 *out) {
+    Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    JoyTurnMove *cm;
+    VECTOR32 vel;
+    VECTOR32 angle;
+    VECTOR32 fwd;
+    s32 yaw;
+    s32 target;
+    s32 step;
+    s32 remain;
+    s32 speed;
+    s32 diff;
+
+    if (gobj == NULL || gobj->move == NULL || JOY_TURNMOVE(gobj) == NULL) {
+        return;
+    }
+    cm = JOY_TURNMOVE(gobj);
+    if (cm->dir.vx != 0 || cm->dir.vy != 0 || cm->dir.vz != 0) {
+        *out = cm->dir;
+    } else {
+        *out = cm->vel;
+    }
+    if (gobj->cas->flags & 0xC000000) {
+        cm->turnSpeedMoving = 0xC00;
+    } else {
+        cm->turnSpeedMoving = 0x400;
+    }
+    cm->turnSpeedStill = 0xC00;
+    cm->turnSpeedMoving = 0xC00;
+    cm->turnSpeedStill = 0xC00;
+    cm->turnSpeedMoving = 0xC00;
+    vel = gobj->move->unkA0;
+    angle = gobj->move->rot;
+    angle.vx += JOY_FIX_TO_INT(vel.vx);
+    angle.vy += JOY_FIX_TO_INT(vel.vy);
+    angle.vz += JOY_FIX_TO_INT(vel.vz);
+    JoyAngleToForward(&angle, &fwd);
+    {
+        VECTOR32 push = D_800114C8;
+
+        if (out->vx != 0 || out->vy != 0 || out->vz != 0) {
+            yaw = angle.vy;
+            JoyArctan(out->vx, out->vz, &target);
+            if (cm->type == 5 || cm->type == 8 || cm->type == 9 || cm->type == 6) {
+                speed = cm->turnSpeedStill;
+            } else {
+                speed = cm->turnSpeedMoving;
+            }
+            EGSGeometry_AngleInterpolate(yaw, target, speed, 1, &step, &remain);
+            diff = step + remain;
+            if (gobj->cas->active == 9) {
+                if (JOY_ABS(diff) >= 0x78F) {
+                    step = 0;
+                }
+            } else if (JOY_ABS(diff) >= 0x78F && JoystickGobjIsInPureStrafe(gobj)) {
+                if ((D_801056F8 == 1 && diff < 0) || (D_801056F8 == 2 && diff > 0)) {
+                    step = -step;
+                }
+            }
+            step <<= 12;
+            if (JoyGobjIsStill(gobj)) {
+                push.vy = (vel.vy * 6 + step * 10) / 22;
+            } else if (D_801056F8 == 0 && (GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) ||
+                                           GameCameraCheckMode(3) || GameCameraCheckMode(8))) {
+                push.vy = (vel.vy * 8 + step * 4) / 20;
+            } else {
+                push.vy = (vel.vy * 8 + step * 4) / 32;
+            }
+            gobj->move->unkF0.vx += push.vx;
+            gobj->move->unkF0.vy += push.vy;
+            gobj->move->unkF0.vz += push.vz;
+        }
+    }
+    if (cm->dir.vx != 0 || cm->dir.vy != 0 || cm->dir.vz != 0) {
+        *out = cm->dir;
+    } else {
+        *out = cm->vel;
+    }
+}
 
 #ifdef NON_MATCHING
 /* last test: the original branches on bit 11 with 1 in the delay slot instead of sltiu */
-s32 func_80039B24(void) {
+s32 func_80039B24(JoyController *joy) {
     u8 *pad;
     s32 dir = 0;
     u32 i;
-    s32 sel;
 
     EGSDeviceControllerRead(&pad, 0);
     if (D_8010F84C[1] != *(u16 *)(pad + 4)) {
@@ -931,7 +1498,7 @@ s32 func_80039B24(void) {
             break;
         }
     }
-    InterfaceWeaponSelect(i < JOY_MAPPED_BUTTONS && JoyTestBit(pad + 4, i) ? (JoyTestBit(pad + 4, 0xB) ? 0 : 1) : 0, dir);
+    InterfaceWeaponSelect((i < JOY_MAPPED_BUTTONS && JoyTestBit(pad + 4, i)) ? !JoyTestBit(pad + 4, 0xB) : 0, dir);
     return 1;
 }
 #else

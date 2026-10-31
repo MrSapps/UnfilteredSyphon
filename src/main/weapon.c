@@ -40,7 +40,12 @@ typedef struct WeaponInfo {
     /* 0x0F */ s8 npcFireSnd; /* SysPlayWpnSnd id; -2: use fireSong */
     /* 0x10 */ s16 npcAlertSnd;
     /* 0x12 */ s16 deathAction;
-    /* 0x14 */ u8 unk14[6];
+    /* 0x14 */ u32 unk14_0 : 6;
+    /* 0x14 */ u32 damageNear : 10;
+    /* 0x14 */ u32 damageFar : 10;
+    /* 0x14 */ u32 fireDelay : 5;
+    /* 0x14 */ u32 unk14_31 : 1;
+    /* 0x18 */ u8 unk18[2];
     /* 0x1A */ s8 tipY; /* muzzle offset in the hand */
     /* 0x1B */ s8 tipZ;
     /* 0x1C */ u8 unk1C[4];
@@ -167,7 +172,7 @@ void CASRequestAction(s32 id, s32 action);
 extern char D_8010F934[]; /* " " (.sdata) */
 
 u16 TextReplaceString(u16 id, char *str, s32 arg2, s32 arg3);
-void SysPlaySong(s32 arg0, s32 song, void *arg2, s32 arg3);
+s32 SysPlaySong(s32 arg0, s32 song, void *arg2, s32 arg3);
 s32 WeaponAddAmmo(s32 weapon, s32 rounds);
 s32 WeaponGetNextID(s32 weapon);
 void WeaponSelect(Gobj *gobj, s32 weapon, s32 arg2);
@@ -820,7 +825,226 @@ WeaponCallback WeaponSetTaserHitNpcCallback(WeaponCallback cb) {
     return old;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponTaser);
+/* TargetInfo fields used here */
+typedef struct WeaponTargetInfo {
+    /* 0x00 */ s16 targetId;
+    /* 0x02 */ s16 unk02;
+    /* 0x04 */ u32 flags;
+    /* 0x08 */ u8 unk08[0x52];
+    /* 0x5A */ s16 aimBone; /* negative: aim at the body point */
+    /* 0x5C */ u8 unk5C[2];
+    /* 0x5E */ s16 windowId; /* window in the line of fire, -1 for none */
+    /* 0x60 */ u8 unk60[4];
+    /* 0x64 */ VECTOR32 bonePoint;
+    /* 0x74 */ VECTOR32 bodyPoint;
+} WeaponTargetInfo;
+
+VECTOR32 *SniperGetTarget(s32 *outId);
+void ParticleTaser(VECTOR32 *aim);
+void ParticleTaserSetTarget(Gobj *target, s32 bone);
+void ParticleTaserRetract(void);
+void NPCDamagedByPC(s32 id);
+void DamageShowFlakJacketMsg(s32 id);
+void DamageGOBJ(s16 from, s16 by, s16 to, s16 amount, s16 type);
+struct GameCamSlot;
+void GameCameraSetModeInteraction(s32 on, Gobj *primary, VECTOR32 *pos, struct GameCamSlot *slot, s32 arg4);
+void GameCameraRequestGetBehind(void);
+void JoystickDirInputDeactivate(s32 deactivate, u8 arg1);
+void SysStopSong(s32 arg0, s32 song);
+void AnimateGobjElectrocute(Gobj *gobj);
+void EGSGeometry_VectorRotateYXZ(VECTOR32 *in, VECTOR32 *angle, VECTOR32 *out);
+void NPCPutFireOnNPCShow(s32 id);
+extern s32 gSniperMode;
+extern s32 gSniperBonesHit;
+extern s32 sWindowCount;
+extern Gobj *sWindowArray[];
+extern s32 D_8010F930;           /* taser shock ticks, -1 before the first */
+extern s16 D_8010F92E;           /* taser hum song, -1 when not playing */
+extern struct GameCamSlot D_80118A78; /* camera slot for the taser close-up */
+
+#define GOBJ_TYPE_WINDOW 0x6D
+
+/* Taser trigger: fire (shoot the darts, then keep shocking) or release. */
+void WeaponTaser(Gobj *gobj, u8 fire) {
+    Gobj *target;
+    Gobj *hit;
+    VECTOR32 *aim;
+    s32 hitId;
+    s32 bone;
+    u32 bits;
+    s32 b;
+    u32 i;
+    s32 id;
+
+    if (fire) {
+        if (particleTaserState == 0 && D_80110028 != 0) {
+            D_8010F930 = -1;
+            D_80110028 = 0;
+            target = NULL;
+            if (gSniperMode != 0) {
+                aim = SniperGetTarget(&hitId);
+                if (hitId >= 0) {
+                    target = gameObjectsInfo[hitId].runtime;
+                }
+                if (target != NULL &&
+                    ((target->id != gPlayerOffset && !(GOBJINFO_WORD24(&gameObjectsInfo[target->id]) & 0x4000)) ||
+                     !(gSniperBonesHit & 0x6000)) &&
+                    !(target->cas->flags & 0x400) &&
+                    (target->npc == NULL || !(((WeaponNPC *)target->npc)->flags & 2)) && GOBJ_TYPE(hitId) != 2 &&
+                    target->healthInfo->health > 0) {
+                    bone = -1;
+                    gTaserGobjID = hitId;
+                    bits = gSniperBonesHit;
+                    for (b = 0; b < 15; b++) {
+                        if (bits & 1) {
+                            bone = b;
+                            break;
+                        }
+                        bits >>= 1;
+                    }
+                    ParticleTaserSetTarget(target, bone);
+                    ParticleTaser(aim);
+                    NPCDamagedByPC(gTaserGobjID);
+                    if (D_8010F904 != NULL) {
+                        D_8010F904(target->id);
+                    }
+                } else {
+                    gTaserGobjID = -1;
+                    ParticleTaserSetTarget(NULL, -1);
+                    ParticleTaser(aim);
+                    if (gameObjectsInfo[hitId].runtime->id == gPlayerOffset ||
+                        (GOBJINFO_WORD24(&gameObjectsInfo[gameObjectsInfo[hitId].runtime->id]) & 0x4000)) {
+                        DamageShowFlakJacketMsg(hitId);
+                    }
+                }
+                if (sWindowCount != 0) {
+                    for (i = 0; i < sWindowCount; i++) {
+                        id = sWindowArray[i]->id;
+                        if (GOBJ_TYPE(id) != GOBJ_TYPE_WINDOW) {
+                            DamageGOBJ(gPlayerOffset, gPlayerOffset, id, gWeaponInfo[0xD].damageNear, 0xF);
+                        }
+                    }
+                }
+            } else {
+                if (gobj->target->targetId >= 0 && gTaserGobjID == -1) {
+                    hit = gameObjectsInfo[gobj->target->targetId].runtime;
+                    if ((u32)(hit->npcState - 1) < 2 && !(hit->cas->flags & 0x400) &&
+                        (hit->npc == NULL || !(((WeaponNPC *)hit->npc)->flags & 2)) && hit->target->targetId >= 0 &&
+                        GOBJ_TYPE(hit->target->targetId) != 2) {
+                        if (hit->id != gPlayerOffset && !(GOBJINFO_WORD24(&gameObjectsInfo[hit->id]) & 0x4000)) {
+                            target = hit;
+                            if (D_8010F904 != NULL) {
+                                D_8010F904(hit->id);
+                            }
+                        } else {
+                            DamageShowFlakJacketMsg(hit->id);
+                        }
+                    }
+                }
+                if (target != NULL) {
+                    ParticleTaserSetTarget(target, -1);
+                    gTaserGobjID = target->id;
+                    DamageGOBJ(gobj->id, gobj->id, gTaserGobjID, 0, 0);
+                } else if (((WeaponTargetInfo *)gobj->target)->aimBone >= 0) {
+                    ParticleTaser(&((WeaponTargetInfo *)gobj->target)->bonePoint);
+                } else {
+                    ParticleTaser(&((WeaponTargetInfo *)gobj->target)->bodyPoint);
+                }
+                id = ((WeaponTargetInfo *)gobj->target)->windowId;
+                if (id >= 0 && GOBJ_TYPE(id) != GOBJ_TYPE_WINDOW) {
+                    DamageGOBJ(gPlayerOffset, gPlayerOffset, id, gWeaponInfo[0xD].damageNear, 0xF);
+                }
+            }
+            SysPlaySong(1, 0x11, gobj, 0);
+        } else if (particleTaserState == 2) {
+            if (gTaserGobjID != -1) {
+                if (D_8010F930 == -1) {
+                    if (gameObjectsInfo[gTaserGobjID].runtime->healthInfo->health > 0) {
+                        CASRequestAction(gTaserGobjID, 0x50);
+                        NPCSoundGobj(1, gTaserGobjID, NULL, 0xC80);
+                        D_8010F930 = 0;
+                    }
+                } else {
+                    if (gSniperMode == 0) {
+                        VECTOR32 from;
+                        VECTOR32 to;
+                        VECTOR32 dir;
+                        VECTOR32 out;
+                        VECTOR32 cam;
+                        VECTOR32 rot = { 0, 0x200, 0, 0 };
+                        s32 dist;
+
+                        from = gobj->move->pos;
+                        to = gameObjectsInfo[gTaserGobjID].runtime->move->pos;
+                        dir.vx = from.vx - to.vx;
+                        dir.vy = from.vy - to.vy;
+                        dir.vz = from.vz - to.vz;
+                        GTEMath_VectorNormal((VECTOR *)&dir, (VECTOR *)&dir);
+                        EGSGeometry_VectorRotateYXZ(&dir, &rot, &out);
+                        cam.vx = EGSMathFIXMul(out.vx, 0x140);
+                        cam.vy = EGSMathFIXMul(out.vy, 0x140);
+                        cam.vz = EGSMathFIXMul(out.vz, 0x140);
+                        EGSGeometry_GetFuzzyDistancePoint2Point(&from, &to, &dist);
+                        if (dist <= 0x280) {
+                            cam.vx += from.vx;
+                            cam.vy += from.vy;
+                            cam.vz += from.vz;
+                            cam.vy += 0xA0;
+                        } else {
+                            cam.vx += to.vx;
+                            cam.vy += to.vy;
+                            cam.vz += to.vz;
+                        }
+                        GameCameraSetModeInteraction(1, gameObjectsInfo[gTaserGobjID].runtime, &cam, &D_80118A78, 1);
+                    } else {
+                        JoystickDirInputDeactivate(-1, 0);
+                    }
+                    if (++D_8010F930 == 0x29) {
+                        NPCPutFireOnNPCShow(gTaserGobjID);
+                        NPCSoundGobj(1, gTaserGobjID, NULL, 0x3E80);
+                    }
+                    if (D_8010F92E == -1) {
+                        D_8010F92E = SysPlaySong(1, 0x19, gameObjectsInfo[gTaserGobjID].runtime, 0);
+                    }
+                    AnimateGobjElectrocute(gameObjectsInfo[gTaserGobjID].runtime);
+                    if (!(gobj->target->flags & 2)) {
+                        CASRequestAction(gobj->id, 0x16);
+                    }
+                }
+            } else {
+                JoystickDirInputDeactivate(0, 0);
+                ParticleTaserRetract();
+            }
+        }
+        if (D_80110028 != 0) {
+            JoystickDirInputDeactivate(-1, 0);
+        }
+    }
+    if (!fire) {
+        if (particleTaserState != 0) {
+            if (gSniperMode == 0) {
+                GameCameraSetModeInteraction(0, gobj, NULL, &D_80118A78, 1);
+                GameCameraRequestGetBehind();
+            }
+            ParticleTaserRetract();
+            if (gTaserGobjID != -1) {
+                if (gameObjectsInfo[gTaserGobjID].runtime->healthInfo->health > 0) {
+                    if (D_8010F930 >= 0x28) {
+                        DamageGOBJ(gobj->id, gobj->id, gTaserGobjID, 0x7FFF, 0x51);
+                    } else {
+                        CASRequestAction(gTaserGobjID, 0x52);
+                    }
+                }
+                gTaserGobjID = -1;
+            }
+            SysStopSong(1, D_8010F92E);
+            D_8010F92E = -1;
+        }
+        JoystickDirInputDeactivate(0, 0);
+        D_80110028 = 1;
+        D_8010F930 = -1;
+    }
+}
 
 #ifdef NON_MATCHING
 /* Loop pointer setup/strength reduction differs (one insn longer). */
