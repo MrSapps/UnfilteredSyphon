@@ -105,7 +105,7 @@ typedef struct ShadowObj {
 
 #define SHADOW_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define SHADOW_MIN(a, b) ((a) > (b) ? (b) : (a))
-#define SHADOW_MAX3(a, b, c) ((a) < SHADOW_MAX2(b, c) ? SHADOW_MAX2(b, c) : (a))
+#define SHADOW_MAX3(a, b, c) ((a) < SHADOW_MAX2(b, c) ? (s16)SHADOW_MAX2(b, c) : (a))
 #define SHADOW_MAX2(a, b) ((a) < (b) ? (b) : (a))
 #define SHADOW_ABS(x) ((x) < 0 ? -(x) : (x))
 /* 20.12 fixed point to integer, rounding towards zero */
@@ -199,28 +199,23 @@ void ShadowInit(void) {
 INCLUDE_ASM("asm/main/nonmatchings/shadow", ShadowInit);
 #endif
 
-#ifdef NON_MATCHING
-/* max-of-three: the original sign-extends only the y/z result and loads x straight into v0 */
 u8 func_800915DC(ShadowObj *obj, u8 *rgb) {
     ShadowBox *box;
-    s16 size;
     s32 level;
+    s32 c;
 
     if (obj->anim->model->flags & 0x400000) {
         box = obj->anim->box;
-        size = SHADOW_MAX3(box->x, box->y, box->z);
-        level = size / 16;
-        level = SHADOW_MAX(SHADOW_MIN(level, 255), 0);
-        rgb[2] = level;
-        rgb[1] = level;
-        rgb[0] = level;
+        level = SHADOW_MAX3(box->x, box->y, box->z);
+        level /= 16;
+        c = SHADOW_MAX(SHADOW_MIN(level, 255), 0);
+        rgb[2] = c;
+        rgb[1] = c;
+        rgb[0] = c;
         return 1;
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/shadow", func_800915DC);
-#endif
 
 static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, s32 count, u8 *rgb) {
     ShadowTex tex;

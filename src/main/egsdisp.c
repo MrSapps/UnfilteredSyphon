@@ -865,8 +865,6 @@ void EGSDisplayBuildPoly4FTrans(EGSPrim *p, u32 color, u32 v0, u32 v1, u32 v2, u
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc (tpage/u swapped) and clut load scheduling */
 void EGSDisplayBuildPoly4FT(PrimFT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 color, EGSTexture *tex, s32 abr) {
     s32 mode;
     s32 shift;
@@ -909,10 +907,10 @@ void EGSDisplayBuildPoly4FT(PrimFT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 
     h = tex->image.ph - 1;
     p->u0 = u;
     p->v0 = v;
+    p->clut = (tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F);
     p->v1 = v;
     p->tpage = tpage;
     p->u2 = u;
-    p->clut = (tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F);
     uEnd = u + w;
     vEnd = v + h;
     p->u1 = uEnd;
@@ -920,9 +918,6 @@ void EGSDisplayBuildPoly4FT(PrimFT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 
     p->u3 = uEnd;
     p->v3 = vEnd;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayBuildPoly4FT);
-#endif
 
 void EGSDisplayBuildPoly4G(EGSPrim *p, u32 c0, u32 v0, u32 v1, u32 v2, u32 v3, u32 c1, u32 c2, u32 c3) {
     p->len = 0x08000000;
@@ -957,8 +952,6 @@ void EGSDisplayBuildPoly4GTrans(EGSPrim *p, u32 c0, u32 v0, u32 v1, u32 v2, u32 
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc (tpage/u swapped) and clut load scheduling */
 void EGSDisplayBuildPoly4GT(PrimGT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 c0, u32 c1, u32 c2, u32 c3, EGSTexture *tex, s32 abr) {
     s32 mode;
     s32 shift;
@@ -1004,10 +997,10 @@ void EGSDisplayBuildPoly4GT(PrimGT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 
     h = tex->image.ph - 1;
     p->u0 = u;
     p->v0 = v;
+    p->clut = (tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F);
     p->v1 = v;
     p->tpage = tpage;
     p->u2 = u;
-    p->clut = (tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F);
     uEnd = u + w;
     vEnd = v + h;
     p->u1 = uEnd;
@@ -1015,9 +1008,6 @@ void EGSDisplayBuildPoly4GT(PrimGT4 *p, u32 xy0, u32 xy1, u32 xy2, u32 xy3, u32 
     p->u3 = uEnd;
     p->v3 = vEnd;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayBuildPoly4GT);
-#endif
 
 void EGSDisplayBuildLineG(EGSPrim *p, u32 c0, u32 v0, u32 v1, u32 c1) {
     p->len = 0x04000000;
@@ -1947,8 +1937,6 @@ s32 EGSDisplayMovieMalloc(u8 *buf, s32 size) {
     return newSize;
 }
 
-#ifdef NON_MATCHING
-/* OT index arithmetic and loop pointer allocation differ */
 s32 EGSDisplayCameraMalloc(EGSCamera *camera, s32 packets) {
     s32 first = camera->index * 2;
     s32 shift = camera->otShift;
@@ -1965,18 +1953,16 @@ s32 EGSDisplayCameraMalloc(EGSCamera *camera, s32 packets) {
         GsClearOt(0, 0, &gOtbl[i]);
     }
     if (packets > 0) {
-        packets <<= 6;
+        s32 bytes = packets << 6;
+
         D_80110234 = D_8014BAD8;
-        gOutPacket = D_8014BAD8 + packets;
-        gPacketAreaSize = packets;
-        gPacketAreaSafeSize = packets;
-        gInitHeap = gOutPacket + packets;
+        gOutPacket = D_8014BAD8 + bytes;
+        gPacketAreaSize = bytes;
+        gPacketAreaSafeSize = bytes;
+        gInitHeap = gOutPacket + bytes;
     }
     return size * 2;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayCameraMalloc);
-#endif
 
 s32 EGSDisplayMalloc(u32 size) {
     s32 i;
@@ -2000,12 +1986,9 @@ s32 EGSDisplayMalloc(u32 size) {
     return packets;
 }
 
-#ifdef NON_MATCHING
-/* load/store scheduling of the packet globals differs */
 u32 *EGSDisplayPacketAreaMalloc(s32 size) {
     s32 half;
     s32 i;
-    s32 newSize;
     u8 *out;
     u32 *p;
 
@@ -2019,20 +2002,20 @@ u32 *EGSDisplayPacketAreaMalloc(s32 size) {
         EGSDebugAssert(1, 0, D_80013734, 0x753);
     }
     gPacketAreaMallocSize = half;
-    newSize = gPacketAreaSize - half;
-    out = gOutPacket + newSize;
+    gPacketAreaSize -= half;
     gPacketAreaSafeSize -= half;
-    p = (u32 *)(out + newSize);
-    gPacketAreaSize = newSize;
+    out = gOutPacket + gPacketAreaSize;
+    p = (u32 *)(out + gPacketAreaSize);
     D_80110234 = out;
-    for (i = 0; i < size >> 2; i++) {
-        p[i] = 0;
+    {
+        u32 *q = p;
+
+        for (i = 0; i < size >> 2; i++) {
+            *q++ = 0;
+        }
     }
     return p;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayPacketAreaMalloc);
-#endif
 
 void EGSDisplayPacketAreaFree(void) {
     s32 size = gPacketAreaMallocSize;
@@ -2308,8 +2291,6 @@ s32 EGSDisplayHAStop(EGSAnim *anim, s32 id) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* register allocation of the two anim copies */
 void EGSDisplayHMDCache(EGSAnim *anim, s32 add) {
     HMDCacheList *list = anim->model->info->cache;
     EGSAnim *obj = anim;
@@ -2327,7 +2308,7 @@ void EGSDisplayHMDCache(EGSAnim *anim, s32 add) {
                 obj->unk18 = e->model;
                 obj->rot = e->rot;
                 e->unk0C = 0;
-                EGSFrameAddNode(e->model->frame, obj->frame);
+                EGSFrameAddNode(e->model->frame, anim->frame);
                 return;
             }
         } else if (e->owner == anim) {
@@ -2339,18 +2320,12 @@ void EGSDisplayHMDCache(EGSAnim *anim, s32 add) {
     }
     EGSDebugAssert(1, 0, D_80013734, 0x8DD);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayHMDCache);
-#endif
 
-#ifdef NON_MATCHING
-/* regalloc/scheduling of the coord pointer and constants */
 void EGSDisplayRegisterHMD(HMDHeader *hmd) {
     s32 i;
     s32 verts = 0;
     s32 n = hmd->numBlocks;
-    HMDBlock *blk = (HMDBlock *)((u8 *)hmd + hmd->primOffset * 4 + 0x24);
-    s32 *coords;
+    HMDBlock *blk = (HMDBlock *)(hmd->primOffset * 4 + (s32)hmd + 0x24);
 
     for (i = 0; i < n; i++) {
         verts += blk->numVerts;
@@ -2360,17 +2335,16 @@ void EGSDisplayRegisterHMD(HMDHeader *hmd) {
         gHMDVertTriplets = verts;
     }
     if (hmd->numBlocks == 15) {
-        coords = (s32 *)((u8 *)hmd + hmd->coordOffset);
+        s32 *coords = (s32 *)((u8 *)hmd + hmd->coordOffset);
+        s32 *coords2;
+
         coords[0x1A4 / 4] = -0x33;
         coords[0x1B4 / 4] = -0xA;
-        coords = (s32 *)((u8 *)hmd + hmd->coordOffset);
-        coords[0x1C4 / 4] = -0x14;
-        coords[0x1D4 / 4] = 0x14;
+        coords2 = (s32 *)((u8 *)hmd + hmd->coordOffset);
+        coords2[0x1C4 / 4] = -0x14;
+        coords2[0x1D4 / 4] = 0x14;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayRegisterHMD);
-#endif
 
 #ifdef NON_MATCHING
 /* instruction scheduling: gGabeCache store/ref load order differs */
@@ -2388,14 +2362,13 @@ void InitGabeDamage(void) {
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", InitGabeDamage);
 #endif
 
-#ifdef NON_MATCHING
-/* found-id copy to s5 is placed before the zero test instead of after */
 s32 EGSDisplayRegisterHMDDamage(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out, u8 byVertex) {
     EGSSectorInfo *hmd = anim->model->info;
     HMDCacheList *list = hmd->cache;
     HMDCacheEntry *e;
     MATRIX *m;
     u32 id;
+    u32 found;
     s32 i;
     s32 j;
     s32 n;
@@ -2416,11 +2389,12 @@ s32 EGSDisplayRegisterHMDDamage(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out
         e = &list->entries[i];
         if (e->model == anim->unk18) {
             m = &((EGSFrame **)e->model)[bone]->matrix;
-            id = byVertex ? EGSDisplayFindAnimBoneVertexNearAndFacing(anim, bone, in, out)
-                          : EGSDisplayFindHMDBoneNormalFacing(hmd, bone, in, anim);
-            if (id == 0) {
+            found = byVertex ? EGSDisplayFindAnimBoneVertexNearAndFacing(anim, bone, in, out)
+                             : EGSDisplayFindHMDBoneNormalFacing(hmd, bone, in, anim);
+            if (found == 0) {
                 return 0;
             }
+            id = found;
             j = 0;
             n = e->unk0C;
             if (!byVertex) {
@@ -2451,9 +2425,6 @@ s32 EGSDisplayRegisterHMDDamage(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayRegisterHMDDamage);
-#endif
 
 s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent) {
     frame->node->parent = parent;
@@ -2991,7 +2962,7 @@ void EGSDisplayRemoveDamage(void *owner) {
 }
 
 #ifdef NON_MATCHING
-/* frame byte and part count swap registers (a3/a1) */
+/* scheduling: the two mask bytes are loaded p[1] first; original loads p[0] first */
 s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
     HAnimation *ha = EGSDisplayGetHA(anim, id);
     EGSSectorInfo *info = anim->model->info;
@@ -2999,8 +2970,7 @@ s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
     u8 b;
     u32 mask;
     s32 i;
-    s32 n;
-    u8 f;
+    s32 f;
 
     if (ha == NULL) {
         return 0x2D;
@@ -3022,8 +2992,7 @@ s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
         p += 2;
         mask = p[1] | (p[0] << 8);
         p += 2;
-        n = info->numParts;
-        for (i = 0; i < n; i++, mask >>= 1) {
+        for (i = 0; i < info->numParts; i++, mask >>= 1) {
             b = *p;
             if (mask & 1) {
                 if (!(b & 0x80)) {

@@ -932,10 +932,11 @@ static inline void iFixMul(s32 a, s32 b, s32 *out) {
 
 #define CLAMP_FIX(v) MAX(MIN(v, 0x7FFF), -0x7FFF)
 
-#ifdef NON_MATCHING
-/* prologue only: original saves/copies s1 (scale) before s0 (m) */
-int EGSFrameScale(MATRIX *m, VECTOR *scale) {
+int EGSFrameScale(MATRIX *mat, VECTOR *scale) {
     s32 t;
+    MATRIX *m;
+
+    m = mat;
 
     iFixMul(m->m[0][0], scale->vx, &t);
     m->m[0][0] = CLAMP_FIX(t);
@@ -957,9 +958,6 @@ int EGSFrameScale(MATRIX *m, VECTOR *scale) {
     m->m[2][2] = CLAMP_FIX(t);
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsframe", EGSFrameScale);
-#endif
 
 int EGSFrameTransformPoint(VECTOR *in, EGSFrame *frame, EGSFrame *ref, VECTOR *out)
 {

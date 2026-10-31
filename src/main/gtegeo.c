@@ -211,7 +211,7 @@ void WindowLOSLoop(LOSQuery *query) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: gobj/forced swap s0/s1 and node/hit s3/s4; the original computes forced in a0 and copies it */
+/* regalloc: node/hit swap s3/s4 (forced is computed in an int temp and copied) */
 void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     LOSNode *node;
     GameObjectRuntime *gobj;
@@ -223,6 +223,7 @@ void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     s32 objType;
     u32 state;
     u8 forced;
+    s32 f;
 
     node = D_80128A20[type];
     ignore0 = query->ignore0;
@@ -235,10 +236,11 @@ void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
         model = (LOSModel *)gobj->anim->model;
         objType = GOBJ_TYPE(gobj->id);
         state = gobj->npcState;
-        forced = 0;
+        f = 0;
         if (objType == 0x2C || objType == 0x62 || objType == 0x38 || objType == 0x1E || state == 9) {
-            forced = 1;
+            f = 1;
         }
+        forced = f;
         if (model->box.state == -1) {
             InitBxv(model);
         }

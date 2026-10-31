@@ -651,8 +651,6 @@ int EGSGeometryFIX_PlaneGetUnitUphillGradient(VECTOR *normal, VECTOR *out)
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: needs one register too many (t9 + s0 spill); structure and ops match */
 int EGSGeometryINT_PlaneGetY(VECTOR *origin, VECTOR *e0, VECTOR *e1, VECTOR *p, s32 *y)
 {
     s32 ox = origin->vx, oy = origin->vy, oz = origin->vz;
@@ -660,20 +658,17 @@ int EGSGeometryINT_PlaneGetY(VECTOR *origin, VECTOR *e0, VECTOR *e1, VECTOR *p, 
     s32 bx = e1->vx, by = e1->vy, bz = e1->vz;
     s32 px = p->vx, pz = p->vz;
     s32 det = ax * bz - az * bx;
-    s32 dx, dz;
+    s32 u, v;
 
     if (det == 0) {
         *y = p->vy;
         return 7;
     }
-    dz = pz - oz;
-    dx = px - ox;
-    *y = oy + (ay * (-bx * dz + bz * dx) + by * (ax * dz - az * dx)) / det;
+    u = -bx * (pz - oz) + bz * (px - ox);
+    v = ax * (pz - oz) - az * (px - ox);
+    *y = oy + (ay * u + by * v) / det;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsgeom", EGSGeometryINT_PlaneGetY);
-#endif
 
 int EGSGeometry_FaceGetUnitNormal(EGSFace *face)
 {
