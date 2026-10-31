@@ -4,9 +4,9 @@
 #include "game.h"
 #include "scratch.h"
 
-/* gamecam.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FF78)
-SDATA_LOCAL(gCamera)
+/* gamecam.c's data is defined in C (docs/data_migration.md) */
+
+
 
 /* Not system.h: its EGSListAdd prototype returns void (egsmisc.c returns the new head). */
 typedef struct EGSListNode {
@@ -101,8 +101,8 @@ typedef struct GameCamState {
     /* 0x208 */ GameCamSlot slots[4];
 } GameCamState;
 
-extern GameCamState D_80113B2C;
-extern s32 D_8010FF78;
+extern GameCamState D_80113B2C; /* .bss, laid out below func_8001AF98 */
+
 extern s32 gInterfaceCurrentMode;
 
 void GameSysJoystickSetMode(s32 mode);
@@ -116,8 +116,8 @@ void GameCameraActivate();
 u8 func_80022318(u8 *on, s32 mode, VECTOR32 *pos, GameCamSlot *slot);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, VECTOR32 *pos);
 void GameCameraSetMode(s32 mode, s32 arg1, s32 arg2, s32 arg3, VECTOR32 *lead, VECTOR32 *watch, GameCamSlot *slot, u8 on, u8 flag);
-extern s32 D_800FE4F8[]; /* modes with a default distance, -1 terminated */
-extern s32 D_800FE54C[]; /* modes with a default pitch, -1 terminated */
+static s32 D_800FE4F8[21]; /* modes with a default distance, -1 terminated */
+static s32 D_800FE54C[21]; /* modes with a default pitch, -1 terminated */
 void GameCameraModeSetDefaultDistance(s32 mode, s32 distance);
 void GameCameraModeSetDefaultPitchAngle(s32 mode, s32 pitch);
 void CameraGetDisplay(void *camera, void **display);
@@ -283,14 +283,173 @@ void RotMatrixYXZ(GameCamSVec *rot, GOBJ_MATRIX *m);
 void CameraAccessFrameInfo(void *camera, s32 arg1, s32 arg2, s32 arg3);
 u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos);
 
-extern GameCamView D_800FCF84[];
-extern GameCamModeInfo D_800FDC50[];
-extern s32 D_800FE13C[];
-extern s32 D_800FE190[];
-extern s32 D_800FE1E4[];
-extern u8 D_8010F714[];
-extern u8 D_800FE238[];
-extern u8 D_800FE340[];
+extern GameCamSlot D_80112DD0;
+extern u8 D_80112DE4[0xD48]; /* the main camera (camera.c's Camera) */
+s32 func_8001D568(void);
+s32 func_8001ECC8(void);
+s32 func_8001F864(GameCamCamera *cam);
+
+/* .sdata (gCamera points at the main camera in this file's .bss, so the camera
+ * and gCamera are gamecam.c's; the unreferenced rest up to player.c's .sdata is
+ * taken as this file's too) */
+void **gCamera = (void **)&D_80112DE4;
+static GameCamRect D_8010F714 = { 0, 0, 0x180, 0xF0 }; /* main camera clip */
+GameCamRect gMainCameraRect = { 0, 0, 0x200, 0xF0 };
+GameCamRect gSniperCameraRect = { 0xA0, 0x50, 0xC0, 0x50 };
+s32 gMainCamera = 0;
+s32 gSniperCamera[2] = { 0, 0 };
+static u8 D_8010F738 = 0;
+u8 gPlayInitFlag = 0;
+static s16 D_8010F73A = 0;
+static s32 D_8010F73C = 0;
+
+/* .sbss */
+static s32 D_8010FF78; /* the 4 bytes after it are psylink's 8-alignment */
+
+/* .data */
+static GameCamView D_800FCF84[21] = {
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0x800, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x1EE,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x3249, 0x3249, 0x3249,
+    0, 0x100, 0x100, 0x100, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0x62,
+    0x800, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0x62,
+    0x800, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0x62,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x6492, 0x6492,
+    0, 0x800, 0x800, 0x800, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0x62,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0, 0, 0, 0x38E,
+    0, 0, 0, 0xB0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x6492, 0x6492,
+    0, 0x555, 0x555, 0x555, 0, -0x2E3, 0x80000001, 0x80000001, 0, 0x38E, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x20000, 0x20000, 0x20000,
+    0, 0x800, 0x800, 0x800, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x20000, 0x20000, 0x20000,
+    0, 0x800, 0x800, 0x800, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, -1, 0x18E000, -1, -1, -1, 0, 0x20000, 0x20000, 0x20000,
+    0, 0x800, 0x800, 0x800, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0x13, 0x80, 0, 0, 0x200,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x6492, 0x6492,
+    0, 0x555, 0x555, 0x555, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x6492, 0x6492,
+    0, 0x555, 0x555, 0x555, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+    0, 0x48, 0, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0x128,
+    0, 0, 0, 0x160, 0x33B, 0x18E000, -1, -1, -1, 0, 0x6492, 0x3249, 0x6492,
+    0, 0x555, 0x100, 0x555, 0, -0x355, 0x80000001, 0x80000001, 0, 0x355, 0x7FFFFFFF, 0x7FFFFFFF, 0,
+};
+static GameCamModeInfo D_800FDC50[21] = {
+    { 0 },
+    { 1 },
+    { 2 },
+    { 3 },
+    { 4 },
+    { 5 },
+    { 6 },
+    { 7 },
+    { 8 },
+    { 9 },
+    { 10 },
+    { 11 },
+    { 12 },
+    { 13 },
+    { 14 },
+    { 15 },
+    { 16 },
+    { 17 },
+    { 18 },
+    { 19 },
+    { 20 },
+};
+static s32 D_800FE13C[21] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16, 0x11, 0x12, 0x13, 0x14,
+};
+static s32 D_800FE190[21] = {
+    0, 1, 2, 3, 12, 13, 4, 5, 6, 7, 8,
+    9, 10, 11, 14, 15, 16, 0x11, 0x12, 0x13, 0x14,
+};
+static s32 D_800FE1E4[21] = {
+    0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 7,
+    1, 4, 3, 2, 2, 2, 2, 7, 5, 5,
+};
+static s32 D_800FE238[66] = { /* CameraModeFuncs: hooks, then 9 move setups */
+    (s32)func_8001D568, (s32)func_8001ECC8, (s32)func_8001F864, 1, 1, 1, -1,
+    -1, -1, -1, 1, 1, 2, -1,
+    -1, -1, -1, 1, 1, 0, -1,
+    -1, -1, -1, 1, 1, 1, -1,
+    -1, -1, -1, 0, 2, 2, -1,
+    -1, -1, -1, 1, 0, -1, -1,
+    -1, -1, -1, 1, 2, 2, -1,
+    -1, -1, -1, 1, 2, 2, -1,
+    -1, 2, 0, 1, 0, -1, -1,
+    -1, -1, -1,
+};
+static s32 D_800FE340[110] = { /* CameraModeParams */
+    0x160, 0x33B, -1, -1, -1, 0, 0x6492, 0x3249,
+    0x6492, 0, 0x555, 0x100, 0x555, 0, 0x30000, 0x8000,
+    0x30000, 0, -0xC924, -0x3249, -0xC924, 0, 0x1000, 0x1000,
+    0x1000, 0, -1, -1, -1, 0, 0x6492, 0x6492,
+    0x6492, 0, 0x555, 0x555, 0x555, 0, -1, -1,
+    -1, 0, 0x6492, 0x3249, 0x6492, 0, 0x555, 0x100,
+    0x555, 0, -0xB000, -0xB000, -0xB000, 0, -0xB60B, -0xB60B,
+    -0xB60B, 0, 0x1000, 0x1000, 0x1000, 0, -0x20000, 0,
+    0, 0, -0x20000, 0, 0, 0, 0x1000, 0,
+    0, 0, -0xB000, -0xB000, -0xB000, 0, -0xB60B, -0xB60B,
+    -0xB60B, 0, 0x1000, 0x1000, 0x1000, 0, -0xB000, -0xB000,
+    -0xB000, 0, -0xB60B, -0xB60B, -0xB60B, 0, 0x1000, 0x1000,
+    0x1000, 0, 0x2D82D, 0, 0, 0, 0x5B05B, 0,
+    0, 0, 0x800, 0, 0, 0,
+};
+static s32 D_800FE4F8[21] = { /* modes with a default distance, -1 terminated */
+    0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11,
+    14, 15, 16, 0x11, -1, 0, 0, 0, 0, 0,
+};
+static s32 D_800FE54C[21] = { /* modes with a default pitch, -1 terminated */
+    0, 1, 2, 3, 4, 6, 7, 9, 11, 14, 15,
+    -1, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+u8 mQuipDeaths[68] = { /* XA quip table */
+    0x00, 0x00, 0x00, 0x00, 0xBD, 0x00, 0xBE, 0x00, 0xBF, 0x00, 0xC0, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00,
+};
 int rcos(int a);
 int rsin(int a);
 void *memset(void *p, int c, int n);
@@ -359,6 +518,132 @@ void CameraSetLeadFrame(void *camera, EGSFrame *frame, VECTOR32 *offset);
 void CameraSetWatchFrame(void *camera, EGSFrame *frame, VECTOR32 *offset);
 void EGSGeometryFIX_VectorGetAngleFromXZPlane(VECTOR32 *v, s32 *out);
 void GameCameraRequestCut(void);
+
+/* camera.c's .text used to end with the next two functions, but they use the game
+ * camera state (D_80113B2C) and gCamera, which are this file's: they start gamecam.c */
+#define CAM_FRAME ((EGSFrame *)*CAM->display)
+void EGSGeometry_AngleToVectorYX(VECTOR32 *angle, VECTOR32 *out);
+
+/* Camera-relative move: v is (side, up, forward) in the camera's XZ heading. */
+void func_8001ACA0(VECTOR32 *v, VECTOR32 *out, GameCamCamera *cam) {
+    VECTOR32 angle;
+    VECTOR32 side;
+    VECTOR32 fwd;
+    VECTOR32 x;
+    GOBJ_MATRIX m;
+    s32 *ps;
+    s32 *pf;
+    s32 up;
+
+    if (D_80113B2C.cut == 0) {
+        m.m[0][0] = CAM_FRAME->m[0][0];
+        m.m[0][1] = -CAM_FRAME->m[0][1];
+        m.m[0][2] = CAM_FRAME->m[0][2];
+        m.m[1][0] = -CAM_FRAME->m[1][0];
+        m.m[1][1] = CAM_FRAME->m[1][1];
+        m.m[1][2] = -CAM_FRAME->m[1][2];
+        m.m[2][0] = CAM_FRAME->m[2][0];
+        m.m[2][1] = -CAM_FRAME->m[2][1];
+        m.m[2][2] = CAM_FRAME->m[2][2];
+        x.vx = m.m[0][0];
+        x.vy = m.m[1][0];
+        x.vz = m.m[2][0];
+        fwd.vx = -x.vz;
+        fwd.vy = 0;
+        fwd.vz = x.vx;
+    } else {
+        if (CAM->angle.mode == 0) {
+            angle.vx = CAM->angle.target.vx;
+        } else {
+            angle = CAM->angle.target;
+        }
+        EGSGeometry_AngleToVectorYX(&angle, &fwd);
+    }
+    if (fwd.vy != 0) {
+        fwd.vy = 0;
+        GTEMath_VectorNormal(&fwd, &fwd);
+    }
+    side.vx = fwd.vz;
+    side.vy = 0;
+    side.vz = -fwd.vx;
+    ps = &side.vx;
+    ps[0] = EGSMathFIXMul(side.vx, v->vx);
+    ps[1] = EGSMathFIXMul(side.vy, v->vx);
+    ps[2] = EGSMathFIXMul(side.vz, v->vx);
+    up = v->vy;
+    pf = &fwd.vx;
+    pf[0] = EGSMathFIXMul(fwd.vx, v->vz);
+    pf[1] = EGSMathFIXMul(fwd.vy, v->vz);
+    pf[2] = EGSMathFIXMul(fwd.vz, v->vz);
+    out->vx = 0;
+    out->vy = 0;
+    out->vz = 0;
+    out->vx += side.vx;
+    out->vy += side.vy;
+    out->vz += side.vz;
+    out->vy += up;
+    out->vx += fwd.vx;
+    out->vy += fwd.vy;
+    out->vz += fwd.vz;
+}
+
+void func_8001AF98(void) {
+    VECTOR32 v;
+    GameCamCamera *cam = CAM;
+
+    if (cam->unk2F8.mode == 0) {
+        v.vx = cam->unk2F8.value.vx;
+    } else {
+        v = cam->unk2F8.value;
+    }
+    func_8001ACA0(&v, (VECTOR32 *)&D_80113B2C.unk088, cam);
+}
+
+/* .bss: one block (separate statics would be 16-aligned by aspsx 2.77 and maspsx), with
+ * the labels the asm functions use inside the game camera state */
+#ifdef _PSYQ
+__asm__("\t.bss\nD_80112DD0:\t.space\t20\nD_80112DE4:\t.space\t3400\n"
+        "D_80113B2C:\t.space\t4\nD_80113B30:\t.space\t8\nD_80113B38:\t.space\t40\n"
+        "D_80113B60:\t.space\t20\nD_80113B74:\t.space\t4\nD_80113B78:\t.space\t4\n"
+        "D_80113B7C:\t.space\t4\nD_80113B80:\t.space\t4\nD_80113B84:\t.space\t4\n"
+        "D_80113B88:\t.space\t4\nD_80113B8C:\t.space\t16\nD_80113B9C:\t.space\t4\n"
+        "D_80113BA0:\t.space\t16\nD_80113BB0:\t.space\t1\nD_80113BB1:\t.space\t1\n"
+        "D_80113BB2:\t.space\t2\nD_80113BB4:\t.space\t4\nD_80113BB8:\t.space\t4\n"
+        "D_80113BBC:\t.space\t8\nD_80113BC4:\t.space\t4\nD_80113BC8:\t.space\t4\n"
+        "D_80113BCC:\t.space\t4\nD_80113BD0:\t.space\t344\nD_80113D28:\t.space\t1\n"
+        "D_80113D29:\t.space\t1\nD_80113D2A:\t.space\t6\nD_80113D30:\t.space\t84\n\t.text");
+#else
+static u8 D_80112DD0_bss[0xFB4];
+__asm__(".set D_80112DD0, D_80112DD0_bss\n"
+        ".set D_80112DE4, D_80112DD0_bss+0x14\n"
+        ".set D_80113B2C, D_80112DD0_bss+0xD5C\n"
+        ".set D_80113B30, D_80112DD0_bss+0xD60\n"
+        ".set D_80113B38, D_80112DD0_bss+0xD68\n"
+        ".set D_80113B60, D_80112DD0_bss+0xD90\n"
+        ".set D_80113B74, D_80112DD0_bss+0xDA4\n"
+        ".set D_80113B78, D_80112DD0_bss+0xDA8\n"
+        ".set D_80113B7C, D_80112DD0_bss+0xDAC\n"
+        ".set D_80113B80, D_80112DD0_bss+0xDB0\n"
+        ".set D_80113B84, D_80112DD0_bss+0xDB4\n"
+        ".set D_80113B88, D_80112DD0_bss+0xDB8\n"
+        ".set D_80113B8C, D_80112DD0_bss+0xDBC\n"
+        ".set D_80113B9C, D_80112DD0_bss+0xDCC\n"
+        ".set D_80113BA0, D_80112DD0_bss+0xDD0\n"
+        ".set D_80113BB0, D_80112DD0_bss+0xDE0\n"
+        ".set D_80113BB1, D_80112DD0_bss+0xDE1\n"
+        ".set D_80113BB2, D_80112DD0_bss+0xDE2\n"
+        ".set D_80113BB4, D_80112DD0_bss+0xDE4\n"
+        ".set D_80113BB8, D_80112DD0_bss+0xDE8\n"
+        ".set D_80113BBC, D_80112DD0_bss+0xDEC\n"
+        ".set D_80113BC4, D_80112DD0_bss+0xDF4\n"
+        ".set D_80113BC8, D_80112DD0_bss+0xDF8\n"
+        ".set D_80113BCC, D_80112DD0_bss+0xDFC\n"
+        ".set D_80113BD0, D_80112DD0_bss+0xE00\n"
+        ".set D_80113D28, D_80112DD0_bss+0xF58\n"
+        ".set D_80113D29, D_80112DD0_bss+0xF59\n"
+        ".set D_80113D2A, D_80112DD0_bss+0xF5A\n"
+        ".set D_80113D30, D_80112DD0_bss+0xF60\n");
+#endif
 
 #ifdef NON_MATCHING
 /* regalloc: the original spills the three range radii to the stack and keeps 1 in s2; prologue scheduling */
@@ -2822,8 +3107,8 @@ void CASRequestAction(s32 id, s32 action);
 void EGSFrameSetMatrix(EGSFrame *frame, s32 arg1, GOBJ_MATRIX *m);
 void *EGSMemMalloc(u32 size);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
-extern GameCamSlot D_80112DD0;
-extern u8 mQuipDeaths[]; /* XA quip table */
+
+
 extern u8 gStartedEOLFade;
 extern s32 gPlayerOffset;
 void SysSoundPlayRandXA(void *table);

@@ -5,9 +5,9 @@
 #include "gobj.h"
 #include "game.h"
 
-/* damage.c's packet list bytes, still in the damage blob (docs/data_migration.md) */
-SDATA_LOCAL(D_80110180)
-SDATA_LOCAL(D_80110184)
+/* func_80066714/func_800667C4 (the damage packet allocator) are damage.c's:
+ * they use its statics D_80110180/4 and start its .text (docs/data_migration.md) */
+
 
 /* Path point (LevelGetPathInfo), 0xC bytes. */
 typedef struct PathPoint {
@@ -169,7 +169,7 @@ static s32 D_8010F97C = 0;                /* unreferenced */
  * .sbss: the original assembler gave every .lcomm 4 bytes (see particle.c); the modern
  * build packs by size, so it gets explicit padding statics.
  */
-#ifdef _PSYQ
+#ifdef LCOMM_WORD
 #define SBSS_PAD2(n)
 #define SBSS_PAD3(n)
 #else
@@ -203,10 +203,10 @@ static u8 D_8011015C; SBSS_PAD3(D_8011015C_pad)
 static u8 D_80110160; SBSS_PAD3(D_80110160_pad) /* cop damaged XA played */
 static u8 D_80110164; SBSS_PAD3(D_80110164_pad)
 static s32 D_80110168;            /* enabled generator count */
-#ifndef _PSYQ
-/* psylink starts damage's .sbss 8-aligned (docs/psyq_build.md); GNU ld needs the pad */
-static s32 D_8011016C_pad;
-#endif
+/* 0x8011016C: psylink starts damage's .sbss 8-aligned (docs/psyq_build.md); the 4-byte
+ * gap is a splat piece */
+
+
 
 /* .bss */
 static VECTOR32 D_8011D1D0;       /* NPCGetMoveMode retreat direction */
@@ -222,10 +222,10 @@ static TargetInfo D_8011D240[NPC_SLOTS];
 static MoveInfo D_8011D750[NPC_SLOTS];
 static NPCPathCtrl D_8011E1A0[NPC_SLOTS];
 #ifdef _PSYQ
-static s32 D_8011E890[NPC_SLOTS];
-static VECTOR32 D_8011E8A8;       /* player position as seen by NPCs */
-static VECTOR32 D_8011E8B8;       /* current NPC's position (y up) */
-static VECTOR32 D_8011E8C8;       /* LOS override position (pad is the active flag) */
+extern s32 D_8011E890[NPC_SLOTS]; /* laid out by hand below: as .lcomms, aspsx 2.77 */
+extern VECTOR32 D_8011E8A8;       /* player position as seen by NPCs (16-aligns them) */
+extern VECTOR32 D_8011E8B8;       /* current NPC's position (y up) */
+extern VECTOR32 D_8011E8C8;       /* LOS override position (pad is the active flag) */
 #else
 /* The vectors are only 8-aligned; maspsx's 2.7x layout would 16-align them, so the
  * modern build reserves them with D_8011E890 and names them with .set below. */
@@ -250,8 +250,8 @@ s16 getNPCIndex;                  /* NPCGetNextID position in npcList */
 s16 npcGrenadeThrowerID;
 u16 grenadeWeaponRestore;
 u16 npcNumGenerators;
-extern u8 D_80110180;             /* damage packet list head */
-extern u8 D_80110184;             /* next damage packet to try */
+
+
 
 /* Level data header, see level.c */
 typedef struct NPCLevelData {
@@ -517,7 +517,10 @@ static NPCXALines D_801067C0[11][6] = {
 };
 u8 bone[4][4] = { { 11, 9, 11, 13 }, { 5, 3, 5, 13 }, { 12, 10, 12, 14 }, { 6, 4, 6, 14 } }; /* fire bones */
 
-#ifndef _PSYQ
+#ifdef _PSYQ
+__asm__("\t.bss\nD_8011E890:\t.space\t24\nD_8011E8A8:\t.space\t16\n"
+        "D_8011E8B8:\t.space\t16\nD_8011E8C8:\t.space\t16\n\t.text");
+#else
 /* labels the asm functions use inside the vectors above */
 __asm__(".set D_80110128, D_80110128_\n"
         ".set D_8011D1D4, D_8011D1D0+4\n"
@@ -4987,41 +4990,5 @@ void func_800664F8(Gobj *obj) {
         } else if (D_80110124 != NULL) {
             D_80110124(obj->id);
         }
-    }
-}
-
-DamagePacket *func_80066714(void) {
-    s32 i;
-    s32 idx = D_80110184;
-    DamagePacket *p = NULL;
-
-    if (D_80110180 == DAMAGE_PACKETS) {
-        p = &D_8011E8E8[0];
-        D_8011E8E8[0].next = DAMAGE_PACKETS;
-        D_80110180 = 0;
-        D_80110184 = 1;
-    } else {
-        for (i = 0; i < DAMAGE_PACKETS; i++) {
-            idx++;
-            if (idx >= DAMAGE_PACKETS) {
-                idx = 0;
-            }
-            if (!D_8011E8E8[idx].inUse) {
-                p = &D_8011E8E8[idx];
-                D_80110184 = idx;
-                p->next = D_80110180;
-                D_80110180 = idx;
-                break;
-            }
-        }
-    }
-    return p;
-}
-
-void func_800667C4(DamagePacket *p, s32 prev) {
-    if (prev != DAMAGE_PACKETS) {
-        D_8011E8E8[prev].next = p->next;
-    } else {
-        D_80110180 = p->next;
     }
 }

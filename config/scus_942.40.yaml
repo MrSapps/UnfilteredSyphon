@@ -78,7 +78,7 @@ segments:
       - [0x2B3C, .rodata, terrain]
       - [0x2B80, .rodata, stream]
       - [0x2BA8, .rodata, hotbox]
-      - [0x2BD8, .rodata, text]
+      - [0x2BC8, .rodata, text]
       - [0x3060, .rodata, friendly]
       - [0x3074, .rodata, strings]
       - [0x35E0, .rodata, pickup]
@@ -89,8 +89,7 @@ segments:
       - [0x3F50, .rodata, egshmd]
       - [0x3F5C, .rodata, egsdev]
       - [0x3F80, .rodata, egsanim]
-      - [0x3F8C, rodata, egsmath_rdata]   # egsmath.c's .rdata head (gEGSMathIdentityMatrix)
-      - [0x3FAC, .rodata, egsmath]
+      - [0x3F8C, .rodata, egsmath]
       - [0x3FFC, .rodata, egsdebug]
       - [0x403C, .rodata, egstex]
       - [0x4048, .rodata, egsmem]
@@ -110,7 +109,7 @@ segments:
       - [0x6D50, c, game]
       - [0x751C, c, level]
       - [0x8448, c, camera]
-      - [0xB800, c, gamecam]
+      - [0xB4A0, c, gamecam]
       - [0x147D8, c, physics]
       - [0x14D38, c, path]
       - [0x15710, c, playcas]
@@ -127,7 +126,7 @@ segments:
       - [0x39204, c, movement]
       - [0x3CCA4, c, particle]
       - [0x487F0, c, npc]
-      - [0x56FFC, c, damage]
+      - [0x56F14, c, damage]
       - [0x5A6AC, c, sound]
       - [0x5C060, c, collision]
       - [0x634EC, c, cobj]
@@ -140,7 +139,7 @@ segments:
       - [0x6F6C0, c, terrain]
       - [0x723D0, c, stream]
       - [0x72F5C, c, hotbox]
-      - [0x73DF4, c, text]
+      - [0x7344C, c, text]
       - [0x77094, c, friendly]
       - [0x7A454, c, strings]
       - [0x7AB6C, c, pickup]
@@ -194,7 +193,7 @@ segments:
       - [0xED334, .data, game]
       - [0xED55C, .data, level]
       - [0xED5AC, .data, camera]
-      - [0xED784, data, data_ED784]
+      - [0xED784, .data, gamecam]
       - [0xEEDE4, .data, physics]
       - [0xEEDF4, .data, playcas]
       - [0xF5048, .data, player]
@@ -204,14 +203,14 @@ segments:
       - [0xF5DDC, .data, target]
       - [0xF5E80, .data, joystick]
       - [0xF6420, .data, sprite]
-      - [0xF66AC, data, data_F66AC]
+      - [0xF66AC, .data, interface]
       - [0xF674C, .data, weapon]
       - [0xF6AC4, .data, particle]
       - [0xF6C38, .data, npc]
       - [0xF71E0, .data, damage]
       - [0xF7238, .data, sound]
       - [0xF72D8, .data, stream]
-      - [0xF72EC, data, data_F72EC]
+      - [0xF72EC, .data, friendly]
       - [0xF7F44, .data, strings]
       - [0xF8040, .data, pickup]
       - [0xF8050, .data, snddrv]
@@ -226,7 +225,7 @@ segments:
       - [0xFFE44, .sdata, game]
       - [0xFFE54, .sdata, level]
       - [0xFFF00, .sdata, camera]
-      - [0xFFF14, sdata, sdata_FFF14]
+      - [0xFFF10, .sdata, gamecam]
       - [0xFFF40, .sdata, player]
       - [0xFFFB0, sdata, sdata_FFFB0]
       - [0xFFFB8, .sdata, cas]
@@ -235,7 +234,7 @@ segments:
       - [0x100020, .sdata, target]
       - [0x100028, .sdata, joystick]
       - [0x100050, .sdata, sprite]
-      - [0x100074, sdata, sdata_100074]
+      - [0x100074, .sdata, interface]
       - [0x1000FC, .sdata, weapon]
       - [0x100138, sdata, sdata_100138]
       - [0x10013C, .sdata, movement]
@@ -247,7 +246,9 @@ segments:
       - [0x1001C8, sdata, sdata_1001C8]
       - [0x1001D0, .sdata, terrain]
       - [0x100208, .sdata, stream]
-      - [0x100248, sdata, sdata_100248]
+      - [0x100248, .sdata, text]
+      - [0x1002B0, sdata, sdata_1002B0]   # unreferenced zero word (text's or friendly's)
+      - [0x1002B4, .sdata, friendly]
       - [0x1002B8, .sdata, strings]
       - [0x1004EC, .sdata, pickup]
       - [0x10051C, .sdata, save]
@@ -259,7 +260,7 @@ segments:
       - [0x1006B0, sdata, sdata_1006B0]
       - [0x1006B8, .sdata, egsdev]
       - [0x100708, .sdata, egsanim]
-      - [0x10070C, sdata, sdata_10070C]
+      - [0x10070C, .sdata, egsmath]
       - [0x100710, .sdata, egsdebug]
       - [0x100720, .sdata, egstex]
       - [0x100728, .sdata, egsmem]
@@ -267,7 +268,8 @@ segments:
       - [0x100740, .sdata, egsfile]
       - [0x100764, .sdata, egshog]
       - { start: 0x100768, type: .sbss, vram: 0x8010FF68, name: system }
-      - { type: sbss, vram: 0x8010FF78, name: sbss_8010FF78 }
+      - { type: .sbss, vram: 0x8010FF78, name: gamecam }
+      - { type: sbss, vram: 0x8010FF7C, name: sbss_8010FF7C }   # psylink 8-aligns player's .sbss
       - { type: .sbss, vram: 0x8010FF80, name: player }
       - { type: .sbss, vram: 0x8010FF88, name: cas }
       - { type: sbss, vram: 0x8010FF94, name: sbss_8010FF94 }
@@ -276,12 +278,16 @@ segments:
       - { type: .sbss, vram: 0x8010FFD8, name: target }
       - { type: .sbss, vram: 0x8010FFE0, name: joystick }
       - { type: sbss, vram: 0x8010FFE4, name: sbss_8010FFE4 }
+      - { type: .sbss, vram: 0x8010FFE8, name: interface }
+      - { type: sbss, vram: 0x80110024, name: sbss_80110024 }   # psylink 8-aligns weapon's .sbss
       - { type: .sbss, vram: 0x80110028, name: weapon }
       - { type: .sbss, vram: 0x80110030, name: particle }
       - { type: .sbss, vram: 0x80110118, name: npc }
+      - { type: sbss, vram: 0x8011016C, name: sbss_8011016C }   # psylink 8-aligns damage's .sbss
       - { type: .sbss, vram: 0x80110170, name: damage }
       - { type: .sbss, vram: 0x80110188, name: sound }
-      - { type: sbss, vram: 0x801101A8, name: sbss_801101A8 }
+      - { type: .sbss, vram: 0x801101A8, name: text }
+      - { type: sbss, vram: 0x801101B4, name: sbss_801101B4 }   # psylink 8-aligns pickup's .sbss
       - { type: .sbss, vram: 0x801101B8, name: pickup }
       - { type: sbss, vram: 0x801101CC, name: sbss_801101CC }
       - { type: .sbss, vram: 0x801101D0, name: snddrv }
@@ -291,10 +297,15 @@ segments:
       - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
       - { type: .bss, vram: 0x801104A0, name: system }
       - { type: .bss, vram: 0x80111EB8, name: game }
-      - { type: bss, vram: 0x80112D40, name: bss_80112D40 }
+      - { type: bss, vram: 0x80112D40, name: bss_80112D40 }   # camera.c's .bss
+      - { type: .bss, vram: 0x80112DD0, name: gamecam }
+      - { type: bss, vram: 0x80113D84, name: bss_80113D84 }   # psylink 8-aligns the next .bss
+      - { type: bss, vram: 0x80113D88, name: bss_80113D88 }
       - { type: .bss, vram: 0x80115638, name: cas }
       - { type: .bss, vram: 0x801156D8, name: sniper }
       - { type: bss, vram: 0x80115754, name: bss_80115754 }
+      - { type: .bss, vram: 0x80117490, name: interface }
+      - { type: bss, vram: 0x80118A58, name: bss_80118A58 }
       - { type: .bss, vram: 0x80118FC0, name: particle }
       - { type: .bss, vram: 0x8011D1D0, name: npc }
       - { type: .bss, vram: 0x8011E8D8, name: damage }
@@ -304,8 +315,12 @@ segments:
       - { type: .bss, vram: 0x8011EB40, name: collision }
       - { type: .bss, vram: 0x8011EB98, name: cobj }
       - { type: bss, vram: 0x8011F750, name: bss_8011F750 }
+      - { type: .bss, vram: 0x8011FAB0, name: text }
+      - { type: bss, vram: 0x801212D4, name: bss_801212D4 }   # psylink 8-aligns the next .bss
+      - { type: .bss, vram: 0x801212D8, name: friendly }
       - { type: .bss, vram: 0x80121918, name: strings }
       - { type: .bss, vram: 0x80121978, name: pickup }
+      - { type: bss, vram: 0x80121A04, name: bss_80121A04 }   # psylink 8-aligns save's .bss
       - { type: .bss, vram: 0x80121A08, name: save }
       - { type: bss, vram: 0x801221E4, name: bss_801221E4 }
       - { type: .bss, vram: 0x801221E8, name: snddrv }

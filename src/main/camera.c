@@ -113,11 +113,11 @@ typedef struct Camera {
 
 /*
  * camera.c's .data and .sdata, defined in original order (docs/data_migration.md).
- * Its .bss (from 0x80112D40) stays in the splat blob for now: the boundary with
- * gamecam.c's .bss is unclear (gamecam code uses 0x80112DD0, the last camera.c
- * functions use 0x80113BB2/4, both inside the other TU's run).
+ * Its .bss (0x80112D40..0x80112DD0) stays in the splat blob for now. The main camera
+ * (0x80112DE4), gCamera and func_8001ACA0/func_8001AF98 are gamecam.c's: gamecam code
+ * uses the 0x80112DD0 static right before the camera, and those two functions use the
+ * game camera state.
  */
-extern Camera D_80112DE4; /* the main camera (size 0xD48), .bss */
 
 /* .data */
 VECTOR32 gDefaultPosition = { 0, 0, 0, 0 };
@@ -129,7 +129,7 @@ Camera *gCameraList[2] = { NULL, NULL };
 u8 gDefaultDisplayPriority = 2;
 static u16 D_8010F70A = 0; /* next camera id */
 static s32 D_8010F70C = 0; /* unreferenced */
-Camera *gCamera = &D_80112DE4;
+/* gCamera (0x8010F710) is gamecam.c's */
 
 u8 CameraActivate(Camera *cam, u8 on);
 u8 CameraDisplay(Camera *cam, u8 on);
@@ -158,12 +158,12 @@ u8 func_80019218(CameraMoveInfo *move, CameraAccess *access);
 void func_800197D4(Camera *cam);
 void func_80019834(Camera *cam);
 void func_8001967C(CameraMotion *m, VECTOR32 *value, u8 full);
-void func_8001ACA0(VECTOR32 *v, VECTOR32 *out, Camera *cam);
+
 void EGSMath_ValueModulus(s32 value, s32 mod, s32 *out);
 void EGSFrameTransformPoint(VECTOR32 *point, EGSFrame *frame, s32 arg2, VECTOR32 *out);
 void EGSFrameGetOrientation(EGSFrame *frame, s32 arg1, VECTOR32 *out);
 
-extern u8 D_80113BB4[];
+
 
 void *memset(void *dst, s32 c, u32 n);
 void EGSDisplayProjectionAngleToDistance(s32 angle, u16 *dist);
@@ -1482,82 +1482,4 @@ u8 func_8001AB9C(Camera *cam) {
     EGSFrameSetLocalAxes(frame, 0, &x, &y, &z);
     cam->display->projection = (cam->display->projection << 12) / 0x6C00;
     return 1;
-}
-
-extern u8 D_80113BB2;
-void EGSGeometry_AngleToVectorYX(VECTOR32 *angle, VECTOR32 *out);
-
-/* Camera-relative move: v is (side, up, forward) in the camera's XZ heading. */
-void func_8001ACA0(VECTOR32 *v, VECTOR32 *out, Camera *cam) {
-    VECTOR32 angle;
-    VECTOR32 side;
-    VECTOR32 fwd;
-    VECTOR32 x;
-    GOBJ_MATRIX m;
-    s32 *ps;
-    s32 *pf;
-    s32 up;
-
-    if (D_80113BB2 == 0) {
-        m.m[0][0] = gCamera->display->frame->m[0][0];
-        m.m[0][1] = -gCamera->display->frame->m[0][1];
-        m.m[0][2] = gCamera->display->frame->m[0][2];
-        m.m[1][0] = -gCamera->display->frame->m[1][0];
-        m.m[1][1] = gCamera->display->frame->m[1][1];
-        m.m[1][2] = -gCamera->display->frame->m[1][2];
-        m.m[2][0] = gCamera->display->frame->m[2][0];
-        m.m[2][1] = -gCamera->display->frame->m[2][1];
-        m.m[2][2] = gCamera->display->frame->m[2][2];
-        x.vx = m.m[0][0];
-        x.vy = m.m[1][0];
-        x.vz = m.m[2][0];
-        fwd.vx = -x.vz;
-        fwd.vy = 0;
-        fwd.vz = x.vx;
-    } else {
-        if (gCamera->move[6].type == 0) {
-            angle.vx = gCamera->move[6].value.vx;
-        } else {
-            angle = gCamera->move[6].value;
-        }
-        EGSGeometry_AngleToVectorYX(&angle, &fwd);
-    }
-    if (fwd.vy != 0) {
-        fwd.vy = 0;
-        GTEMath_VectorNormal(&fwd, &fwd);
-    }
-    side.vx = fwd.vz;
-    side.vy = 0;
-    side.vz = -fwd.vx;
-    ps = &side.vx;
-    ps[0] = EGSMathFIXMul(side.vx, v->vx);
-    ps[1] = EGSMathFIXMul(side.vy, v->vx);
-    ps[2] = EGSMathFIXMul(side.vz, v->vx);
-    up = v->vy;
-    pf = &fwd.vx;
-    pf[0] = EGSMathFIXMul(fwd.vx, v->vz);
-    pf[1] = EGSMathFIXMul(fwd.vy, v->vz);
-    pf[2] = EGSMathFIXMul(fwd.vz, v->vz);
-    out->vx = 0;
-    out->vy = 0;
-    out->vz = 0;
-    out->vx += side.vx;
-    out->vy += side.vy;
-    out->vz += side.vz;
-    out->vy += up;
-    out->vx += fwd.vx;
-    out->vy += fwd.vy;
-    out->vz += fwd.vz;
-}
-
-void func_8001AF98(void) {
-    VECTOR32 v;
-    Camera *cam = gCamera;
-
-    if (cam->move[1].type == 0) {
-        v.vx = cam->move[1].input.value.vx;
-    } else {
-        v = cam->move[1].input.value;
-    }
-    func_8001ACA0(&v, (VECTOR32 *)D_80113BB4, cam);
 }

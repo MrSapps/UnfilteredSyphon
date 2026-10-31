@@ -272,12 +272,13 @@ has its own `_PSYQ` variant of the one GAS macro it used.
 | collision| .rdata .bss                         | OK          | data OK (2 asm functions) |
 | shadow   | .rdata + mShadowRequestList common  | OK          | .rdata short until its asm functions are C |
 | save     | .rdata .sdata .bss                  | OK          | data OK (SaveRestoreContinue asm) |
-| damage   | .rdata .data .sdata .sbss .bss      | OK          | OK (npc.c's last function func_80066714 uses its static 0x80110180/4: probably damage.c's) |
+| damage   | .rdata .text .data .sdata .sbss .bss | OK         | OK; its .text starts with the damage packet allocator func_80066714/func_800667C4 (moved from npc.c: they use its statics 0x80110180/4) |
 | main     | .sdata                              | OK          | data OK (asm MainLoop) |
 | system   | .data .sdata .sbss .bss + commons   | OK          | data OK (asm functions) |
 | game     | .rdata .text .data .sdata .bss      | OK          | OK with a `_PSYQ` scratch.h (see below) |
 | level    | .rdata .data .sdata + commons       | OK          | data + .rdata OK (asm functions) |
-| camera   | .data .sdata (.bss: boundary with gamecam unclear) | OK | data OK (asm functions) |
+| camera   | .data .sdata (.bss 0x80112D40..DD0 still in the blob) | OK | OK; gCamera, the main camera (0x80112DE4) and func_8001ACA0/func_8001AF98 moved to gamecam.c |
+| gamecam  | .rdata .text .data .sdata .sbss .bss (one hand-laid block: slot, Camera, state) | OK | OK; .sbss/.bss end 4 bytes short of the next TU (psylink 8-alignment, splat pieces) |
 | physics  | .data                               | OK          | data OK (asm functions) |
 | playcas  | .rdata .text .data                  | OK          | OK |
 | sprite   | .rdata .text .data .sdata (.bss still in the blob) | OK | OK |
@@ -297,13 +298,13 @@ don't compile under ccpsx yet: its `scratch_jal_ds` GAS `.macro` needs a `_PSYQ`
 form, e.g. `".set noreorder\n\tjal " #fn "\n\t" ds "\n\t.set reorder"`. With that,
 game.c matches in every section.
 | particle | .data .sdata .sbss .bss + 5 commons (.rdata still has the INCLUDE_RODATA blob) | OK | data OK with aspsx 2.56 (`.sbss` DIFF with 2.77); 16 asm functions |
-| npc      | .data .sdata .sbss .bss + 14 commons (.rdata still has the INCLUDE_RODATA blob) | OK | data OK with aspsx 2.56 except `.sbss` 0x54 vs 0x58: the last 4 bytes are psylink's 8-alignment before damage (modern-only pad); 16 asm functions |
-| sound    | .data .sdata .sbss .bss + mXABlock common (.rdata keeps its INCLUDE_RODATA strings) | OK | data OK with aspsx 2.56; 4 asm functions |
+| npc      | .data .sdata .sbss .bss + 14 commons (.rdata still has the INCLUDE_RODATA blob) | OK | OK (aspsx 2.77): pads in both builds, hand-laid .bss tail under `_PSYQ`; the 4 bytes at 0x8011016C are a splat piece (psylink 8-aligns damage's .sbss) |
+| sound    | .data .sdata .sbss .bss + mXABlock common (.rdata keeps its INCLUDE_RODATA strings) | OK | OK (aspsx 2.77, .sbss pads in both builds) |
 | cobj     | .sdata .bss + 7 commons (0x8010F9C8/CC left in the blob, owner unclear) | OK | data OK; the "0x8011EBAC" object is node 1 of a 150-node pool at 0x8011EB98 |
 | terrain  | .sdata + 10 commons (no .data/.sbss/.bss of its own) | OK | .sdata OK; .sdata defined after the first INCLUDE_ASM (maspsx pitfall) |
-| pickup   | .data .sdata .sbss .bss + 4 commons | OK | data OK with aspsx 2.56 except `.bss` 0x8C vs 0x90 (psylink's 8-alignment before save) |
+| pickup   | .data .sdata .sbss .bss + 4 commons | OK | OK (aspsx 2.77): .sbss pads in both builds, hand-laid .bss under `_PSYQ`; 0x80121A04 is a 4-byte splat piece (psylink 8-aligns save's .bss) |
 | snddrv   | .data .sdata .sbss .bss + 2 commons (0x8010FD20 left in the blob) | OK | data OK; 5 asm functions |
-| egsdisp  | .data .sdata .bss + 13 commons (gLRTick at 0x8010FDA0 left in the blob) | OK | data OK; gHADoneCallback (egshmd's .sdata) gets a tentative definition so it stays $gp |
+| egsdisp  | .data .sdata .bss + 13 commons (gLRTick at 0x8010FDA0 left in the blob) | OK | OK; .bss hand-laid under `_PSYQ` (the draw areas are only 8-aligned); gHADoneCallback (egshmd's .sdata) gets a tentative definition so it stays $gp |
 | strings  | .rdata .data .sdata .bss (message table rebuilt from C initialisers) | OK | .rdata .data .sdata .bss OK (aspsx 2.56 and 2.77); StringContactMeiXingMsg asm |
 | particle | .rdata .data .sdata .sbss .bss + 5 commons (3 INCLUDE_RODATA blobs left) | OK | OK (aspsx doesn't auto-align `.word`: a blob after the 13-byte `__FILE__` landed unaligned, so D_80012000/10 are C consts) |
 
@@ -340,3 +341,8 @@ Every overlay TU (`src/<ovl>/<ovl>.c`) defines its own `.rdata/.data/.bss`; the 
   the wrong ones were dropped. `config/symbols/overrides.txt` still assigns
   church2Briefings/catacombsBriefings to park, mFileBuffer to baseext and
   mFlamethrowerEndNormal to subway (they belong to levspec, title and park2).
+| hotbox   | .rdata (D_800123A8 {1,1,1,0} as a C const + "NO_CLIMB_DOWN\n"); no data of its own. Its last four functions (func_80082C4C..func_80082F20) were text.c's | OK | OK |
+| text     | .rdata (font glyph tables from 0x800123C8, no {1,1,1,0} head) .sdata (0x8010FA48..0x8010FAB0; the lui-reached glyphs are defined after their users so cc1 doesn't use $gp) .sbss .bss (one hand-laid block) + gTextCamera common; starts with the marker helpers from hotbox.c (they use its statics D_801101B0/D_801211E4) | OK | OK (0x8010FAB0..B8 is friendly's .sdata: friendly reaches 0x8010FAB4 through $gp) |
+| friendly | .data .sdata .bss (no commons via $gp; 0x8010FAB0 left to the text side) | OK | OK; D_80107740 (= D_80106AEC.foundCount) is absolute in main.syms.ld because lib_gte rcos also names it |
+| egsmath  | .rdata (gEGSMathIdentityMatrix heads it) .text .sdata (pEGSMathIdentityMatrix) | OK | OK |
+| interface | .data .sdata .sbss .bss (one hand-laid block) + 3 commons | OK | OK; 0x80110024 is a 4-byte splat piece before weapon's .sbss |

@@ -20,8 +20,7 @@ static s32 D_80110178; /* cos 65 deg: front/back limits */
 static s32 D_8011017C;
 #ifndef _PSYQ
 /* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes one of its own arrays from these
- * folded addresses, so the labels have to stay visible to it; npc.c's
- * func_80066714 (see above) reaches D_80110180/4 through SDATA_LOCAL */
+ * folded addresses, so the labels have to stay visible to it */
 __asm__(".globl D_80110170\n.globl D_80110178\n.globl D_80110180\n.globl D_80110184\n");
 #endif
 /* .data; the unreferenced list before the body bones is taken as this file's (it is
@@ -193,6 +192,44 @@ void GameCameraShakeStart(void *state, s32 ticks, s32 arg2, void *vec, s32 arg4,
 void TextAddMarker(u16 id, void *msg, s32 arg2, s32 arg3);
 void NPCSoundGobj(s32 arg0, void *arg1, void *arg2, s32 arg3);
 void ParticleHitWall(void *arg0, void *arg1, void *arg2, s32 color);
+
+/* The damage packet allocator; npc.c's .text used to end with it, but it uses this
+ * file's statics D_80110180/4, so it is the start of damage.c. */
+DamagePacket *func_80066714(void) {
+    s32 i;
+    s32 idx = D_80110184[0];
+    DamagePacket *p = NULL;
+
+    if (D_80110180[0] == DAMAGE_PACKET_NONE) {
+        p = &D_8011E8E8[0];
+        D_8011E8E8[0].next = DAMAGE_PACKET_NONE;
+        D_80110180[0] = 0;
+        D_80110184[0] = 1;
+    } else {
+        for (i = 0; i < DAMAGE_PACKET_NONE; i++) {
+            idx++;
+            if (idx >= DAMAGE_PACKET_NONE) {
+                idx = 0;
+            }
+            if (!D_8011E8E8[idx].delay) {
+                p = &D_8011E8E8[idx];
+                D_80110184[0] = idx;
+                p->next = D_80110180[0];
+                D_80110180[0] = idx;
+                break;
+            }
+        }
+    }
+    return p;
+}
+
+void func_800667C4(DamagePacket *p, s32 prev) {
+    if (prev != DAMAGE_PACKET_NONE) {
+        D_8011E8E8[prev].next = p->next;
+    } else {
+        D_80110180[0] = p->next;
+    }
+}
 
 void DamagePacketUpdate(void) {
     VECTOR32 pos;

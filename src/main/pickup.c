@@ -48,22 +48,23 @@ static s32 D_801101B8;
 static s32 D_801101BC;                /* UseMsg count */
 static s32 D_801101C0;                /* PickupPending count */
 static u8 D_801101C4;
-#ifndef _PSYQ
-static u8 D_801101C4_pad;
+static u8 D_801101C4_pad;              /* aspsx 2.77 packs by size: pad */
 static s16 D_801101C4_pad2;
-#endif
+
+
 static u8 D_801101C8;
 
 /* .bss */
 #ifdef _PSYQ
-static UseMsg D_80121978[USE_MSG_MAX];
-static PickupPending D_80121990[PICKUP_PENDING_MAX];
-static u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT]; /* taken-message text ids */
-static u8 D_801219E8[PICKUP_TAKEN_MSG_COUNT];  /* checksums of those messages */
+/* separate .lcomms would be 16-aligned by aspsx 2.77: laid out by hand below */
+extern UseMsg D_80121978[USE_MSG_MAX];
+extern PickupPending D_80121990[PICKUP_PENDING_MAX];
+extern u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT]; /* taken-message text ids */
+extern u8 D_801219E8[PICKUP_TAKEN_MSG_COUNT];  /* checksums of those messages */
 #else
 /* maspsx's 2.7x layout would 16-align the arrays; one block, named with .set below
- * (the size includes psylink's 8-alignment before save's .bss) */
-static u8 D_80121978_bss[0x90];
+ * (psylink 8-aligns save's .bss after it: the 4-byte gap is a splat piece) */
+static u8 D_80121978_bss[0x8C];
 extern UseMsg D_80121978[USE_MSG_MAX];
 extern PickupPending D_80121990[PICKUP_PENDING_MAX];
 extern u16 D_801219B0[PICKUP_TAKEN_MSG_COUNT];
@@ -218,7 +219,10 @@ void PickupInitData(void) {
     UseSetSwitchCallback(NULL);
 }
 
-#ifndef _PSYQ
+#ifdef _PSYQ
+__asm__("\t.bss\nD_80121978:\t.space\t24\nD_80121990:\t.space\t32\n"
+        "D_801219B0:\t.space\t56\nD_801219E8:\t.space\t27\n\t.text");
+#else
 __asm__(".set D_80121978, D_80121978_bss\n"
         ".set D_8012197A, D_80121978_bss+0x2\n"
         ".set D_8012197C, D_80121978_bss+0x4\n"

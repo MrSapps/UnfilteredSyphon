@@ -5,60 +5,6 @@
 #include "game.h"
 #include "scratch.h"
 
-/* interface.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F878)
-SDATA_LOCAL(D_8010F879)
-SDATA_LOCAL(D_8010F87A)
-SDATA_LOCAL(D_8010F880)
-SDATA_LOCAL(D_8010F882)
-SDATA_LOCAL(D_8010F884)
-SDATA_LOCAL(gSpareTextWindow)
-SDATA_LOCAL(D_8010F887)
-SDATA_LOCAL(gInterfaceOn)
-SDATA_LOCAL(D_8010F88C)
-SDATA_LOCAL(D_8010F890)
-SDATA_LOCAL(D_8010F892)
-SDATA_LOCAL(D_8010F894)
-SDATA_LOCAL(D_8010F898)
-SDATA_LOCAL(mSniperViewMax)
-SDATA_LOCAL(D_8010F89E)
-SDATA_LOCAL(D_8010F8A0)
-SDATA_LOCAL(D_8010F8A2)
-SDATA_LOCAL(gMenuPolys)
-SDATA_LOCAL(gMenuLines)
-SDATA_LOCAL(D_8010F8AC)
-SDATA_LOCAL(D_8010F8B0)
-SDATA_LOCAL(D_8010F8B1)
-SDATA_LOCAL(D_8010F8B2)
-SDATA_LOCAL(D_8010F8B4)
-SDATA_LOCAL(D_8010F8B8)
-SDATA_LOCAL(D_8010F8BC)
-SDATA_LOCAL(D_8010F8C0)
-SDATA_LOCAL(D_8010F8C4)
-SDATA_LOCAL(D_8010F8E0)
-SDATA_LOCAL(D_8010F8E4)
-SDATA_LOCAL(D_8010F8E8)
-SDATA_LOCAL(D_8010F8F0)
-SDATA_LOCAL(D_8010F8F4)
-SDATA_LOCAL(D_8010F8F8)
-SDATA_LOCAL(D_8010F8F9)
-SDATA_LOCAL(D_8010FFE8)
-SDATA_LOCAL(D_8010FFEC)
-SDATA_LOCAL(D_8010FFF0)
-SDATA_LOCAL(D_8010FFF4)
-SDATA_LOCAL(D_8010FFF8)
-SDATA_LOCAL(D_80110000)
-SDATA_LOCAL(D_80110004)
-SDATA_LOCAL(D_80110008)
-SDATA_LOCAL(D_8011000C)
-SDATA_LOCAL(D_80110010)
-SDATA_LOCAL(D_80110014)
-SDATA_LOCAL(D_80110018)
-SDATA_LOCAL(D_8011001C)
-SDATA_LOCAL(D_80110020)
-SDATA_LOCAL(gInterfaceCurrentMode)
-SDATA_LOCAL(gInterfaceWindow)
-SDATA_LOCAL(mTargetCursorPosition)
 
 /* Screen-space point, passed by value (PsyQ DVECTOR layout). */
 typedef struct IfacePoint {
@@ -144,6 +90,103 @@ typedef struct IfaceWeaponInfo {
     /* 0x09 */ u8 unk09[0x17];
 } IfaceWeaponInfo;
 
+/* Radar scale matrix pieces. */
+typedef struct IfaceSV3 {
+    s16 vx, vy, vz;
+} IfaceSV3;
+
+/*
+ * interface.c's data (docs/data_migration.md), each section in address order.
+ */
+/* .data */
+static IfaceRect D_80105EAC[8][2] = { /* compass letter quads per heading */
+    { { -129, 72, 3, 16 }, { 0, 0, 0, 0 } },
+    { { -139, 60, 13, -2 }, { -129, 60, 3, 8 } },
+    { { -163, 60, 20, -2 }, { 0, 0, 0, 0 } },
+    { { -180, 60, 13, -2 }, { -177, 60, -3, 8 } },
+    { { -177, 72, -3, 16 }, { 0, 0, 0, 0 } },
+    { { -180, 100, 13, 2 }, { -177, 100, -3, -8 } },
+    { { -163, 100, 20, 2 }, { 0, 0, 0, 0 } },
+    { { -139, 100, 13, 2 }, { -129, 100, 3, -8 } },
+};
+static s32 D_80105F2C[8] = { -1, -1, -1, -1, -1, -1, -1, -1 }; /* per-mode animation step, [mode] for modes 1-7 */
+#define D_80105F30 (D_80105F2C + 1)
+#define D_80105F44 (D_80105F2C[6])
+#define D_80105F48 (D_80105F2C[7])
+
+/* .sdata; the literals only asm functions use are named arrays */
+static char D_8010F874[4] = "";
+static u8 D_8010F878 = 0x28;            /* interface colour */
+static u8 D_8010F879 = 0x30;
+static u8 D_8010F87A = 0x50;
+static u8 D_8010F87B = 0;               /* unreferenced */
+static u8 D_8010F87C[3] = { 0x30, 0x50, 0x28 }; /* unreferenced */
+static u16 D_8010F880 = 0xFFFF;         /* objective text strings */
+static u16 D_8010F882 = 0xFFFF;
+static u16 D_8010F884 = 0xFFFF;
+u8 gSpareTextWindow = 0xFF;
+static u8 D_8010F887 = 1;               /* radar on */
+u8 gInterfaceOn = 1;
+static s32 D_8010F88C = 0;
+static u16 D_8010F890 = 0xFFFF;         /* rounds string */
+static u16 D_8010F892 = 0xFFFF;         /* countdown string, 0xFFFF when none */
+static s32 D_8010F894 = 5;
+static s32 D_8010F898 = 1;              /* countdown running */
+s16 mSniperViewMax = -100;
+static s16 D_8010F89E = -45;
+static u16 D_8010F8A0 = 200;            /* sniper view width */
+static s16 D_8010F8A2 = 90;
+IfacePoly4 *gMenuPolys = NULL;          /* menu background quads, [30] is the backdrop */
+IfaceLine *gMenuLines = NULL;           /* menu outline lines */
+static s32 D_8010F8AC = 0;              /* requested interface mode */
+static u8 D_8010F8B0 = 0xD0;
+static u8 D_8010F8B1 = 0xD0;
+static u8 D_8010F8B2 = 0xD0;
+static s32 D_8010F8B4 = 0;
+static IfaceSprite *D_8010F8B8 = NULL;  /* direction sprites (5) */
+static IfaceSprite *D_8010F8BC = NULL;  /* direction sprites (8) */
+static s32 D_8010F8C0 = 0;              /* weapon select ticks, -5 when closed */
+static void (*D_8010F8C4)() = NULL;     /* add level specific NPC callback */
+static u8 D_8010F8C8[8] = { 0, 0, 0, 0, 0x80, 0x01, 0xF0, 0x00 }; /* RECT 0, 0, 384, 240 */
+static char D_8010F8D0[8] = "......";
+static IfaceSV3 D_8010F8D8 = { 0, 0, 0 }; /* radar scale matrix, last row */
+static s32 D_8010F8E0 = 0;              /* countdown flicker digit */
+static u8 D_8010F8E4 = 0;               /* weapon changed while selecting */
+static s32 D_8010F8E8 = 6;              /* joystick mode to restore */
+static char D_8010F8EC[4] = " ";
+static s32 D_8010F8F0 = -1;             /* target-lock message tick */
+static struct { u16 id; u16 zoom; } D_8010F8F4 = { 0xFFFF, 0 }; /* sniper text string, last zoom shown */
+static u8 D_8010F8F8 = 0;               /* zoom text shown */
+static u8 D_8010F8F9 = 0;               /* body part last reported */
+
+/* .sbss (aspsx 2.77 packs .lcomms by size: D_8010FFF0 gets a pad, see particle.c) */
+static s32 D_8010FFE8;
+static s32 D_8010FFEC;                  /* target cursor size */
+static s16 D_8010FFF0;                  /* radar scale */
+static s16 D_8010FFF0_pad;
+static s16 D_8010FFF4;
+static IfaceRect D_8010FFF8;            /* health meter clut */
+static s32 D_80110000;                  /* weapon shown */
+static s32 D_80110004;                  /* danger, 0x1000 = none */
+static s32 D_80110008;                  /* countdown ticks */
+static s32 D_8011000C;                  /* countdown end ticks */
+static void (*D_80110010)();            /* countdown done callback */
+static s32 D_80110014;                  /* deferred countdown args */
+static s32 D_80110018;
+static void (*D_8011001C)();
+static u8 D_80110020;                   /* mode transition in progress */
+/* 0x80110024: psylink 8-aligns weapon's .sbss; the 4-byte gap is a splat piece */
+
+/* .bss: laid out by hand (after InterfaceForceOff), see the end of the block below */
+#ifndef _PSYQ
+static u8 D_80117490_bss[0x15C8];
+#endif
+
+/* commons this TU reaches through $gp */
+s32 gInterfaceCurrentMode;
+void *gInterfaceWindow;
+s16 mTargetCursorPosition;
+
 extern IfaceWeaponInfo gWeaponInfo[];
 
 extern u8 D_8010F887;                   /* radar on */
@@ -172,7 +215,6 @@ extern u8 D_80110020;                   /* mode transition in progress */
 extern s32 gInterfaceCurrentMode;
 extern void *gInterfaceWindow;
 
-extern s32 D_80105F30[];
 extern VECTOR32 mBombPosition; /* pad holds the bomb's object id */
 extern IfacePoly4 mBombPoly;
 extern VECTOR32 D_80117490; /* chase pointer target */
@@ -186,8 +228,6 @@ extern s32 gSystemTick;
 extern char *gStringFillerText[];
 extern char *gCountdownFmt;
 extern char D_80118104[];
-extern s32 D_80105F48;
-extern s32 D_80105F2C[]; /* per-mode animation step, [mode] for modes 1-7 */
 
 void EGSDisplayAddPoly(void *camera, void *poly);
 void EGSDisplayDeletePoly(void *camera, void *poly);
@@ -324,7 +364,6 @@ extern IfacePoly24 D_80117CB8[2];
 extern IfacePolyG3 D_80117D00;
 extern IfaceLine D_80117D24[5];
 extern IfacePoly24 D_801174A0; /* radar player arrow (POLY_G3 layout) */
-extern IfaceRect D_80105EAC[][2]; /* compass letter quads per heading */
 int ratan2(int y, int x);
 void ApplyMatrixLV(GOBJ_MATRIX *m, VECTOR32 *in, VECTOR32 *out);
 void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
@@ -394,6 +433,415 @@ void InterfaceForceOff(void) {
     }
 }
 
+#ifdef _PSYQ
+__asm__("\t.bss\n"
+        "D_80117490:\t.space\t4\n"
+        "D_80117494:\t.space\t4\n"
+        "D_80117498:\t.space\t8\n"
+        "D_801174A0:\t.space\t16\n"
+        "D_801174B0:\t.space\t8\n"
+        "D_801174B8:\t.space\t8\n"
+        "D_801174C0:\t.space\t4\n"
+        "D_801174C4:\t.space\t36\n"
+        "D_801174E8:\t.space\t44\n"
+        "D_80117514:\t.space\t184\n"
+        "D_801175CC:\t.space\t16\n"
+        "D_801175DC:\t.space\t4\n"
+        "D_801175E0:\t.space\t4\n"
+        "D_801175E4:\t.space\t4\n"
+        "D_801175E8:\t.space\t20\n"
+        "D_801175FC:\t.space\t4\n"
+        "D_80117600:\t.space\t4\n"
+        "D_80117604:\t.space\t4\n"
+        "D_80117608:\t.space\t24\n"
+        "D_80117620:\t.space\t4\n"
+        "D_80117624:\t.space\t4\n"
+        "D_80117628:\t.space\t28\n"
+        "D_80117644:\t.space\t4\n"
+        "D_80117648:\t.space\t4\n"
+        "D_8011764C:\t.space\t16\n"
+        "D_8011765C:\t.space\t264\n"
+        "D_80117764:\t.space\t264\n"
+        "D_8011786C:\t.space\t308\n"
+        "D_801179A0:\t.space\t8\n"
+        "D_801179A8:\t.space\t4\n"
+        "D_801179AC:\t.space\t4\n"
+        "D_801179B0:\t.space\t4\n"
+        "D_801179B4:\t.space\t124\n"
+        "D_80117A30:\t.space\t16\n"
+        "D_80117A40:\t.space\t4\n"
+        "D_80117A44:\t.space\t4\n"
+        "D_80117A48:\t.space\t4\n"
+        "D_80117A4C:\t.space\t188\n"
+        "D_80117B08:\t.space\t4\n"
+        "D_80117B0C:\t.space\t8\n"
+        "D_80117B14:\t.space\t4\n"
+        "D_80117B18:\t.space\t4\n"
+        "D_80117B1C:\t.space\t4\n"
+        "D_80117B20:\t.space\t4\n"
+        "D_80117B24:\t.space\t8\n"
+        "D_80117B2C:\t.space\t12\n"
+        "D_80117B38:\t.space\t16\n"
+        "D_80117B48:\t.space\t8\n"
+        "D_80117B50:\t.space\t8\n"
+        "D_80117B58:\t.space\t8\n"
+        "D_80117B60:\t.space\t248\n"
+        "D_80117C58:\t.space\t24\n"
+        "D_80117C70:\t.space\t8\n"
+        "D_80117C78:\t.space\t4\n"
+        "D_80117C7C:\t.space\t4\n"
+        "D_80117C80:\t.space\t4\n"
+        "D_80117C84:\t.space\t4\n"
+        "D_80117C88:\t.space\t4\n"
+        "D_80117C8C:\t.space\t24\n"
+        "D_80117CA4:\t.space\t4\n"
+        "D_80117CA8:\t.space\t4\n"
+        "D_80117CAC:\t.space\t4\n"
+        "D_80117CB0:\t.space\t8\n"
+        "D_80117CB8:\t.space\t8\n"
+        "D_80117CC0:\t.space\t4\n"
+        "D_80117CC4:\t.space\t60\n"
+        "D_80117D00:\t.space\t4\n"
+        "D_80117D04:\t.space\t8\n"
+        "D_80117D0C:\t.space\t3\n"
+        "D_80117D0F:\t.space\t5\n"
+        "D_80117D14:\t.space\t4\n"
+        "D_80117D18:\t.space\t4\n"
+        "D_80117D1C:\t.space\t4\n"
+        "D_80117D20:\t.space\t4\n"
+        "D_80117D24:\t.space\t8\n"
+        "D_80117D2C:\t.space\t4\n"
+        "D_80117D30:\t.space\t4\n"
+        "D_80117D34:\t.space\t4\n"
+        "D_80117D38:\t.space\t100\n"
+        "D_80117D9C:\t.space\t8\n"
+        "D_80117DA4:\t.space\t4\n"
+        "D_80117DA8:\t.space\t4\n"
+        "D_80117DAC:\t.space\t4\n"
+        "D_80117DB0:\t.space\t4\n"
+        "D_80117DB4:\t.space\t72\n"
+        "D_80117DFC:\t.space\t410\n"
+        "D_80117F96:\t.space\t102\n"
+        "D_80117FFC:\t.space\t264\n"
+        "D_80118104:\t.space\t352\n"
+        "D_80118264:\t.space\t12\n"
+        "D_80118270:\t.space\t4\n"
+        "D_80118274:\t.space\t4\n"
+        "D_80118278:\t.space\t4\n"
+        "D_8011827C:\t.space\t16\n"
+        "D_8011828C:\t.space\t4\n"
+        "D_80118290:\t.space\t4\n"
+        "D_80118294:\t.space\t16\n"
+        "D_801182A4:\t.space\t4\n"
+        "D_801182A8:\t.space\t4\n"
+        "D_801182AC:\t.space\t16\n"
+        "D_801182BC:\t.space\t4\n"
+        "D_801182C0:\t.space\t4\n"
+        "D_801182C4:\t.space\t16\n"
+        "D_801182D4:\t.space\t4\n"
+        "D_801182D8:\t.space\t4\n"
+        "D_801182DC:\t.space\t16\n"
+        "D_801182EC:\t.space\t4\n"
+        "D_801182F0:\t.space\t20\n"
+        "D_80118304:\t.space\t4\n"
+        "D_80118308:\t.space\t20\n"
+        "D_8011831C:\t.space\t4\n"
+        "D_80118320:\t.space\t20\n"
+        "D_80118334:\t.space\t4\n"
+        "D_80118338:\t.space\t4\n"
+        "D_8011833C:\t.space\t16\n"
+        "D_8011834C:\t.space\t4\n"
+        "D_80118350:\t.space\t4\n"
+        "D_80118354:\t.space\t16\n"
+        "D_80118364:\t.space\t4\n"
+        "D_80118368:\t.space\t20\n"
+        "D_8011837C:\t.space\t4\n"
+        "D_80118380:\t.space\t20\n"
+        "D_80118394:\t.space\t4\n"
+        "D_80118398:\t.space\t4\n"
+        "D_8011839C:\t.space\t16\n"
+        "D_801183AC:\t.space\t4\n"
+        "D_801183B0:\t.space\t20\n"
+        "D_801183C4:\t.space\t4\n"
+        "D_801183C8:\t.space\t20\n"
+        "D_801183DC:\t.space\t4\n"
+        "D_801183E0:\t.space\t20\n"
+        "D_801183F4:\t.space\t4\n"
+        "D_801183F8:\t.space\t20\n"
+        "D_8011840C:\t.space\t4\n"
+        "D_80118410:\t.space\t20\n"
+        "D_80118424:\t.space\t4\n"
+        "D_80118428:\t.space\t20\n"
+        "D_8011843C:\t.space\t4\n"
+        "D_80118440:\t.space\t20\n"
+        "D_80118454:\t.space\t4\n"
+        "D_80118458:\t.space\t20\n"
+        "D_8011846C:\t.space\t4\n"
+        "D_80118470:\t.space\t20\n"
+        "D_80118484:\t.space\t4\n"
+        "D_80118488:\t.space\t20\n"
+        "D_8011849C:\t.space\t4\n"
+        "D_801184A0:\t.space\t20\n"
+        "D_801184B4:\t.space\t4\n"
+        "D_801184B8:\t.space\t20\n"
+        "D_801184CC:\t.space\t4\n"
+        "D_801184D0:\t.space\t20\n"
+        "D_801184E4:\t.space\t4\n"
+        "D_801184E8:\t.space\t20\n"
+        "D_801184FC:\t.space\t4\n"
+        "D_80118500:\t.space\t196\n"
+        "D_801185C4:\t.space\t8\n"
+        "D_801185CC:\t.space\t4\n"
+        "D_801185D0:\t.space\t276\n"
+        "D_801186E4:\t.space\t16\n"
+        "D_801186F4:\t.space\t4\n"
+        "D_801186F8:\t.space\t4\n"
+        "D_801186FC:\t.space\t4\n"
+        "D_80118700:\t.space\t24\n"
+        "D_80118718:\t.space\t4\n"
+        "D_8011871C:\t.space\t4\n"
+        "D_80118720:\t.space\t4\n"
+        "D_80118724:\t.space\t24\n"
+        "D_8011873C:\t.space\t4\n"
+        "D_80118740:\t.space\t4\n"
+        "D_80118744:\t.space\t4\n"
+        "D_80118748:\t.space\t24\n"
+        "D_80118760:\t.space\t4\n"
+        "D_80118764:\t.space\t4\n"
+        "D_80118768:\t.space\t4\n"
+        "D_8011876C:\t.space\t24\n"
+        "D_80118784:\t.space\t4\n"
+        "D_80118788:\t.space\t4\n"
+        "D_8011878C:\t.space\t4\n"
+        "D_80118790:\t.space\t24\n"
+        "D_801187A8:\t.space\t4\n"
+        "D_801187AC:\t.space\t4\n"
+        "D_801187B0:\t.space\t4\n"
+        "D_801187B4:\t.space\t440\n"
+        "D_8011896C:\t.space\t8\n"
+        "D_80118974:\t.space\t8\n"
+        "D_8011897C:\t.space\t4\n"
+        "D_80118980:\t.space\t4\n"
+        "D_80118984:\t.space\t20\n"
+        "D_80118998:\t.space\t4\n"
+        "D_8011899C:\t.space\t4\n"
+        "D_801189A0:\t.space\t4\n"
+        "D_801189A4:\t.space\t15\n"
+        "D_801189B3:\t.space\t36\n"
+        "D_801189D7:\t.space\t21\n"
+        "D_801189EC:\t.space\t48\n"
+        "D_80118A1C:\t.space\t4\n"
+        "D_80118A20:\t.space\t20\n"
+        "D_80118A34:\t.space\t36\n"
+        "\t.text");
+#else
+__asm__(".set D_80117490, D_80117490_bss+0x0\n"
+        ".set D_80117494, D_80117490_bss+0x4\n"
+        ".set D_80117498, D_80117490_bss+0x8\n"
+        ".set D_801174A0, D_80117490_bss+0x10\n"
+        ".set D_801174B0, D_80117490_bss+0x20\n"
+        ".set D_801174B8, D_80117490_bss+0x28\n"
+        ".set D_801174C0, D_80117490_bss+0x30\n"
+        ".set D_801174C4, D_80117490_bss+0x34\n"
+        ".set D_801174E8, D_80117490_bss+0x58\n"
+        ".set D_80117514, D_80117490_bss+0x84\n"
+        ".set D_801175CC, D_80117490_bss+0x13C\n"
+        ".set D_801175DC, D_80117490_bss+0x14C\n"
+        ".set D_801175E0, D_80117490_bss+0x150\n"
+        ".set D_801175E4, D_80117490_bss+0x154\n"
+        ".set D_801175E8, D_80117490_bss+0x158\n"
+        ".set D_801175FC, D_80117490_bss+0x16C\n"
+        ".set D_80117600, D_80117490_bss+0x170\n"
+        ".set D_80117604, D_80117490_bss+0x174\n"
+        ".set D_80117608, D_80117490_bss+0x178\n"
+        ".set D_80117620, D_80117490_bss+0x190\n"
+        ".set D_80117624, D_80117490_bss+0x194\n"
+        ".set D_80117628, D_80117490_bss+0x198\n"
+        ".set D_80117644, D_80117490_bss+0x1B4\n"
+        ".set D_80117648, D_80117490_bss+0x1B8\n"
+        ".set D_8011764C, D_80117490_bss+0x1BC\n"
+        ".set D_8011765C, D_80117490_bss+0x1CC\n"
+        ".set D_80117764, D_80117490_bss+0x2D4\n"
+        ".set D_8011786C, D_80117490_bss+0x3DC\n"
+        ".set D_801179A0, D_80117490_bss+0x510\n"
+        ".set D_801179A8, D_80117490_bss+0x518\n"
+        ".set D_801179AC, D_80117490_bss+0x51C\n"
+        ".set D_801179B0, D_80117490_bss+0x520\n"
+        ".set D_801179B4, D_80117490_bss+0x524\n"
+        ".set D_80117A30, D_80117490_bss+0x5A0\n"
+        ".set D_80117A40, D_80117490_bss+0x5B0\n"
+        ".set D_80117A44, D_80117490_bss+0x5B4\n"
+        ".set D_80117A48, D_80117490_bss+0x5B8\n"
+        ".set D_80117A4C, D_80117490_bss+0x5BC\n"
+        ".set D_80117B08, D_80117490_bss+0x678\n"
+        ".set D_80117B0C, D_80117490_bss+0x67C\n"
+        ".set D_80117B14, D_80117490_bss+0x684\n"
+        ".set D_80117B18, D_80117490_bss+0x688\n"
+        ".set D_80117B1C, D_80117490_bss+0x68C\n"
+        ".set D_80117B20, D_80117490_bss+0x690\n"
+        ".set D_80117B24, D_80117490_bss+0x694\n"
+        ".set D_80117B2C, D_80117490_bss+0x69C\n"
+        ".set D_80117B38, D_80117490_bss+0x6A8\n"
+        ".set D_80117B48, D_80117490_bss+0x6B8\n"
+        ".set D_80117B50, D_80117490_bss+0x6C0\n"
+        ".set D_80117B58, D_80117490_bss+0x6C8\n"
+        ".set D_80117B60, D_80117490_bss+0x6D0\n"
+        ".set D_80117C58, D_80117490_bss+0x7C8\n"
+        ".set D_80117C70, D_80117490_bss+0x7E0\n"
+        ".set D_80117C78, D_80117490_bss+0x7E8\n"
+        ".set D_80117C7C, D_80117490_bss+0x7EC\n"
+        ".set D_80117C80, D_80117490_bss+0x7F0\n"
+        ".set D_80117C84, D_80117490_bss+0x7F4\n"
+        ".set D_80117C88, D_80117490_bss+0x7F8\n"
+        ".set D_80117C8C, D_80117490_bss+0x7FC\n"
+        ".set D_80117CA4, D_80117490_bss+0x814\n"
+        ".set D_80117CA8, D_80117490_bss+0x818\n"
+        ".set D_80117CAC, D_80117490_bss+0x81C\n"
+        ".set D_80117CB0, D_80117490_bss+0x820\n"
+        ".set D_80117CB8, D_80117490_bss+0x828\n"
+        ".set D_80117CC0, D_80117490_bss+0x830\n"
+        ".set D_80117CC4, D_80117490_bss+0x834\n"
+        ".set D_80117D00, D_80117490_bss+0x870\n"
+        ".set D_80117D04, D_80117490_bss+0x874\n"
+        ".set D_80117D0C, D_80117490_bss+0x87C\n"
+        ".set D_80117D0F, D_80117490_bss+0x87F\n"
+        ".set D_80117D14, D_80117490_bss+0x884\n"
+        ".set D_80117D18, D_80117490_bss+0x888\n"
+        ".set D_80117D1C, D_80117490_bss+0x88C\n"
+        ".set D_80117D20, D_80117490_bss+0x890\n"
+        ".set D_80117D24, D_80117490_bss+0x894\n"
+        ".set D_80117D2C, D_80117490_bss+0x89C\n"
+        ".set D_80117D30, D_80117490_bss+0x8A0\n"
+        ".set D_80117D34, D_80117490_bss+0x8A4\n"
+        ".set D_80117D38, D_80117490_bss+0x8A8\n"
+        ".set D_80117D9C, D_80117490_bss+0x90C\n"
+        ".set D_80117DA4, D_80117490_bss+0x914\n"
+        ".set D_80117DA8, D_80117490_bss+0x918\n"
+        ".set D_80117DAC, D_80117490_bss+0x91C\n"
+        ".set D_80117DB0, D_80117490_bss+0x920\n"
+        ".set D_80117DB4, D_80117490_bss+0x924\n"
+        ".set D_80117DFC, D_80117490_bss+0x96C\n"
+        ".set D_80117F96, D_80117490_bss+0xB06\n"
+        ".set D_80117FFC, D_80117490_bss+0xB6C\n"
+        ".set D_80118104, D_80117490_bss+0xC74\n"
+        ".set D_80118264, D_80117490_bss+0xDD4\n"
+        ".set D_80118270, D_80117490_bss+0xDE0\n"
+        ".set D_80118274, D_80117490_bss+0xDE4\n"
+        ".set D_80118278, D_80117490_bss+0xDE8\n"
+        ".set D_8011827C, D_80117490_bss+0xDEC\n"
+        ".set D_8011828C, D_80117490_bss+0xDFC\n"
+        ".set D_80118290, D_80117490_bss+0xE00\n"
+        ".set D_80118294, D_80117490_bss+0xE04\n"
+        ".set D_801182A4, D_80117490_bss+0xE14\n"
+        ".set D_801182A8, D_80117490_bss+0xE18\n"
+        ".set D_801182AC, D_80117490_bss+0xE1C\n"
+        ".set D_801182BC, D_80117490_bss+0xE2C\n"
+        ".set D_801182C0, D_80117490_bss+0xE30\n"
+        ".set D_801182C4, D_80117490_bss+0xE34\n"
+        ".set D_801182D4, D_80117490_bss+0xE44\n"
+        ".set D_801182D8, D_80117490_bss+0xE48\n"
+        ".set D_801182DC, D_80117490_bss+0xE4C\n"
+        ".set D_801182EC, D_80117490_bss+0xE5C\n"
+        ".set D_801182F0, D_80117490_bss+0xE60\n"
+        ".set D_80118304, D_80117490_bss+0xE74\n"
+        ".set D_80118308, D_80117490_bss+0xE78\n"
+        ".set D_8011831C, D_80117490_bss+0xE8C\n"
+        ".set D_80118320, D_80117490_bss+0xE90\n"
+        ".set D_80118334, D_80117490_bss+0xEA4\n"
+        ".set D_80118338, D_80117490_bss+0xEA8\n"
+        ".set D_8011833C, D_80117490_bss+0xEAC\n"
+        ".set D_8011834C, D_80117490_bss+0xEBC\n"
+        ".set D_80118350, D_80117490_bss+0xEC0\n"
+        ".set D_80118354, D_80117490_bss+0xEC4\n"
+        ".set D_80118364, D_80117490_bss+0xED4\n"
+        ".set D_80118368, D_80117490_bss+0xED8\n"
+        ".set D_8011837C, D_80117490_bss+0xEEC\n"
+        ".set D_80118380, D_80117490_bss+0xEF0\n"
+        ".set D_80118394, D_80117490_bss+0xF04\n"
+        ".set D_80118398, D_80117490_bss+0xF08\n"
+        ".set D_8011839C, D_80117490_bss+0xF0C\n"
+        ".set D_801183AC, D_80117490_bss+0xF1C\n"
+        ".set D_801183B0, D_80117490_bss+0xF20\n"
+        ".set D_801183C4, D_80117490_bss+0xF34\n"
+        ".set D_801183C8, D_80117490_bss+0xF38\n"
+        ".set D_801183DC, D_80117490_bss+0xF4C\n"
+        ".set D_801183E0, D_80117490_bss+0xF50\n"
+        ".set D_801183F4, D_80117490_bss+0xF64\n"
+        ".set D_801183F8, D_80117490_bss+0xF68\n"
+        ".set D_8011840C, D_80117490_bss+0xF7C\n"
+        ".set D_80118410, D_80117490_bss+0xF80\n"
+        ".set D_80118424, D_80117490_bss+0xF94\n"
+        ".set D_80118428, D_80117490_bss+0xF98\n"
+        ".set D_8011843C, D_80117490_bss+0xFAC\n"
+        ".set D_80118440, D_80117490_bss+0xFB0\n"
+        ".set D_80118454, D_80117490_bss+0xFC4\n"
+        ".set D_80118458, D_80117490_bss+0xFC8\n"
+        ".set D_8011846C, D_80117490_bss+0xFDC\n"
+        ".set D_80118470, D_80117490_bss+0xFE0\n"
+        ".set D_80118484, D_80117490_bss+0xFF4\n"
+        ".set D_80118488, D_80117490_bss+0xFF8\n"
+        ".set D_8011849C, D_80117490_bss+0x100C\n"
+        ".set D_801184A0, D_80117490_bss+0x1010\n"
+        ".set D_801184B4, D_80117490_bss+0x1024\n"
+        ".set D_801184B8, D_80117490_bss+0x1028\n"
+        ".set D_801184CC, D_80117490_bss+0x103C\n"
+        ".set D_801184D0, D_80117490_bss+0x1040\n"
+        ".set D_801184E4, D_80117490_bss+0x1054\n"
+        ".set D_801184E8, D_80117490_bss+0x1058\n"
+        ".set D_801184FC, D_80117490_bss+0x106C\n"
+        ".set D_80118500, D_80117490_bss+0x1070\n"
+        ".set D_801185C4, D_80117490_bss+0x1134\n"
+        ".set D_801185CC, D_80117490_bss+0x113C\n"
+        ".set D_801185D0, D_80117490_bss+0x1140\n"
+        ".set D_801186E4, D_80117490_bss+0x1254\n"
+        ".set D_801186F4, D_80117490_bss+0x1264\n"
+        ".set D_801186F8, D_80117490_bss+0x1268\n"
+        ".set D_801186FC, D_80117490_bss+0x126C\n"
+        ".set D_80118700, D_80117490_bss+0x1270\n"
+        ".set D_80118718, D_80117490_bss+0x1288\n"
+        ".set D_8011871C, D_80117490_bss+0x128C\n"
+        ".set D_80118720, D_80117490_bss+0x1290\n"
+        ".set D_80118724, D_80117490_bss+0x1294\n"
+        ".set D_8011873C, D_80117490_bss+0x12AC\n"
+        ".set D_80118740, D_80117490_bss+0x12B0\n"
+        ".set D_80118744, D_80117490_bss+0x12B4\n"
+        ".set D_80118748, D_80117490_bss+0x12B8\n"
+        ".set D_80118760, D_80117490_bss+0x12D0\n"
+        ".set D_80118764, D_80117490_bss+0x12D4\n"
+        ".set D_80118768, D_80117490_bss+0x12D8\n"
+        ".set D_8011876C, D_80117490_bss+0x12DC\n"
+        ".set D_80118784, D_80117490_bss+0x12F4\n"
+        ".set D_80118788, D_80117490_bss+0x12F8\n"
+        ".set D_8011878C, D_80117490_bss+0x12FC\n"
+        ".set D_80118790, D_80117490_bss+0x1300\n"
+        ".set D_801187A8, D_80117490_bss+0x1318\n"
+        ".set D_801187AC, D_80117490_bss+0x131C\n"
+        ".set D_801187B0, D_80117490_bss+0x1320\n"
+        ".set D_801187B4, D_80117490_bss+0x1324\n"
+        ".set D_8011896C, D_80117490_bss+0x14DC\n"
+        ".set D_80118974, D_80117490_bss+0x14E4\n"
+        ".set D_8011897C, D_80117490_bss+0x14EC\n"
+        ".set D_80118980, D_80117490_bss+0x14F0\n"
+        ".set D_80118984, D_80117490_bss+0x14F4\n"
+        ".set D_80118998, D_80117490_bss+0x1508\n"
+        ".set D_8011899C, D_80117490_bss+0x150C\n"
+        ".set D_801189A0, D_80117490_bss+0x1510\n"
+        ".set D_801189A4, D_80117490_bss+0x1514\n"
+        ".set D_801189B3, D_80117490_bss+0x1523\n"
+        ".set D_801189D7, D_80117490_bss+0x1547\n"
+        ".set D_801189EC, D_80117490_bss+0x155C\n"
+        ".set D_80118A1C, D_80117490_bss+0x158C\n"
+        ".set D_80118A20, D_80117490_bss+0x1590\n"
+        ".set D_80118A34, D_80117490_bss+0x15A4\n"
+        ".set D_80105F30, D_80105F2C+4\n"
+        ".set D_80105F34, D_80105F2C+8\n"
+        ".set D_80105F38, D_80105F2C+12\n"
+        ".set D_80105F3C, D_80105F2C+16\n"
+        ".set D_80105F40, D_80105F2C+20\n"
+        ".set D_80105F44, D_80105F2C+24\n"
+        ".set D_80105F48, D_80105F2C+28\n");
+#endif
+
 void InterfacePlaceQuad(IfacePoly4 *poly, IfacePoint pos, s32 w, s32 h) {
     s32 left, right;
 
@@ -411,7 +859,6 @@ void InterfacePlaceQuad(IfacePoly4 *poly, IfacePoint pos, s32 w, s32 h) {
 extern const IfacePoint D_80011BE4[]; /* weapon-select bar origins */
 extern Gobj *gObjPlayer;
 
-extern s32 D_80105F44;
 extern s16 POSITION;     /* screen centre x */
 extern s16 D_8012C7FA;   /* screen centre y */
 extern void *gTextCamera;
@@ -490,7 +937,6 @@ typedef struct IfaceCamera {
 extern s32 D_8010F8C0;                  /* weapon select ticks, -5 when closed */
 extern u8 D_8010F8E4;                   /* weapon changed while selecting */
 extern s32 D_8010F8E8;                  /* joystick mode to restore */
-extern char D_8010F8EC[];
 extern IfaceLine D_801189EC[2];
 extern IfacePoly4 D_801189A4[2];
 extern s32 gPlayerOffset;
@@ -506,7 +952,6 @@ extern u16 D_80118A34; /* D_80118A1C[3].unk0 */
 
 extern u16 D_8010F8A0;                  /* sniper view width */
 extern s32 D_8010F8F0;                  /* target-lock message tick */
-extern struct { u16 id; u16 zoom; } D_8010F8F4; /* sniper text string, last zoom shown */
 extern u8 D_8010F8F8;                   /* zoom text shown */
 extern u8 D_8010F8F9;                   /* body part last reported */
 extern struct { s32 color; u8 unk04[0x20]; } D_801186E4[8]; /* zoom bar polys from their colour word */
@@ -610,8 +1055,6 @@ static inline s32 iRadarXY(s32 xy) {
 INCLUDE_PART1("asm/main/nonmatchings/interface", InterfaceSetup)
 
 extern const VECTOR32 D_80011D2C;
-extern char D_8010F874[], D_8010F8D0[];
-extern u8 D_8010F8C8[];
 extern IfaceSprite D_801174E8;          /* radar background sprite */
 extern char D_80117FFC[];               /* rounds text sprites */
 extern char D_8011765C[], D_80117764[], D_8011786C[]; /* meter caption buffers */
@@ -1228,11 +1671,6 @@ void InterfaceAddNPC(s32 id) {
         }
     }
 }
-
-/* Radar scale matrix pieces. */
-typedef struct IfaceSV3 {
-    s16 vx, vy, vz;
-} IfaceSV3;
 
 typedef struct IfaceRows {
     IfaceSV3 r[3];

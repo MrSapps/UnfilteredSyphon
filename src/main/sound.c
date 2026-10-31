@@ -27,10 +27,10 @@ static s32 D_8010F9BC = 0;
 static s32 D_8011018C;             /* unreferenced */
 static s32 *D_80110190;            /* MIDI data */
 static u8 D_80110194;              /* shooting excite active */
-#ifndef _PSYQ
-static u8 D_80110194_pad;          /* the original assembler gave every .lcomm 4 bytes */
-static s16 D_80110194_pad2;
-#endif
+static u8 D_80110194_pad;          /* the original assembler gave every .lcomm 4 bytes; */
+static s16 D_80110194_pad2;        /* aspsx 2.77 packs by size, so pad (as particle.c) */
+
+
 static u8 D_80110198;              /* chase excite level */
 static s32 D_8011019C;             /* periodic song */
 static s32 D_801101A0;

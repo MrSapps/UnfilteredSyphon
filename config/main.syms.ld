@@ -42,3 +42,5 @@ D_8010781C = 0x8010781C; /* gStringSniperSpareText[2] */
 D_80107820 = 0x80107820; /* gStringSniperSpareText[3] */
 D_80107828 = 0x80107828; /* gStringSnifferSpareText[1] */
 D_8010782C = 0x8010782C; /* gStringSnifferSpareText[2] */
+D_8011FABC = 0x8011FABC; /* &text.c D_8011FAB0[0].tpage, used by animate AnimateProcess */
+D_80107740 = 0x80107740; /* friendly.c D_80106AEC.foundCount (also lib_gte rcos %hi) */

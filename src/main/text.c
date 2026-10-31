@@ -3,17 +3,14 @@
 #include "scratch.h"
 #include "game.h"
 
-SDATA_LOCAL(gTextCamera)
-SDATA_LOCAL(D_8010FA48)
-SDATA_LOCAL(D_8010FA4C)
-SDATA_LOCAL(D_8010FA50)
-SDATA_LOCAL(D_8010FAA8)
-SDATA_LOCAL(D_8010FAAC)
-SDATA_LOCAL(D_801101A8)
-SDATA_LOCAL(D_801101AA)
-SDATA_LOCAL(D_801101AC)
-SDATA_LOCAL(D_801101AE)
-SDATA_LOCAL(D_801101B0)
+#include "gameobj.h"
+
+/*
+ * text.c's data is defined here (docs/data_migration.md). Its .text starts with the
+ * marker/justify helpers that used to end hotbox.c (func_80082C4C...): they use this
+ * file's statics D_801101B0 and D_801211E4. Its .rdata starts with the font tables
+ * at 0x800123C8 (no {1, 1, 1, 0} head).
+ */
 
 /* One displayed character: a GsSPRITE plus two words (0x2C bytes). */
 typedef struct TextChar {
@@ -76,28 +73,31 @@ typedef struct TextWindow {
 
 extern TextString D_80120BE0[TEXT_STRING_MAX];
 extern TextWindow D_80121158[TEXT_WINDOW_MAX];
-extern void *gTextCamera;
-extern EGSListNode *D_8010FA50; /* persistent strings */
+void *gTextCamera;              /* common, $gp */
+/* .sdata (the rest, which the original reaches with lui, is defined at the end) */
+static s32 D_8010FA48 = 0;      /* next free sprite */
+static u16 D_8010FA4C = 0;      /* next free string slot */
+static EGSListNode *D_8010FA50 = NULL; /* persistent strings */
 extern s32 D_8010FAA8;
 extern s32 D_8010FAAC;          /* tick of the last typing click */
 typedef struct TextRect {
     s16 x, y, w, h;
 } TextRect;
-extern TextRect D_801101A8; /* TextStringRect result */
-extern s32 D_8010FA48;
-extern u16 D_8010FA4C; /* next free string slot */
+static TextRect D_801101A8;     /* .sbss: TextStringRect result */
 extern u8 D_8010FAA0[];         /* camera parameters */
+/* .bss, one block: laid out by hand after func_80082C4C */
 extern TextChar D_8011FAB0[100];
 
 /* A flat-shaded line primitive built by EGSDisplayBuildLineF (0x18 bytes). */
 typedef struct TextLine {
     /* 0x00 */ s32 tag;
-    /* 0x04 */ u8 unk04[0xC];
+    /* 0x04 */ u8 unk04[8];
+    /* 0x0C */ u32 color;
     /* 0x10 */ s32 xy0;
     /* 0x14 */ s32 xy1;
 } TextLine;
 extern TextLine D_801211E4[10];
-extern u32 D_801101B0;          /* tick of the next queued TextUpdate */
+static u32 D_801101B0;          /* .sbss: tick of the next queued TextUpdate */
 
 #define TEXT_GET_STRING(s, id)     \
     if ((id) >= TEXT_STRING_MAX) { \
@@ -138,16 +138,271 @@ void EGSDisplaySetupTransformWorldToScreen(void *display);
 u8 iTextRemoveWindow(TextWindow *w);
 u8 func_80086474(u8 c, TextChar *ch, u8 mini);
 
-INCLUDE_RODATA("asm/main/nonmatchings/text", D_800123D8);
+/* .rdata: font glyphs (u, v, width) */
+static const u8 D_800123C8[26][3] = { { 0x38, 0x10, 0x06 }, { 0x20, 0x18, 0x05 }, { 0x28, 0x18, 0x05 }, { 0x30, 0x18, 0x06 }, { 0x38, 0x18, 0x04 }, { 0x20, 0x20, 0x04 }, { 0x28, 0x20, 0x05 }, { 0x30, 0x20, 0x05 }, { 0x38, 0x20, 0x01 }, { 0x20, 0x28, 0x04 }, { 0x28, 0x28, 0x05 }, { 0x30, 0x28, 0x04 }, { 0x38, 0x28, 0x07 }, { 0x20, 0x30, 0x06 }, { 0x28, 0x30, 0x05 }, { 0x30, 0x30, 0x05 }, { 0x38, 0x30, 0x06 }, { 0x20, 0x38, 0x05 }, { 0x28, 0x38, 0x05 }, { 0x30, 0x38, 0x05 }, { 0x38, 0x38, 0x05 }, { 0x40, 0x00, 0x06 }, { 0x48, 0x00, 0x09 }, { 0x58, 0x00, 0x06 }, { 0x60, 0x00, 0x06 }, { 0x40, 0x08, 0x05 } };
+static const u8 D_80012418[26][3] = { { 0x08, 0x20, 0x05 }, { 0x10, 0x20, 0x04 }, { 0x18, 0x20, 0x04 }, { 0x00, 0x28, 0x05 }, { 0x08, 0x28, 0x04 }, { 0x10, 0x28, 0x04 }, { 0x18, 0x28, 0x05 }, { 0x00, 0x30, 0x05 }, { 0x08, 0x30, 0x01 }, { 0x10, 0x30, 0x04 }, { 0x18, 0x30, 0x04 }, { 0x00, 0x38, 0x04 }, { 0x08, 0x38, 0x06 }, { 0x10, 0x38, 0x05 }, { 0x18, 0x38, 0x05 }, { 0x20, 0x00, 0x04 }, { 0x28, 0x00, 0x05 }, { 0x30, 0x00, 0x04 }, { 0x38, 0x00, 0x04 }, { 0x20, 0x08, 0x05 }, { 0x28, 0x08, 0x05 }, { 0x30, 0x08, 0x05 }, { 0x38, 0x08, 0x08 }, { 0x20, 0x10, 0x05 }, { 0x28, 0x10, 0x05 }, { 0x30, 0x10, 0x04 } };
+static const u8 D_80012468[10][3] = { { 0x00, 0x00, 0x05 }, { 0x08, 0x00, 0x05 }, { 0x10, 0x00, 0x05 }, { 0x18, 0x00, 0x05 }, { 0x00, 0x08, 0x05 }, { 0x08, 0x08, 0x05 }, { 0x10, 0x08, 0x05 }, { 0x18, 0x08, 0x05 }, { 0x00, 0x10, 0x05 }, { 0x08, 0x10, 0x05 } };
+static const u8 D_80012488[26][3] = { { 0x40, 0x1A, 0x06 }, { 0x48, 0x1A, 0x06 }, { 0x50, 0x1A, 0x06 }, { 0x58, 0x1A, 0x06 }, { 0x40, 0x21, 0x06 }, { 0x48, 0x21, 0x06 }, { 0x50, 0x21, 0x06 }, { 0x58, 0x21, 0x06 }, { 0x60, 0x21, 0x02 }, { 0x40, 0x28, 0x06 }, { 0x48, 0x28, 0x06 }, { 0x50, 0x28, 0x06 }, { 0x58, 0x28, 0x08 }, { 0x40, 0x2F, 0x06 }, { 0x48, 0x2F, 0x06 }, { 0x50, 0x2F, 0x06 }, { 0x58, 0x2F, 0x06 }, { 0x40, 0x36, 0x06 }, { 0x48, 0x36, 0x06 }, { 0x50, 0x36, 0x06 }, { 0x58, 0x36, 0x06 }, { 0x60, 0x36, 0x06 }, { 0x40, 0x3D, 0x08 }, { 0x4A, 0x3D, 0x07 }, { 0x52, 0x3D, 0x06 }, { 0x5A, 0x3D, 0x06 } };
+static const u8 D_800124D8[10][3] = { { 0x62, 0x3D, 0x06 }, { 0x40, 0x44, 0x06 }, { 0x48, 0x44, 0x06 }, { 0x50, 0x44, 0x06 }, { 0x58, 0x44, 0x06 }, { 0x60, 0x44, 0x06 }, { 0x40, 0x4B, 0x06 }, { 0x48, 0x4B, 0x06 }, { 0x50, 0x4B, 0x06 }, { 0x58, 0x4B, 0x06 } };
+static const u8 D_800124F8[4][3] = { { 0x52, 0xA5, 0x15 }, { 0x52, 0x9C, 0x15 }, { 0x52, 0x93, 0x15 }, { 0x52, 0x8A, 0x15 } };
+static const u8 D_80012504[4][3] = { { 0x5E, 0xB8, 0x0B }, { 0x52, 0xAF, 0x09 }, { 0x5E, 0xAF, 0x0A }, { 0x52, 0xB8, 0x08 } };
+static const u8 D_80012510[4][3] = { { 0x52, 0x81, 0x15 }, { 0x00, 0x01, 0x00 }, { 0x00, 0x01, 0x00 }, { 0x52, 0x7C, 0x06 } };
 
-INCLUDE_RODATA("asm/main/nonmatchings/text", D_80012448);
+/* Marker/justify helpers (formerly the end of hotbox.c) */
+typedef struct {
+    s32 vx, vy, vz;
+} HotboxVector;
 
-INCLUDE_RODATA("asm/main/nonmatchings/text", D_800124F8);
+typedef struct HotboxFrame {
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ s32 x, y, z;
+} HotboxFrame;
 
-INCLUDE_RODATA("asm/main/nonmatchings/text", D_80012504);
+/* Bounding box at the start of a model. */
+typedef struct HotboxModel {
+    /* 0x00 */ HotboxVector min;
+    /* 0x0C */ s32 pad0C;
+    /* 0x10 */ HotboxVector max;
+} HotboxModel;
 
-INCLUDE_RODATA("asm/main/nonmatchings/text", D_80012510);
+typedef struct HotboxNPC {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ s32 flags; /* 0x200: show marker */
+} HotboxNPC;
 
+#define HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+
+u8 LevelGameObjectHasModel(s32 id);
+void EGSFrameTransformVector(HotboxVector *in, void *frame, s32 arg2, HotboxVector *out);
+void EGSDisplayTransformWorldToScreen(HotboxVector *in, HotboxVector *out);
+void EGSDisplayAddPoly(void *camera, void *poly);
+void EGSDisplayDeletePoly(void *camera, void *poly);
+
+void func_80082C4C(void) {
+    if (gSystemTick + 1 < D_801101B0) {
+        if ((u8)SysIsPaused()) { /* u8 in the original */
+            return;
+        }
+        if (D_801101B0 != -1) {
+            EGSDisplayQueueInterrupt(TextUpdate, 0, 0xE0C00000);
+        }
+        SysPostMessage(0x1F, 4, 0xFFFE, 0xFFFE, 0, 0, 0, 0);
+        D_801101B0 = gSystemTick + 1;
+    }
+}
+
+/* .bss: as separate .lcomms aspsx 2.77 would 16-align the windows and lines */
+#ifdef _PSYQ
+__asm__("\t.bss\nD_8011FAB0:\t.space\t4400\nD_80120BE0:\t.space\t1400\n"
+        "D_80121158:\t.space\t140\nD_801211E4:\t.space\t240\n\t.text");
+#else
+static u8 D_8011FAB0_bss[0x1824];
+__asm__(".set D_8011FAB0, D_8011FAB0_bss\n"
+        ".set D_80120BE0, D_8011FAB0_bss+0x1130\n"
+        ".set D_80121158, D_8011FAB0_bss+0x16A8\n"
+        ".set D_801211E4, D_8011FAB0_bss+0x1734\n"
+        /* folded font addresses func_80086474 (asm) uses */
+        ".set D_800123D8, D_800123C8+0x10\n"
+        ".set D_80012448, D_80012418+0x30\n");
+#endif
+
+/* Justify each line (run of glyphs with increasing x) of a string. */
+void func_80082CE8(TextString *text) {
+    TextChar *start = text->chars;
+    TextChar *end;
+    s32 offset;
+
+    for (end = start; start < &text->chars[text->length]; end++) {
+        while (end[1].x > end->x && end < &text->chars[text->length - 1]) {
+            end++;
+        }
+        if (text->flags & 0x40) {
+            offset = (s16)text->xOffset - (end->x + end->w);
+        } else if (text->flags & 8) {
+            offset = (s16)text->xOffset - (((end->x + end->w) - start->x) / 2 + start->x);
+        } else {
+            offset = (s16)text->xOffset - start->x;
+        }
+        if (offset != 0) {
+            for (; start <= end; start++) {
+                start->x += offset;
+            }
+        } else {
+            start = end + 1;
+        }
+    }
+}
+
+void func_80082E70(TextString *text, s32 x, s32 y) {
+    s32 dy;
+    s32 i;
+
+    text->xOffset = x;
+    dy = y - text->chars[0].y;
+    func_80082CE8(text);
+    text->chars[0].y = y;
+    for (; text != NULL; text = text->next) {
+        for (i = 1; i < text->length; i++) {
+            text->chars[i].y += dy;
+        }
+    }
+}
+
+#ifdef NON_MATCHING
+/* regalloc of width/room/arrow (a1/a0/a2 vs a2/a1/a3), (x - 6) + arrow reassociated, &line[1] not kept in s0 */
+/*
+ * Place marker string s (index-th marker) over the object it labels: project
+ * the object (or the top of its model) to the screen, move the string there
+ * clamped to the screen edges, and draw the two-line pointer from it to the
+ * object while the string is shown. Off-screen markers are parked below.
+ */
+void func_80082F20(TextString *s, s32 index) {
+    HotboxVector pos;
+    HotboxVector at;
+    HotboxVector head;
+    void *display;
+    TextChar *chars;
+    GameObjectRuntime *gobj;
+    GameObjectInfo *info;
+    HotboxModel *model;
+    TextLine *line;
+    s32 width;
+    s32 room;
+    s32 arrow;
+    s32 x;
+    s32 t;
+    u32 color;
+
+    model = NULL;
+    chars = s->chars;
+    gobj = gameObjectsInfo[s->speed].runtime;
+    line = &D_801211E4[index * 2];
+    if (LevelGameObjectHasModel(gobj->id)) {
+        model = (HotboxModel *)gobj->anim->model;
+        pos.vx = ((HotboxFrame *)gobj->anim->frame)->x;
+        pos.vy = ((HotboxFrame *)gobj->anim->frame)->y;
+        pos.vz = ((HotboxFrame *)gobj->anim->frame)->z;
+        pos.vy = -pos.vy;
+        if (gobj->npcState == 2) {
+            if (!(((HotboxNPC *)gobj->npc)->flags & 0x200)) {
+                func_80085024(s);
+                return;
+            }
+            head.vz = 0;
+            head.vy = 0;
+            head.vx = 0;
+        } else {
+            head.vx = model->min.vx + model->max.vx;
+            head.vy = model->min.vy + model->max.vy;
+            head.vz = model->min.vz + model->max.vz;
+            head.vx = HALF(head.vx);
+            head.vy = HALF(head.vy);
+            head.vz = HALF(head.vz);
+            if (head.vx != 0 || head.vy != 0 || head.vz != 0) {
+                head.vy = -head.vy;
+                EGSFrameTransformVector(&head, gobj->anim->frame, 0, &head);
+                CameraGetDisplay(gCamera, &display);
+                EGSDisplaySetupTransformWorldToScreen(display);
+            }
+            gobj = NULL;
+            pos.vx += head.vx;
+            pos.vy += head.vy;
+            pos.vz += head.vz;
+        }
+    } else {
+        info = &gameObjectsInfo[gobj->id];
+        pos.vx = info->matrix.t[0];
+        pos.vy = info->matrix.t[1];
+        gobj = NULL;
+        pos.vz = info->matrix.t[2];
+    }
+    EGSDisplayTransformWorldToScreen(&pos, &pos);
+    if (pos.vz > 0) {
+        if (gobj != NULL) {
+            head.vx = ((HotboxFrame *)gobj->anim->frame)->x;
+            head.vy = ((HotboxFrame *)gobj->anim->frame)->y;
+            head.vz = ((HotboxFrame *)gobj->anim->frame)->z;
+            head.vy = -head.vy;
+            head.vy -= model->min.vy;
+            EGSDisplayTransformWorldToScreen(&head, &head);
+        } else {
+            head.vz = pos.vz;
+            head.vx = pos.vx;
+            head.vy = pos.vy;
+        }
+        width = chars[s->length - 1].x + chars[s->length - 1].w - chars[0].x;
+        if (head.vz < 0) {
+            head.vz = 0;
+        }
+        if (head.vx + (t = width + 8) > 0x98) {
+            /* off the right edge: right-justify and shorten the pointer */
+            room = 0xA0 - pos.vx;
+            arrow = room * 6 / (width + 16);
+            at.vx = 0x98;
+            if (arrow < 0) {
+                arrow = 0;
+            }
+            x = width * room / (width + 16);
+            if (x < 0) {
+                x = 0;
+            }
+            x = 0x98 - x;
+            s->flags |= 0x40;
+        } else {
+            s->flags &= ~0x40;
+            if (head.vx + 8 < -0x98) {
+                at.vx = -0x98;
+            } else {
+                at.vx = head.vx + 8;
+            }
+            x = at.vx;
+            arrow = 6;
+        }
+        if (head.vy + 8 > 0x5A) {
+            at.vy = 0x5A;
+        } else if (head.vy + 8 < -0x5A) {
+            at.vy = -0x5A;
+        } else {
+            at.vy = head.vy + 8;
+        }
+        if (head.vy > 0x52) {
+            head.vy = (pos.vy < 0x52) ? 0x52 : pos.vy;
+        }
+        if (s->endTick > gSystemTick) {
+            line[0].xy0 = (u16)head.vx | (-head.vy << 16);
+            line[0].xy1 = (x & 0xFFFF) | (-at.vy << 16);
+            line[1].xy0 = ((x + arrow) & 0xFFFF) | (-at.vy << 16);
+            line[1].xy1 = ((x - 6 + arrow) & 0xFFFF) | (-at.vy << 16);
+            color = ((chars[0].b << 16) + (chars[0].g << 8) + chars[0].r) | 0x40000000;
+            line[1].color = color;
+            line[0].color = color;
+            if (line[0].tag == 0) {
+                EGSDisplayAddPoly(gTextCamera, &line[0]);
+                EGSDisplayAddPoly(gTextCamera, &line[1]);
+            }
+        } else if (line[0].tag != 0) {
+            EGSDisplayDeletePoly(gTextCamera, &line[0]);
+            EGSDisplayDeletePoly(gTextCamera, &line[1]);
+        }
+        at.vy += 8;
+    } else {
+        if (gSystemTick - s->startTick < 600 && s->endTick < (u32)-1) {
+            s->endTick++;
+        }
+        at.vy = 300;
+        if (line[0].tag != 0) {
+            EGSDisplayDeletePoly(gTextCamera, &line[0]);
+            EGSDisplayDeletePoly(gTextCamera, &line[1]);
+        }
+    }
+    func_80082E70(s, at.vx, -at.vy);
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/text", func_80082F20);
+#endif
+
+/* keep the original line numbers (ASSERT) */
+#line 151
 void TextInitialize(s32 createCamera) {
     s32 params[4] = { 0, 0, 0, 0 };
     TextWindow *w;
@@ -1409,17 +1664,12 @@ static void func_800863E8(TextString *s) {
     }
 }
 
-/*
- * Font glyphs (u, v, width). The tables live in this file's rodata, but the
- * rodata split leaves the first 16 bytes (the start of A-Z, 0x800123C8) at the
- * end of hotbox's blob, so they are addressed relative to D_800123D8.
- */
-extern u8 D_800123D8[];
-#define TEXT_UPPER        ((u8(*)[3])(D_800123D8 - 0x10))  /* 0x800123C8 */
-#define TEXT_LOWER        ((u8(*)[3])(D_800123D8 + 0x40))  /* 0x80012418 */
-#define TEXT_DIGITS       ((u8(*)[3])(D_800123D8 + 0x90))  /* 0x80012468 */
-#define TEXT_MINI_LETTERS ((u8(*)[3])(D_800123D8 + 0xB0))  /* 0x80012488 */
-#define TEXT_MINI_DIGITS  ((u8(*)[3])(D_800123D8 + 0x100)) /* 0x800124D8 */
+/* Font glyphs (u, v, width), defined at the top of the file */
+#define TEXT_UPPER        ((u8(*)[3])D_800123C8)
+#define TEXT_LOWER        ((u8(*)[3])D_80012418)
+#define TEXT_DIGITS       ((u8(*)[3])D_80012468)
+#define TEXT_MINI_LETTERS ((u8(*)[3])D_80012488)
+#define TEXT_MINI_DIGITS  ((u8(*)[3])D_800124D8)
 /* Punctuation glyphs in .sdata: normal font, then mini font. */
 extern u8 D_8010FA54[]; /* : */
 extern u8 D_8010FA58[]; /* / */
@@ -1565,15 +1815,12 @@ INCLUDE_ASM("asm/main/nonmatchings/text", func_80086474);
 #endif
 
 /* Glyphs (u, v, width) of the special characters, in the font rodata above. */
-extern u8 D_800124F8[];
-extern u8 D_800124FE[];
-extern u8 D_80012501[];
-extern u8 D_80012504[];
-extern u8 D_80012507[];
-extern u8 D_8001250A[];
-extern u8 D_8001250D[];
-extern u8 D_80012510[];
-extern u8 D_80012519[];
+#define D_800124FE ((u8 *)D_800124F8 + 6)
+#define D_80012501 ((u8 *)D_800124F8 + 9)
+#define D_80012507 ((u8 *)D_80012504 + 3)
+#define D_8001250A ((u8 *)D_80012504 + 6)
+#define D_8001250D ((u8 *)D_80012504 + 9)
+#define D_80012519 ((u8 *)D_80012510 + 9)
 
 #ifdef NON_MATCHING
 /*
@@ -1595,7 +1842,7 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
                     glyph = D_8001250D;
                     break;
                 case 'e':
-                    glyph = D_80012510;
+                    glyph = (u8 *)D_80012510;
                     break;
                 case 't':
                     glyph = D_80012519;
@@ -1606,7 +1853,7 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
             glyph = D_8001250A;
             break;
         case 't':
-            glyph = D_80012504;
+            glyph = (u8 *)D_80012504;
             break;
         case 'l':
             switch (str[1]) {
@@ -1614,7 +1861,7 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
                     glyph = D_800124FE;
                     break;
                 case '2':
-                    glyph = D_800124F8;
+                    glyph = (u8 *)D_800124F8;
                     break;
             }
             break;
@@ -1624,7 +1871,7 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
                     glyph = D_80012501;
                     break;
                 case '2':
-                    glyph = D_800124F8 + 3;
+                    glyph = (u8 *)D_800124F8 + 3;
                     break;
             }
             break;
@@ -1641,3 +1888,27 @@ static s32 func_80086710(u8 *str, TextChar *ch) {
 #else
 INCLUDE_ASM("asm/main/nonmatchings/text", func_80086710);
 #endif
+
+/* .sdata, the part the original reaches with lui: defined after its users */
+static u8 D_8010FA54[3] = { 0x10, 0x10, 0x02 }; /* : */
+static u8 D_8010FA58[3] = { 0x14, 0x10, 0x05 }; /* / */
+static u8 D_8010FA5C[3] = { 0x1C, 0x10, 0x01 }; /* . */
+static u8 D_8010FA60[3] = { 0x00, 0x18, 0x04 }; /* ? */
+static u8 D_8010FA64[3] = { 0x08, 0x18, 0x01 }; /* ! */
+static u8 D_8010FA68[3] = { 0x18, 0x18, 0x01 }; /* ' */
+static u8 D_8010FA6C[3] = { 0x18, 0x18, 0x03 }; /* " */
+static u8 D_8010FA70[3] = { 0x00, 0x20, 0x01 }; /* , */
+static u8 D_8010FA74[3] = { 0x04, 0x20, 0x03 }; /* - */
+static u8 D_8010FA78[3] = { 0x58, 0x10, 0x03 }; /* ( */
+static u8 D_8010FA7C[3] = { 0x60, 0x10, 0x03 }; /* ) */
+static u8 D_8010FA80[3] = { 0x44, 0x52, 0x02 }; /* : (mini) */
+static u8 D_8010FA84[3] = { 0x60, 0x4B, 0x02 }; /* . (mini) */
+static u8 D_8010FA88[3] = { 0x64, 0x4B, 0x06 }; /* ? (mini) */
+static u8 D_8010FA8C[3] = { 0x40, 0x52, 0x02 }; /* ! (mini) */
+static u8 D_8010FA90[3] = { 0x50, 0x52, 0x02 }; /* ' (mini) */
+static u8 D_8010FA94[3] = { 0x50, 0x52, 0x05 }; /* " (mini) */
+static u8 D_8010FA98[3] = { 0x4C, 0x52, 0x02 }; /* , (mini) */
+static u8 D_8010FA9C[3] = { 0x04, 0x20, 0x03 }; /* - (mini) */
+static u8 D_8010FAA0[8] = { 0, 0, 0, 0, 0x80, 0x01, 0xF0, 0x00 }; /* camera parameters */
+static s32 D_8010FAA8 = -1;
+static s32 D_8010FAAC = 0;

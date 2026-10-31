@@ -90,13 +90,12 @@ How it works:
 
 Status as of 2026-10-31:
 
-* **Main exe.** `psyq_check_tu.py` reports 37 of the 51 main TUs OK in every section:
-  main system game level camera physics path playcas sprite los movement collision
-  gtegeo animate stream save shadow egshmd egsanim egsframe egsdebug egstex egsmem
-  egsmisc egsfile egshog egsgeom cas object target egsdev damage particle sniper
-  player joystick weapon. Many of these still contain INCLUDE_ASM functions.
-* **Linked.** With all 37 passed to `gen_psylink.py --libs` as `--obj` objects,
-  `psyq_link.sh` still gives 16x OK.
+* **Main exe.** `psyq_check_tu.py` reports all 51 main TUs OK in every section (aspsx
+  2.77). Many of them still contain INCLUDE_ASM functions.
+* **Linked.** With all 51 passed to `gen_psylink.py --libs` as `--obj` objects
+  (`--obj <tu>=build/psyqtu/<tu>.obj` after `psyq_check_tu.py --keep build/psyqtu ...`),
+  `psyq_link.sh` gives 16x OK: the main exe's game code is built entirely by
+  ccpsx + aspsx, linked by psylink.
 * **aspsx doesn't auto-align `.word`** (GNU as does). An INCLUDE_RODATA blob after
   data of odd size (a `__FILE__` string) lands unaligned; define it in C instead.
 * **The other main TUs.** None of them fails because of the asm path:

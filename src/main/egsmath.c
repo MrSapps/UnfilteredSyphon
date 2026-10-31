@@ -3,9 +3,9 @@
 #include "egsmath.h"
 #include "egsframe.h"
 
-SDATA_LOCAL(pEGSMathIdentityMatrix)
-
-extern MATRIX *pEGSMathIdentityMatrix;
+const MATRIX gEGSMathIdentityMatrix = { { { 0x1000, 0, 0 }, { 0, 0x1000, 0 }, { 0, 0, 0x1000 } }, { 0, 0, 0 } };
+/* .sdata */
+MATRIX *pEGSMathIdentityMatrix = (MATRIX *)&gEGSMathIdentityMatrix;
 
 int EGSMath_VectorModulus(VECTOR *v, s32 *out);
 int EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR *a, VECTOR *b, s32 *out);

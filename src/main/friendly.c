@@ -4,7 +4,7 @@
 #include "gobj.h"
 #include "scratch.h"
 
-SDATA_LOCAL(D_8010FAB4)
+/* friendly.c's data is defined in C (docs/data_migration.md) */
 
 /* Bit-string access that tolerates an unaligned base. */
 #define BITS_WORD(arr, n, w, b)           \
@@ -75,8 +75,8 @@ extern u8 D_8012D7AC[30];        /* == mCollisionFakeFacePool.flags */
 extern FakeVertex mCollisionBoxVertices[COLLISION_BOX_MAX][8];
 extern FakeFace mCollisionBoxFaces[COLLISION_BOX_MAX][6];
 extern u8 mCollisionBoxFaceFlags[COLLISION_BOX_MAX][6];
-extern s32 D_8010FAB4;              /* number of vertices in D_801212D8 */
-extern FakeVertex *D_801212D8[400]; /* vertices whose y is currently negated */
+static s32 D_8010FAB4 = 0;          /* .sdata: number of vertices in D_801212D8 */
+static FakeVertex *D_801212D8[400]; /* .bss: vertices whose y is currently negated */
 
 void CollisionClearFakeFaces(void);
 
@@ -193,7 +193,36 @@ typedef struct FriendlyEdgeInfo {
     /* 0x108 */ u8 shadowMatrix[1];
 } FriendlyEdgeInfo;
 
-extern FaceCollect D_80106AEC;
+/* .data: the face groups' parameters are initialised, the rest is zero */
+static FaceCollect D_80106AEC = {
+    {
+        { 3, 0, 0, 0x800, 0x7FFFFFFF, -0x30, 0x10 },
+        { 4, 0, 0, (s32)0x80000001, -0x800, -0x10, 0x30 },
+        { 5, 12, 13, (s32)0x80000001, -0x800, -0x10, 0x50 },
+        { 6, 14, 15, (s32)0x80000001, -0x800, -0x33, 0x60 },
+        { 7, 16, 17, (s32)0x80000001, -0x800, -0x1B, 0x50 },
+    },
+};
+#ifndef _PSYQ
+/* fields of D_80106AEC the asm functions address by splat label */
+__asm__(".set D_80106CE0, D_80106AEC+0x1F4\n"
+        ".set D_80106CF0, D_80106AEC+0x204\n"
+        ".set D_80106CF4, D_80106AEC+0x208\n"
+        ".set D_80106CF8, D_80106AEC+0x20C\n"
+        ".set D_80106D00, D_80106AEC+0x214\n"
+        ".set D_80106D04, D_80106AEC+0x218\n"
+        ".set D_80106D08, D_80106AEC+0x21C\n"
+        ".set D_80106D10, D_80106AEC+0x224\n"
+        ".set D_80106D14, D_80106AEC+0x228\n"
+        ".set D_80106D20, D_80106AEC+0x234\n"
+        ".set D_80106D24, D_80106AEC+0x238\n"
+        ".set D_80106D28, D_80106AEC+0x23C\n"
+        ".set D_80106D30, D_80106AEC+0x244\n"
+        ".set D_80106D34, D_80106AEC+0x248\n"
+        ".set D_80106D38, D_80106AEC+0x24C\n");
+/* D_80107740 (.foundCount) is an absolute symbol in config/main.syms.ld: lib_gte's
+ * rcos reaches its table through the same folded %hi */
+#endif
 static void func_80088270();
 s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove);
 s32 GobjCollideLoop(Gobj *gobj);

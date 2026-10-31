@@ -684,11 +684,12 @@ static DamageInitFlags D_8010FE68 = { 1, 1 }; /* deferred re-inits requested by 
 void *gOTStart = NULL;
 
 /* .bss */
-static TILE D_801225C8[2];
 #ifdef _PSYQ
-static DR_MODE D_801225E8[2];
-static DR_AREA D_80122600[10]; /* per OT draw areas */
+extern TILE D_801225C8[2];     /* laid out by hand after EGSDisplayInit: as .lcomms */
+extern DR_MODE D_801225E8[2];  /* aspsx 2.77 would 16-align the draw areas */
+extern DR_AREA D_80122600[10]; /* per OT draw areas */
 #else
+static TILE D_801225C8[2];
 /* maspsx's 2.7x layout would 16-align the draw areas; one block, named with .set */
 static DR_MODE D_801225E8_bss[12];
 extern DR_MODE D_801225E8[2];
@@ -726,6 +727,11 @@ s32 EGSDisplayInit(void) {
     gHMDVertTriplets = 0;
     return 0;
 }
+
+#ifdef _PSYQ
+__asm__("\t.bss\nD_801225C8:\t.space\t32\nD_801225E8:\t.space\t24\n"
+        "D_80122600:\t.space\t120\n\t.text"); /* + 40 unreferenced bytes, as the modern block */
+#endif
 
 s32 EGSDisplayAddMovie(EGSCamera *camera) {
     if (camera->flags & 2) {
