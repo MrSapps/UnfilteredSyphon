@@ -83,7 +83,7 @@ void PlayerFailMission(void);
 void StringMissionCompletedMsg(char *buf);
 void JoystickDeactivateMenu(s32);
 void GameCameraRequestCutToBehind(void);
-u16 ObjectDoQuip(s16 id, s32 bit, LevelObjectives *objectives);
+u16 ObjectDoQuip(s16 id);
 void LevelObjectiveAdd(s32 objective, s32 quipFrom);
 
 s32 LevelGetGameObjectMatrix(s32 id, GOBJ_MATRIX *out) {
@@ -322,9 +322,7 @@ void LevelGameOver(s32 arg0) {
     }
 }
 
-#ifdef NON_MATCHING
-/* logic matches; argument registers are allocated differently (one extra move) */
-void LevelMissionFailed(s32 reason, s32 xa, u8 secondary) {
+void LevelMissionFailed(s16 reason, s32 xa, u8 secondary) {
     char buf[32];
 
     if (gObjPlayer->healthInfo->health <= 0) {
@@ -350,29 +348,20 @@ void LevelMissionFailed(s32 reason, s32 xa, u8 secondary) {
         mMissionFailedMsgFlag = 1;
     }
     if (xa == -2) {
-        switch ((u16)gSysInfo.level) {
-        case 10:
-        case 11:
-        case 12:
-        case 13:
+        if (gSysInfo.level == 10 || gSysInfo.level == 11 || gSysInfo.level == 12 || gSysInfo.level == 13) {
             PlayerFailMission();
-            break;
-        default:
+        } else {
             SysPlayXA(0x16C, 0, 1);
-            break;
         }
     } else if (xa != -1) {
         SysPlayXA(xa, 0, 1);
     }
     StringObjectiveMsg(buf, reason, secondary, 0);
-    if (mNextTickAllowMsgMissionFailed < (u32)gExeTick) {
+    if ((u32)gExeTick > mNextTickAllowMsgMissionFailed) {
         mNextTickAllowMsgMissionFailed = gExeTick + LevelMissionCtrMsg(buf, 0) + 16;
         SetNextTickAllowMsgLongText(mNextTickAllowMsgMissionFailed);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelMissionFailed);
-#endif
 
 void LevelObjectiveComplete(s16 objective) {
     char buf[32];
@@ -429,23 +418,21 @@ void func_80017950(void) {
     LevelAddingObjectiveInstruction();
 }
 
-#ifdef NON_MATCHING
-/* register allocation: original keeps quipFrom in a1 and bit in a2 */
 void LevelObjectiveAdd(s32 objective, s32 quipFrom) {
     u32 added;
     s32 bit;
     u16 quip;
 
     if (gObjectives != NULL) {
-        added = gObjectives->unk18;
         bit = 1 << objective;
+        added = gObjectives->unk18;
         if (!(added & bit)) {
             gObjectives->unk18 = added | bit;
             gObjectives->unk1C |= bit;
             if (mLastTickAddedObjectives != gExeTick) {
                 gAddingObjectiveViaQuip = 0;
                 if ((s16)quipFrom != -1) {
-                    quip = ObjectDoQuip(quipFrom, bit, gObjectives);
+                    quip = ObjectDoQuip(quipFrom);
                 } else {
                     quip = 0xFFFF;
                 }
@@ -459,9 +446,6 @@ void LevelObjectiveAdd(s32 objective, s32 quipFrom) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/level", LevelObjectiveAdd);
-#endif
 
 void LevelRemoveContactMeiXingMsgForRadio(void) {
     StringReplaceContactMeiXingMsg(NULL);

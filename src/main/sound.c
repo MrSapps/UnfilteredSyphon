@@ -541,9 +541,6 @@ void SndSysCheckXADoneCallback(void (*done)(void)) {
     }
 }
 
-#ifdef NON_MATCHING
-/* The original keeps &D_8011EB30 in $s1 (one lui/addiu, then 0($s1) accesses); cc1 here
- * folds the pointer back into direct %hi/%lo accesses. */
 void iSndXACB(void) {
     s32 *state = &D_8011EB30;
     GameObjectRuntime *src;
@@ -575,9 +572,6 @@ void iSndXACB(void) {
         D_8011EB38 = -1;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/sound", iSndXACB);
-#endif
 
 void SysPlayXA(s32 track, GameObjectRuntime *src, s32 queue) {
     s16 vol;
@@ -616,9 +610,6 @@ void SysSoundQueueXA(s32 level, s32 index) {
     EGSDisplayQueueInterrupt(iSndXACB, 100, 0);
 }
 
-#ifdef NON_MATCHING
-/* Scheduling/register allocation only: the original keeps msg in $a2 and loads D_8011EB38
- * before the D_8011EB34/36 stores. */
 s32 SysSoundPlayQueuedXA(s32 msg, s32 id) {
     if (D_8011EB30 != -3) {
         if (msg != -1) {
@@ -633,9 +624,6 @@ s32 SysSoundPlayQueuedXA(s32 msg, s32 id) {
     SysPlayXA(D_8011EB38, gameObjectsInfo[id].runtime, 1);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/sound", SysSoundPlayQueuedXA);
-#endif
 
 s32 SysSoundIsXAQueued(void) {
     return D_8011EB30 == -3;

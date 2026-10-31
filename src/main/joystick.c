@@ -1868,8 +1868,6 @@ void JoystickGobjTurn(VECTOR32 *out) {
     }
 }
 
-#ifdef NON_MATCHING
-/* last test: the original branches on bit 11 with 1 in the delay slot instead of sltiu */
 s32 func_80039B24(JoyController *joy) {
     u8 *pad;
     s32 dir = 0;
@@ -1889,12 +1887,13 @@ s32 func_80039B24(JoyController *joy) {
             break;
         }
     }
-    InterfaceWeaponSelect((i < JOY_MAPPED_BUTTONS && JoyBitMask(pad + 4, i)) ? !JoyBitMask(pad + 4, 0xB) : 0, dir);
+    if (i >= JOY_MAPPED_BUTTONS || !JoyBitMask(pad + 4, i) || JoyBitMask(pad + 4, 0xB)) {
+        InterfaceWeaponSelect(0, dir);
+    } else {
+        InterfaceWeaponSelect(1, dir);
+    }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80039B24);
-#endif
 
 void JoystickGobjTeleport(Gobj *gobj, s32 x, s32 y, s32 z) {
     if (gobj == gameObjectsInfo[gCASJoystickGobjID].runtime) {

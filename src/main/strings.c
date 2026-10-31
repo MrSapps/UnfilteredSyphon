@@ -234,14 +234,13 @@ void StringInitMessages(void) {
     sprintf(gEliminateRhoemerMsg, D_8010FB44, gRhoemerMsg);
 }
 
-#ifdef NON_MATCHING
-/* Matches except that the loop's constant 1 and i = 0 are emitted in swapped order. */
 u16 StringContactMeiXingMsg(void) {
     u32 i;
+    u32 action = 1; /* the mapped action whose button the message names */
     char *button;
 
     for (i = 0; i < 9; i++) {
-        if (gJoyMap[i] == 1) {
+        if (gJoyMap[i] == action) {
             button = gButtonStrings[i];
             goto found;
         }
@@ -256,9 +255,6 @@ found:
     EGSDisplayQueueInterrupt(LevelRemoveContactMeiXingMsgForAddingObjectiveMsg, 99, 0xE0C00000);
     return gContactMeiXingMsgH;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/strings", StringContactMeiXingMsg);
-#endif
 
 void StringReplaceContactMeiXingMsg(char *msg) {
     if (gContactMeiXingMsgH != 0xFFFF) {

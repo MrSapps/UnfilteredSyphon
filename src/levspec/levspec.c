@@ -154,12 +154,11 @@ static void func_80141A40(s16 id) {
     }
 }
 
-#ifdef NON_MATCHING
-/* GCC threads the first gMissionFailed test past the second one; original does not. */
 static s32 func_80141AA4(s32 arg0) {
     u32 completed;
+    s32 failed = gMissionFailed;
 
-    if (!gMissionFailed && gObjectives != NULL) {
+    if (!failed && gObjectives != NULL) {
         completed = gObjectives->completed;
         if (completed & 0x10) {
             arg0 = 7;
@@ -176,9 +175,6 @@ static s32 func_80141AA4(s32 arg0) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/levspec/nonmatchings/levspec", func_80141AA4);
-#endif
 
 static void func_80141B70(s16 id) {
     if (id == gLevelSpecificNpcID2) {

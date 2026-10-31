@@ -319,17 +319,16 @@ u8 CameraActivateAndDisplay(Camera *cam, u8 on) {
 }
 
 #ifdef NON_MATCHING
-/* return value and loaded display swap v0/v1 */
+/* layout matches; ret lands in v1 (the display load takes v0) where the original keeps ret in v0 and loads into v1 */
 u8 CameraGetDisplay(Camera *cam, EGSCamera **out) {
     u8 ret = 0;
 
     if (cam != NULL) {
         ret = 1;
         if (out == NULL) {
-            ret = 0;
-        } else {
-            *out = cam->display;
+            return 0;
         }
+        *out = cam->display;
     }
     return ret;
 }

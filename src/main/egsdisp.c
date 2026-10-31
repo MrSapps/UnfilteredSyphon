@@ -2180,47 +2180,41 @@ void EGSDisplayHAStartUnique(EGSAnim *anim, s32 animId, u8 flags) {
     EGSDisplayHAStart3(anim, animId, flags, 0, 30);
 }
 
-#ifdef NON_MATCHING
-/* regalloc only (register assignment differs) */
 HAnimation *EGSDisplayGetHA(EGSAnim *anim, s32 id) {
     HAnimation *ha;
     HAnimNode *node;
 
-    for (node = anim->haList; node != NULL; node = node->next) {
-        ha = node->ha;
-        if (id < 0) {
-            return ha;
+    do {
+        for (node = anim->haList; node != NULL; node = node->next) {
+            ha = node->ha;
+            if (id < 0) {
+                return ha;
+            }
+            if (ha->id == id) {
+                return ha;
+            }
         }
-        if (ha->id == id) {
-            return ha;
-        }
-    }
+    } while (0);
     return NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayGetHA);
-#endif
 
-#ifdef NON_MATCHING
-/* regalloc only (register assignment differs) */
 HAnimation *EGSDisplayGetHAWithType(EGSAnim *anim, s32 type) {
     HAnimNode *node;
     HAnimation *ha;
 
-    for (node = anim->haList; node != NULL; node = node->next) {
-        ha = node->ha;
-        if (type < 0) {
-            return ha;
+    do {
+        for (node = anim->haList; node != NULL; node = node->next) {
+            ha = node->ha;
+            if (type < 0) {
+                return ha;
+            }
+            if (ha->type == type) {
+                return ha;
+            }
         }
-        if (ha->type == type) {
-            return ha;
-        }
-    }
+    } while (0);
     return NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayGetHAWithType);
-#endif
 
 s32 *EGSDisplayHAGetHipMotionArray(HAnimation *ha) {
     u8 *data = ha->data;
@@ -2867,8 +2861,6 @@ void EGSAnimGunFlash2(EGSAnim *anim, s32 time, u32 color) {
     anim->model->color = color & 0xFFFFFF;
 }
 
-#ifdef NON_MATCHING
-/* regalloc only (register assignment differs) */
 EGSAnim *EGSDisplayGetPointSector(s32 *point) {
     EGSListNode *node;
     EGSAnim *anim;
@@ -2881,7 +2873,7 @@ EGSAnim *EGSDisplayGetPointSector(s32 *point) {
         if (model->flags & 0x1000000) {
             id = model->info->id;
             if (id != -1 && id != 0xF0) {
-                if (model->min[0] < point[0] && point[0] < model->max[0] && model->min[2] < point[2] &&
+                if (point[0] > model->min[0] && point[0] < model->max[0] && point[2] > model->min[2] &&
                     point[2] < model->max[2]) {
                     return anim;
                 }
@@ -2890,9 +2882,6 @@ EGSAnim *EGSDisplayGetPointSector(s32 *point) {
     }
     return NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayGetPointSector);
-#endif
 
 void InitDamagePolys(void) {
     s32 off;
@@ -3385,13 +3374,14 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 
 #ifdef NON_MATCHING
-/* store scheduling of the accumulator init and model/point register swap (same as EGSDisplayGetPointSector) */
+/* ret (always 0) is s3 and copied to v0; the original keeps a dead ret=0 in s2 and returns literal 0, 450 block first */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
     VECTOR p;
     EGSModel *model;
     EGSFrame *frame;
+    s32 count;
     s32 ret = 0;
 
     frame = anim->frame;
@@ -3402,18 +3392,19 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
     EGSFrameGetPosition(anim->frame, NULL, &p);
     for (; node != NULL; node = node->next) {
         model = ((EGSAnim *)node->data)->model;
-        if ((model->flags & 0x1000000) && model->min[0] < p.vx && p.vx < model->max[0] && model->min[2] < p.vz &&
+        if ((model->flags & 0x1000000) && p.vx > model->min[0] && p.vx < model->max[0] && p.vz > model->min[2] &&
             p.vz < model->max[2]) {
             EGSDisplayPointColor(model->info, &acc);
         }
     }
-    if (acc.count == 0) {
+    count = acc.count;
+    if (count == 0) {
         out->vx = out->vy = out->vz = 450;
         return ret;
     }
-    out->vx = acc.sum[0] / acc.count * 16;
-    out->vy = acc.sum[1] / acc.count * 16;
-    out->vz = acc.sum[2] / acc.count * 16;
+    out->vx = acc.sum[0] / count * 16;
+    out->vy = acc.sum[1] / count * 16;
+    out->vz = acc.sum[2] / count * 16;
     return ret;
 }
 #else

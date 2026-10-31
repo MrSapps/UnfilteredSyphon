@@ -23,8 +23,8 @@ void EGSDeviceControllerPoll(void);
 s32 EGSDeviceControllerRead(PadState **out, u32 port);
 void EGSDisplaySort(s32 run, s32 tick);
 void EGSDisplayNoSort(void);
-void TextUpdate(PadState *pad);
-u16 TextReplaceString(u16 id, char *str, s32 arg2);
+void TextUpdate(void);
+u16 TextReplaceString(u16 id, char *str);
 void TextRemoveString(u16 id);
 void TextRemoveWindowNow(u8 window);
 void TextSetStringIntensity(u16 id, s32 r, s32 g, s32 b);
@@ -38,6 +38,26 @@ extern u8 gSpareTextWindow;
 static char D_8010F600[] = "";  /* "" */
 static s32 D_8010F604 = 0;      /* state the display was last sorted for */
 
+static inline u32 PadBit(u8 *bits, s32 n) {
+    u32 misalign = (u32)bits & 3;
+    s32 word;
+    s32 bit;
+
+    if (misalign != 0) {
+        n += misalign * 8;
+        bits = (u8 *)((u32)bits & ~3);
+    }
+    word = n >> 5;
+    bit = 1 << (n & 0x1F);
+    return ((u32 *)bits)[word] & bit;
+}
+
+#ifndef _PSYQ
+/* lib_sn's __main walks an (empty) constructor list at the start of .rdata, which
+ * splat names after MainLoop's jump table; label that address for the asm. */
+__asm__("\t.rdata\n\t.globl jtbl_80010000\njtbl_80010000:\n\t.text");
+#endif
+
 /* cc1 inserts the __main() constructor call itself */
 int main(void) {
     ResetCallback();
@@ -46,13 +66,8 @@ int main(void) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* pad bit tests: the original keeps &pad->buttons and the pad pointer in swapped registers (2 insns) */
 void MainLoop(void) {
     PadState *pad;
-    u32 *words;
-    s32 bit;
-    s32 misalign;
     s32 state;
     s32 blink;
     u8 paused;
@@ -107,22 +122,9 @@ void MainLoop(void) {
             case 8:
                 EGSDeviceControllerRead(&pad, 0);
                 if (pad->status != 0xFF && pad->buttons != 0) {
-                    words = (u32 *)&pad->buttons;
-                    bit = 11;
-                    misalign = (u32)words & 3;
-                    if (misalign) {
-                        bit = misalign * 8 + 11;
-                        words = (u32 *)((u32)words & ~3);
-                    }
-                    if (!(words[bit >> 5] & (1 << (bit & 0x1F)))) {
-                        words = (u32 *)&pad->buttons;
-                        bit = 8;
-                        if (misalign) {
-                            bit = misalign * 8 + 8;
-                            words = (u32 *)((u32)words & ~3);
-                        }
-                        if (!(words[bit >> 5] & (1 << (bit & 0x1F)))) {
-                            TextRemoveString(TextReplaceString(D_8014BAD0, D_8010F600, misalign));
+                    if (!PadBit((u8 *)&pad->buttons, 11)) {
+                        if (!PadBit((u8 *)&pad->buttons, 8)) {
+                            TextRemoveString(TextReplaceString(D_8014BAD0, D_8010F600));
                             TextRemoveWindowNow(gSpareTextWindow);
                             D_8014BAD0 = 0xFFFF;
                             gSpareTextWindow = 0xFF;
@@ -132,7 +134,7 @@ void MainLoop(void) {
                         }
                     }
                 }
-                TextUpdate(pad);
+                TextUpdate();
             blink:
                 if (!(gSystemTick & 0xF) && D_8014BAD0 != 0xFFFF) {
                     blink = (u32)(gSystemTick & 0x10) >> 4;
@@ -151,10 +153,10 @@ void MainLoop(void) {
                 EGSDisplaySort(paused == 0, paused ? 0x29A : gExeTick);
             } else {
                 EGSDisplayNoSort();
-                if (gSystemState == 6) {
-                    SysStatePop();
-                } else {
+                if (gSystemState != 6) {
                     D_8010F604 = gSystemState;
+                } else {
+                    SysStatePop();
                 }
                 if (gObjPlayer != NULL && gObjPlayer->anim != NULL) {
                     gObjPlayer->anim->faceList = NULL;
@@ -163,8 +165,3 @@ void MainLoop(void) {
         } while (gSystemState != SYS_STATE_HALTED);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/main", MainLoop);
-
-INCLUDE_RODATA("asm/main/nonmatchings/main", jtbl_80010000);
-#endif

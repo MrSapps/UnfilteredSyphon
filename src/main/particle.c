@@ -4266,7 +4266,7 @@ typedef struct MoveVelView {
 } MoveVelView;
 
 #ifdef NON_MATCHING
-/* scheduling: half and quarter shifts land one slot off */
+/* half/quarter shifts scheduled one slot off (sra s2 before the and; sra s1 in bgez delay slot) */
 /* Shared particle step; returns 0 when the particle died */
 s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
     u32 flags = g->flags;

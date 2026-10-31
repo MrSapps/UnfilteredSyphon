@@ -531,33 +531,31 @@ void EGSDeviceUnhang(void) {
     lastCounterTickSort = lastCounterTick;
 }
 
-#ifdef NON_MATCHING
 static char D_8010FEF8[5]; /* defined below */
-/* v0/v1 swapped for the font-table index and loaded byte */
 /* Print `digits` hex digits of n with the debug font sprite (crash screen). */
 void EmergencyPrintNum(EmergencySprite *sprite, u32 n, s32 digits) {
     char buf[16];
     s32 i;
+    s32 j;
     u8 c;
 
     sprintf(buf, D_8010FEF8, n);
     for (i = 0; i < digits; i++) {
         c = buf[i];
         if (c >= '0' && c <= '9') {
-            sprite->u = D_80107B30[c - '0'][0];
-            sprite->v = D_80107B30[c - '0'][1];
+            j = c - '0';
+            sprite->u = D_80107B30[j][0];
+            do { sprite->v = D_80107B30[j][1]; } while (0);
         } else {
-            sprite->u = D_80107B44[c - 'A'][0];
-            sprite->v = D_80107B44[c - 'A'][1];
+            j = c - 'A';
+            sprite->u = D_80107B44[j][0];
+            do { sprite->v = D_80107B44[j][1]; } while (0);
         }
         DrawPrim(sprite);
         DrawSync(0);
         sprite->x += 8;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdev", EmergencyPrintNum);
-#endif
 
 /* BIOS thread control block of the interrupted thread (only the saved registers used) */
 typedef struct EGSThreadContext {

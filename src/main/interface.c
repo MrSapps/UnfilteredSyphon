@@ -4194,12 +4194,11 @@ u8 func_800453F8(u8 on) {
     return func_801417D0(on, *level);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: old lands in a1 instead of v1, so the gInterfaceOn load is scheduled above the sb */
 s32 InterfaceSetMode(s32 mode) {
-    s32 old = D_8010F8AC;
+    s32 old;
 
-    if (old != mode) {
+    if (mode != D_8010F8AC) {
+        old = D_8010F8AC;
         D_80110020 = 1;
         if (gInterfaceOn == 0 && mode == 1) {
             D_8010F8AC = 0;
@@ -4211,9 +4210,6 @@ s32 InterfaceSetMode(s32 mode) {
     }
     return mode;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceSetMode);
-#endif
 
 void func_800454B8(void) {
     if (D_8010F8AC != 2) {

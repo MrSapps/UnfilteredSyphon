@@ -858,7 +858,7 @@ INCLUDE_ASM("asm/main/nonmatchings/text", func_80083F1C);
 #endif
 
 #ifdef NON_MATCHING
-/* Only the final add's operand order and result register (a3 in the original) differ. */
+/* Only the final subtract's result register differs (a3 in the original, the add's v0 here). */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -872,7 +872,11 @@ void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     if (w != NULL && (w->flags & 0x10)) {
         scale = 6;
     }
-    *y = lines * scale + w->y - w->yAdjust;
+    {
+        s16 h = lines * scale;
+
+        *y = h + w->y - w->yAdjust;
+    }
     *x = w->x;
 }
 #else
@@ -995,8 +999,6 @@ u16 TextAddStringMulti(u8 window, s32 n, char **strs, s32 ticks, TextChar *sprit
     return first;
 }
 
-#ifdef NON_MATCHING
-/* Only the order of the gSystemTick / length loads in the default-duration branch differs. */
 u16 TextStatusMessage(char *msg, s32 ticks) {
     TextString *s;
     u16 id;
@@ -1007,14 +1009,14 @@ u16 TextStatusMessage(char *msg, s32 ticks) {
         if (ticks != 0) {
             s->endTick = gSystemTick + ticks;
         } else {
-            s->endTick = gSystemTick + 0x18 + (s->length << 1);
+            u32 t;
+
+            t = gSystemTick + 0x18;
+            s->endTick = t + (s->length << 1);
         }
     }
     return id;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", TextStatusMessage);
-#endif
 
 u16 TextAddPersistentString(char *str, TextChar *sprites, s16 x, s16 y) {
     TextString *s;
@@ -1292,8 +1294,6 @@ void TextUpdate(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: node/w land in s4/s3 instead of s3/s4; the permuter fixes it only with a dead `if (s || node)` in the reveal loop */
 /*
  * Animate the strings of window w (or the persistent strings when w is NULL):
  * reveal and fade them, drop expired ones and scroll the rest up. Returns the
@@ -1379,7 +1379,13 @@ u32 func_800857B8(TextWindow *w) {
                     speed = (s->flags & 2) ? 1 : s->speed;
                     if (gSystemTick <= s->startTick + (reveal = (s->length << 12) / speed + 8)) {
                         if ((u8)func_80085F98(s)) {
-                            next = 0;
+                            /* FAKE: a dead use of node, found by the permuter; it raises
+                               node's allocation priority so node/w get s3/s4 as in the original */
+                            if (s || node) {
+                                next = 0;
+                            } else {
+                                next = 0;
+                            }
                         }
                     } else {
                         last = &s->chars[s->length - 1];
@@ -1406,9 +1412,6 @@ u32 func_800857B8(TextWindow *w) {
     }
     return next;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_800857B8);
-#endif
 
 void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
     TextString *s;

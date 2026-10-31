@@ -1757,8 +1757,24 @@ void func_8001E1DC(void) {
     v = D_800101F4;
 }
 
-#ifdef NON_MATCHING
-/* stack: the original reuses the rotation-matrix slots (sp+0x70) for the mode-5 vectors; here they get fresh slots */
+/* The view direction (third matrix column) for a camera angle. */
+static inline void iAngleDir(VECTOR32 *angle, VECTOR32 *dir) {
+    GOBJ_MATRIX m;
+    GameCamSVec rot;
+
+    rot.vx = -angle->vx;
+    rot.vy = angle->vy;
+    rot.vz = -angle->vz;
+    RotMatrixYXZ(&rot, &m);
+    m.m[0][1] = -m.m[0][1];
+    m.m[1][2] = -m.m[1][2];
+    m.m[1][0] = -m.m[1][0];
+    m.m[2][1] = -m.m[2][1];
+    dir->vx = m.m[0][2];
+    dir->vy = m.m[1][2];
+    dir->vz = m.m[2][2];
+}
+
 /* As in func_8001F864, the distance fetch writes a whole vector over a single word. */
 s32 func_8001E218(s32 arg0) {
     VECTOR32 cur;
@@ -1774,22 +1790,7 @@ s32 func_8001E218(s32 arg0) {
     } else {
         angle = CAM->angle.value;
     }
-    {
-        GOBJ_MATRIX m;
-        GameCamSVec rot;
-
-        rot.vx = -angle.vx;
-        rot.vy = angle.vy;
-        rot.vz = -angle.vz;
-        RotMatrixYXZ(&rot, &m);
-        m.m[0][1] = -m.m[0][1];
-        m.m[1][2] = -m.m[1][2];
-        m.m[1][0] = -m.m[1][0];
-        m.m[2][1] = -m.m[2][1];
-        dir.vx = m.m[0][2];
-        dir.vy = m.m[1][2];
-        dir.vz = m.m[2][2];
-    }
+    iAngleDir(&angle, &dir);
     {
     s32 dist;
 
@@ -1845,9 +1846,6 @@ s32 func_8001E218(s32 arg0) {
     CameraAccessMoveInfo(gCamera, 1, 0, 1);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001E218);
-#endif
 
 s32 func_8001E5D8(VECTOR32 *out) {
     VECTOR32 pos;

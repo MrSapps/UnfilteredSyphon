@@ -680,6 +680,15 @@ static inline s32 NPCGetFirstID(void) {
     i = getNPCIndex;       \
     NPC_SCAN_IDS(id, i)
 
+/* out = normalize(a - b) in the xz plane */
+static inline void VecDiffFlatNorm(VECTOR32 *out, VECTOR32 *a, VECTOR32 *b) {
+    out->vx = a->vx - b->vx;
+    out->vy = a->vy - b->vy;
+    out->vz = a->vz - b->vz;
+    out->vy = 0;
+    GTEMath_VectorNormal(out, out);
+}
+
 void NPCInitData(void) {
     NPCCombatModeCallback(0);
     NPCSetCopDeactivateCallback(0);
@@ -868,7 +877,7 @@ void NPCShootHostage(s32 id) {
 }
 
 #ifdef NON_MATCHING
-/* draft: right shape; stack slot order of best/dist2 and some scheduling differ */
+/* draft: right shape; stack slot order of best/dist2, prologue constants and some scheduling differ */
 s32 NPCPickNPCTarget(s32 self) {
     s32 copBest = 0x7FFFFFF;
     Gobj *obj = gameObjectsInfo[self].runtime;
@@ -945,11 +954,7 @@ s32 NPCPickNPCTarget(s32 self) {
                     other = o->move->pos;
                     EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &other, &dist2);
                     if (o->healthInfo->health != -1) {
-                        D_8011D1D0.vx = pos.vx - other.vx;
-                        D_8011D1D4 = pos.vy - other.vy;
-                        D_8011D1D8 = pos.vz - other.vz;
-                        D_8011D1D4 = 0;
-                        GTEMath_VectorNormal(&D_8011D1D0, &D_8011D1D0);
+                        VecDiffFlatNorm(&D_8011D1D0, &pos, &other);
                         if ((D_8011D1D0.vx * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || dist2 < 0x1E0) && dist2 < best) {
                             target = id;
                             best = dist2;
@@ -1812,11 +1817,7 @@ u8 NPCGetMoveMode(Gobj *obj) {
         }
         if (obj->target->targetId < 0 || dist > 0x640) {
         retreat:
-            D_8011D1D0.vx = D_8011E8B8.vx - D_8011E8A8.vx;
-            D_8011D1D4 = D_8011E8B8.vy - D_8011E8A8.vy;
-            D_8011D1D8 = D_8011E8B8.vz - D_8011E8A8.vz;
-            D_8011D1D4 = 0;
-            GTEMath_VectorNormal(&D_8011D1D0, &D_8011D1D0);
+            VecDiffFlatNorm(&D_8011D1D0, &D_8011E8B8, &D_8011E8A8);
             if (D_8011D1D0.vx * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || npc->unk28 < 0x140) {
                 D_8010F960 = -1;
                 mode = 7;
@@ -1998,7 +1999,7 @@ void NPCShoot(Gobj *obj) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc (points kept in a2) + addu operand order */
+/* regalloc: target copies points to a2 and keeps v in a0; the vz store goes through v (a0) instead of a %lo symbol */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
     NPC *npc = NPC_OF(obj);
@@ -3036,10 +3037,10 @@ void NPCGetNumActive(void) {
 }
 
 #ifdef NON_MATCHING
-/* prologue scheduling and the kind/flags register pair differ */
+/* regalloc: info/paths pointers and the kind/flags register pair (v0/v1/a0) differ */
 s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
     GameObjectInfo *info = &gameObjectsInfo[id];
-    s32 *paths = &gen->paths[path];
+    s32 p = gen->paths[path];
     Gobj *obj = info->runtime;
     u8 model = gen->models[variant];
     s32 elite;
@@ -3050,7 +3051,7 @@ s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
     void *sniper;
 
     info->pathStart = 99;
-    info->path = *paths;
+    info->path = p;
     info->modelIndex = model;
     elite = 0;
     if (gSysInfo.level == 14) {
@@ -3114,8 +3115,6 @@ s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
 INCLUDE_ASM("asm/main/nonmatchings/npc", NPCCreateGenerator);
 #endif
 
-#ifdef NON_MATCHING
-/* create-failure 'return 0' gets merged into the epilogue; target keeps a separate j+li block */
 s32 NPCGenerate(s32 genIdx) {
     s32 ret = 0;
     s32 dist;
@@ -3147,19 +3146,20 @@ s32 NPCGenerate(s32 genIdx) {
                     EGSDisplayTransformWorldPointToScreen(&D_8011D220, *gCamera, &D_8011D230);
                     if (force || dist > 0x640 || D_8011D230.vz <= 0 || (u32)(D_8011D230.vx + 200) >= 0x249) {
                         r = rand() % gen->unk05;
-                        if (!NPCCreateGenerator(gen, id, path, r)) {
+                        if (NPCCreateGenerator(gen, id, path, r)) {
+                            ret = 1;
+                            NPC_OF(obj)->unk28 = dist;
+                            slot = id - D_80110148;
+                            NPCNumActiveTick = gExeTick;
+                            D_80110144 = gExeTick;
+                            NPCNumActive++;
+                            D_80110140 = obj->id;
+                            genData[slot].gen = genIdx;
+                            genData[slot].path = path;
+                            genData[slot].variant = r;
+                        } else {
                             return 0;
                         }
-                        ret = 1;
-                        NPC_OF(obj)->unk28 = dist;
-                        NPCNumActiveTick = gExeTick;
-                        D_80110144 = gExeTick;
-                        NPCNumActive++;
-                        D_80110140 = obj->id;
-                        slot = id - D_80110148;
-                        genData[slot].gen = genIdx;
-                        genData[slot].path = path;
-                        genData[slot].variant = r;
                     }
                 }
             }
@@ -3169,9 +3169,6 @@ s32 NPCGenerate(s32 genIdx) {
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCGenerate);
-#endif
 
 #ifdef NON_MATCHING
 /* sector-count loop keeps the inline's NULL return path (target threads it away) */
@@ -3307,8 +3304,6 @@ void NPCEnableGenerator(s32 id) {
     }
 }
 
-#ifdef NON_MATCHING
-/* first NPC scan: i/ptr regs swapped */
 void NPCTryToDeactivate(s32 force, s32 unused1, s32 unused2) {
     s32 best = 0;
     s32 target = gObjPlayer->target->targetId;
@@ -3321,9 +3316,18 @@ void NPCTryToDeactivate(s32 force, s32 unused1, s32 unused2) {
     NPC *npc;
 
     if ((u32)(gExeTick - D_8011014C) >= 6) {
-        i = 0;
         getNPCIndex = 0;
-        NPC_SCAN_IDS(id, i)
+        {
+            s32 j;
+
+            for (j = 0; j < NPC_SLOTS; j++) {
+                id = npcList[j];
+                if (id >= 0) {
+                    getNPCIndex = j + 1;
+                    break;
+                }
+            }
+        }
         while (id >= 0) {
             type = GOBJ_TYPE(id);
             obj = gameObjectsInfo[id].runtime;
@@ -3370,9 +3374,6 @@ void NPCTryToDeactivate(s32 force, s32 unused1, s32 unused2) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCTryToDeactivate);
-#endif
 
 void NPCRemoveDead(void) {
     s32 best = 0;
@@ -3899,7 +3900,7 @@ void LOSOverride(VECTOR32 *pos) {
 }
 
 /* Is the object linked to a key (type 0x1C)? */
-static inline s32 NPCHasKey(Gobj *obj) {
+static inline u8 NPCHasKey(Gobj *obj) {
     s32 ref = gameObjectsInfo[obj->id].refId;
     s32 ret = 0;
 
@@ -3909,8 +3910,6 @@ static inline s32 NPCHasKey(Gobj *obj) {
     return ret;
 }
 
-#ifdef NON_MATCHING
-/* inlined key test result needs an extra reg copy before the branch */
 void NPCDropPickupStuff(s32 id) {
     Gobj *obj = gameObjectsInfo[id].runtime;
     s32 flags;
@@ -3924,12 +3923,9 @@ void NPCDropPickupStuff(s32 id) {
         KeyDroppedByNPC(obj);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCDropPickupStuff);
-#endif
 
 #ifdef NON_MATCHING
-/* drop flag gets v1 instead of reusing v0 */
+/* drop flag gets v1 instead of reusing v0 (sched1 puts slti before the unk28 store) */
 void NPCLosUpdateOtherStuff(s32 id) {
     VECTOR32 point;
     s32 start;

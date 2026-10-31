@@ -1237,22 +1237,19 @@ void func_80139A50(s32 arg0) {
     }
 }
 
-#ifdef NON_MATCHING
-/* buffer pointer and string swap registers in the range check */
 void func_80139B54(void) {
     s32 i;
 
     for (i = 0; i < 26; i++) {
-        if (MENU_STRINGS[i] < (char *)D_8013FE78 || MENU_STRINGS[i] > (char *)D_8013FE78 + 0xF000) {
-            StreamSynchronous();
-        }
+        do {
+            if (MENU_STRINGS[i] < (char *)D_8013FE78 || MENU_STRINGS[i] > (char *)D_8013FE78 + 0xF000) {
+                StreamSynchronous();
+            }
+        } while (0);
     }
     func_80139044(MENU_STRINGS[D_8013F7D0[D_8013F7C4].textIds - D_8013FE20], 1, 0, func_80139A50);
     func_801389C8(gObjPlayer->cas->active != 8 ? 7 : 2);
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_80139B54);
-#endif
 
 void func_80139C54(void) {
     s32 cursor = D_8013F7C4;
@@ -1285,7 +1282,7 @@ void func_80139D24(void) {
 }
 
 #ifdef NON_MATCHING
-/* cursor and item pointer swap s0/s1 */
+/* first loop: the original fills the entry bltz slot from the exit (i + 1) instead of the item pointer copy; base+offset operand order for D_8013FCBC[D_8013F7C4] */
 void func_80139D64(s32 cursor) {
     MenuItem *item;
     MenuItem *p;
@@ -3026,8 +3023,6 @@ void func_8013EE78(void) {
     EGSDisplayFade(-1, 30, NULL);
 }
 
-#ifdef NON_MATCHING
-/* fill loop: 0xFFFF and the counter are loaded in swapped order (2 insns) */
 void func_8013F144(void) {
     TextChar *chars = D_8013FE6C;
     MenuItem *item;
@@ -3036,8 +3031,9 @@ void func_8013F144(void) {
     s32 window;
 
     if (D_8013F7C0 != 0xFF) {
+        u16 none = 0xFFFF;
         for (i = 34; i >= 0; i--) {
-            D_8013FE20[i] = 0xFFFF;
+            D_8013FE20[i] = none;
         }
         if (D_8013FCB4 == 0) {
             menu = D_8013FCAC[D_8013F7C4];
@@ -3088,9 +3084,6 @@ void func_8013F144(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013F144);
-#endif
 
 void MenuExecute(void) {
     if (gSystemTick < D_8013FCA4) {
