@@ -3,6 +3,7 @@
 #include "gameobj.h"
 #include "gobj.h"
 #include "scratch.h"
+#include "egsmath.h"
 
 /* cobj.c's small data, still assembled from asm */
 SDATA_LOCAL(D_8010F9C0)
@@ -145,13 +146,32 @@ s32 func_800737B8(Gobj *gobj, CobjNode **list);
 typedef struct CobjPhysics {
     /* 0x00 */ u8 unk00[0x24];
     /* 0x24 */ s32 minNormalY; /* contacts with a flatter normal count as floor */
+    /* 0x28 */ s32 maxNormalY;
+    /* 0x2C */ s32 wallStatic;
+    /* 0x30 */ s32 wallKinetic;
+    /* 0x34 */ s32 floorStatic;
+    /* 0x38 */ s32 floorKinetic;
 } CobjPhysics;
 
 /* Contact found by the collision detector */
 typedef struct CobjContact {
     /* 0x00 */ u8 unk00[0x44];
     /* 0x44 */ VECTOR32 normal;
+    /* 0x54 */ s32 unk54;
+    /* 0x58 */ VECTOR32 motion;
+    /* 0x68 */ u8 unk68[0x14];
+    /* 0x7C */ s32 staticCoef;
+    /* 0x80 */ s32 kineticCoef;
+    /* 0x84 */ s32 coef;
 } CobjContact;
+
+/* MoveInfo.coll (fields used here) */
+struct CollisionInfo {
+    /* 0x00 */ u8 unk00[0x10];
+    /* 0x10 */ s32 unk10;
+    /* 0x14 */ u8 unk14[0x14];
+    /* 0x28 */ void *hold;
+};
 
 s32 iCollisionPhysicsFaceGetFrictionForceValue(u8 *physics, s32 *out) {
     s32 modulus;
@@ -229,7 +249,171 @@ void func_80072E34(CobjPhysics *phys, CobjContact **contacts, s32 count, VECTOR3
 INCLUDE_ASM("asm/main/nonmatchings/cobj", func_80072E34);
 #endif
 
+s32 func_80071E04(Gobj *a, Gobj *b, VECTOR32 *rel, VECTOR32 *out);
+s32 func_800721EC(Gobj *obj, CobjPhysics *det, VECTOR32 *vel, VECTOR32 *out);
+s32 func_8007112C(VECTOR32 *v, VECTOR32 *a1, VECTOR32 *axis, s32 *a3, CobjContact **hits, s32 *count);
+void func_80072AE0(VECTOR32 *v, CobjContact **hit, s32 mode, VECTOR32 *axis, VECTOR32 *out, s32 *len);
+s32 PhysicsGobjRegisterForce(Gobj *gobj, VECTOR32 *force);
+s32 iCollisionPhysicsGetKineticFrictionForce(VECTOR32 *v, s32 force, VECTOR32 *out);
+
+#define COBJ_COEF(hit, a, b)                \
+    if ((a) == 0x1000) {                    \
+        (hit)->coef = (b);                  \
+    } else if ((b) == 0x1000) {             \
+        (hit)->coef = (a);                  \
+    } else {                                \
+        (hit)->coef = EGSMathFIXMul(a, b);  \
+    }
+
+static inline u8 CobjOverLimit(s32 len, s32 limit) {
+    if (len < limit) {
+        return 0;
+    }
+    return 1;
+}
+
+static inline u8 CobjOverLimit2(s32 len, s32 limit) {
+    if (len >= limit) {
+        return 1;
+    }
+    return 0;
+}
+
+#ifdef NON_MATCHING
+/* regalloc only: kinetic gets s5 and hits s7 (original: hits s6, staticSum s5, kinetic s7) */
+s32 CollisionPhysicsGobj_DetectorMotion(Gobj *obj, Gobj *other, CobjPhysics *det, CobjContact **hits, s32 count,
+                                        u8 *kineticFlag) {
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 c;
+    VECTOR32 d;
+    VECTOR32 e;
+    VECTOR32 f;
+    VECTOR32 axis;
+    VECTOR32 force;
+    s32 limit[2];
+    VECTOR32 h;
+    VECTOR32 fr;
+    VECTOR32 kin;
+    s32 len;
+    s32 friction;
+    struct CollisionInfo *coll;
+    u8 prev;
+    u8 kinetic;
+    s32 staticSum;
+    s32 i;
+
+    prev = *kineticFlag;
+    *kineticFlag = 0;
+    coll = obj->move->coll;
+    if (count == 0) {
+        return 1;
+    }
+    func_80071E04(obj, other, &a, &b);
+    func_800721EC(obj, det, &c, &d);
+    if (coll->hold == NULL) {
+        a.vx += c.vx;
+        a.vy += c.vy;
+        a.vz += c.vz;
+        b.vx += d.vx;
+        b.vy += d.vy;
+        b.vz += d.vz;
+    } else {
+        a.vy += c.vy;
+        b.vy += d.vy;
+    }
+    func_8007112C(&b, &f, &axis, limit, hits, &count);
+    e.vx = b.vx - f.vx;
+    e.vy = b.vy - f.vy;
+    e.vz = b.vz - f.vz;
+    if (count == 0) {
+        return 1;
+    }
+    if (coll->hold != NULL && count != 3) {
+        c.vy = 0;
+        d.vy = 0;
+        func_80072AE0(&c, hits, count, &axis, &c, NULL);
+        func_80072AE0(&d, hits, count, &axis, &d, NULL);
+        a.vx += c.vx;
+        a.vy += c.vy;
+        a.vz += c.vz;
+        b.vx += d.vx;
+        b.vy += d.vy;
+        b.vz += d.vz;
+    }
+    force.vx = 0;
+    force.vy = 0;
+    force.vz = 0;
+    func_80072AE0(&a, hits, count, &axis, &h, &len);
+    for (i = 0; i < count; i++) {
+        hits[i]->motion = h;
+    }
+    if (prev == 0) {
+        kinetic = CobjOverLimit2(len, 0x3321);
+    } else {
+        kinetic = CobjOverLimit(len, 0x1000);
+    }
+    staticSum = 0;
+    fr.vx = 0;
+    fr.vy = 0;
+    fr.vz = 0;
+    for (i = 0; i < count; i++) {
+        hits[i]->staticCoef = 0x1833;
+        hits[i]->kineticCoef = 0x872;
+        if (hits[i]->normal.vy >= det->minNormalY && hits[i]->normal.vy <= det->maxNormalY) {
+            if (kinetic == 0) {
+                COBJ_COEF(hits[i], hits[i]->staticCoef, det->floorStatic);
+            } else {
+                COBJ_COEF(hits[i], hits[i]->kineticCoef, det->floorKinetic);
+            }
+        } else if (kinetic == 0) {
+            COBJ_COEF(hits[i], hits[i]->staticCoef, det->wallStatic);
+        } else {
+            COBJ_COEF(hits[i], hits[i]->kineticCoef, det->wallKinetic);
+        }
+        iCollisionPhysicsFaceGetFrictionForceValue((u8 *)hits[i], &friction);
+        if (kinetic == 1) {
+            iCollisionPhysicsGetKineticFrictionForce(&hits[i]->motion, friction, &kin);
+            fr.vx += kin.vx;
+            fr.vy += kin.vy;
+            fr.vz += kin.vz;
+        } else {
+            staticSum += friction;
+        }
+    }
+    if (kinetic == 1) {
+        force.vx = -e.vx;
+        force.vy = -e.vy;
+        force.vz = -e.vz;
+        force.vx += fr.vx;
+        force.vy += fr.vy;
+        force.vz += fr.vz;
+    } else if (limit[0] < staticSum) {
+        force.vx = -b.vx;
+        force.vy = -b.vy;
+        force.vz = -b.vz;
+    } else {
+        kinetic = 1;
+        force.vx = -e.vx;
+        force.vy = -e.vy;
+        force.vz = -e.vz;
+    }
+    if (coll->unk10 == 0) {
+        func_80072E34(det, hits, count, &force);
+    }
+    PhysicsGobjRegisterForce(obj, &force);
+    if (other != NULL) {
+        force.vx = -force.vx;
+        force.vy = -force.vy;
+        force.vz = -force.vz;
+        PhysicsGobjRegisterForce(other, &force);
+    }
+    *kineticFlag = kinetic;
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/cobj", CollisionPhysicsGobj_DetectorMotion);
+#endif
 
 s32 func_8007369C(CobjNode *node, CobjNode **list) {
     CobjNode *n;
@@ -344,9 +528,6 @@ s32 CobjRemoveWindowGobj(Gobj *gobj) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* One addu operand order (ts = base + i*0x3C) differs; the per-field gTerrSector reloads
- * suggest the original grouped some fields differently. */
 s32 CobjInit(void) {
     s32 i;
     s32 j;
@@ -374,7 +555,8 @@ s32 CobjInit(void) {
         gTerrSector[i].unk19 = 1;
         gTerrSector[i].unk1A = 0;
         gTerrSector[i].unk1B = 0;
-        ts = &gTerrSector[i];
+        /* offset + base (&gTerrSector[i] adds them the other way round) */
+        ts = (CobjTerrSector *)(i * sizeof(CobjTerrSector) + (u32)gTerrSector);
         ts->unk1C = 0;
         ts->unk20 = 0;
         gTerrSector[i].unk24 = 0;
@@ -384,11 +566,319 @@ s32 CobjInit(void) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjInit);
-#endif
 
-INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjHandleHotBoxLosXZ);
+/* Hot box shapes (CobjNode.type): 1 a sector rotated box, 2 a game object, 3 an animated model */
+typedef struct CobjRotBox {
+    /* 0x00 */ u32 flags;
+    /* 0x04 */ VECTOR center;
+    /* 0x14 */ MATRIX mtx;
+    /* 0x34 */ VECTOR size;
+} CobjRotBox;
+
+typedef struct CobjBoxBounds {
+    /* 0x00 */ VECTOR min;
+    /* 0x10 */ VECTOR max;
+} CobjBoxBounds;
+
+typedef struct CobjBoxModel {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ MATRIX *frame;
+    /* 0x10 */ CobjBoxBounds *bounds;
+} CobjBoxModel;
+
+typedef struct CobjBoxGobj {
+    /* 0x00 */ u8 unk00[2];
+    /* 0x02 */ s16 id;
+    /* 0x04 */ u8 unk04[4];
+    /* 0x08 */ CobjBoxModel *anim;
+} CobjBoxGobj;
+
+typedef struct CobjSegment {
+    /* 0x00 */ VECTOR p0;
+    /* 0x10 */ VECTOR p1;
+} CobjSegment;
+
+/* Line of sight request handed to CobjHandleHotBoxLosXZ */
+typedef struct CobjLosQuery {
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ void *unk04;
+    /* 0x08 */ void *unk08;
+    /* 0x0C */ void *unk0C;
+    /* 0x10 */ s32 unk10;
+    /* 0x14 */ CobjSegment seg;
+    /* 0x34 */ VECTOR point;
+    /* 0x44 */ s32 radius;
+    /* 0x48 */ s32 unk48;
+    /* 0x4C */ s32 margin;
+    /* 0x50 */ s32 unk50;
+    /* 0x54 */ u8 hit;
+} CobjLosQuery;
+
+int EGSMath_MatrixInvert(MATRIX *in, MATRIX *out);
+int EGSGeometry_TransformRay(CobjSegment *in, MATRIX *m, CobjSegment *out);
+int EGSGeometry_GetIntersectRaySegment2UnrotBox(CobjSegment *ray, CobjBoxBounds *box, s32 margin, u8 *hit,
+                                                VECTOR *point, VECTOR *normal);
+
+#define HB_ROT(node) ((CobjRotBox *)(node)->gobj)
+#define HB_GOBJ(node) (((CobjBoxGobj *)(node)->gobj)->anim)
+#define HB_MODEL(node) ((CobjBoxModel *)(node)->gobj)
+#define HALVE(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+
+static inline void CobjHotBoxGetCenter(CobjNode *node, u8 type, VECTOR *out) {
+    CobjBoxBounds *b;
+
+    switch (type) {
+    case 1:
+        *out = HB_ROT(node)->center;
+        break;
+    case 2:
+        out->vx = HB_GOBJ(node)->frame->t[0];
+        out->vy = HB_GOBJ(node)->frame->t[1];
+        out->vz = HB_GOBJ(node)->frame->t[2];
+        out->vy = -out->vy;
+        break;
+    case 3:
+        b = HB_MODEL(node)->bounds;
+        out->vx = b->max.vx + b->min.vx;
+        out->vy = b->max.vy + b->min.vy;
+        out->vz = b->max.vz + b->min.vz;
+        out->vx = HALVE(out->vx);
+        out->vy = HALVE(out->vy);
+        out->vz = HALVE(out->vz);
+        break;
+    }
+}
+
+static inline void CobjHotBoxGetHalfSize(CobjNode *node, u8 type, VECTOR *size, VECTOR *out) {
+    CobjBoxBounds *b;
+    CobjBoxBounds *m;
+
+    switch (type) {
+    case 1:
+        *size = HB_ROT(node)->size;
+        out->vx = size->vx >> 1;
+        out->vy = size->vy >> 1;
+        out->vz = size->vz >> 1;
+        break;
+    case 2:
+        b = HB_GOBJ(node)->bounds;
+        out->vx = b->max.vx - b->min.vx;
+        out->vy = b->max.vy - b->min.vy;
+        out->vz = b->max.vz - b->min.vz;
+        break;
+    case 3:
+        m = HB_MODEL(node)->bounds;
+        out->vx = m->max.vx - m->min.vx;
+        out->vy = m->max.vy - m->min.vy;
+        out->vz = m->max.vz - m->min.vz;
+        out->vx = out->vx >> 1;
+        out->vy = out->vy >> 1;
+        out->vz = out->vz >> 1;
+        break;
+    }
+}
+
+static inline void CobjHotBoxIsUnrotated(CobjNode *node, u8 type, u8 *out) {
+    switch (type) {
+    case 1:
+        *out = 0;
+        break;
+    case 2:
+        *out = 0;
+        break;
+    case 3:
+        *out = 1;
+        break;
+    }
+}
+
+#define HB_FLIP_MATRIX(dst, src)        \
+    (dst).m[0][0] = (src)->m[0][0];    \
+    (dst).m[0][1] = -(src)->m[0][1];   \
+    (dst).m[0][2] = (src)->m[0][2];    \
+    (dst).m[1][0] = -(src)->m[1][0];   \
+    (dst).m[1][1] = (src)->m[1][1];    \
+    (dst).m[1][2] = -(src)->m[1][2];   \
+    (dst).m[2][0] = (src)->m[2][0];    \
+    (dst).m[2][1] = -(src)->m[2][1];   \
+    (dst).m[2][2] = (src)->m[2][2];    \
+    (dst).t[0] = (src)->t[0];          \
+    (dst).t[1] = -(src)->t[1];         \
+    (dst).t[2] = (src)->t[2];
+
+/* Inverse of the box frame (the y axis flipped for game objects and models) */
+#define HB_GET_INV_MATRIX(node, type, mtx, out)              \
+    switch (type) {                                         \
+    case 1:                                                 \
+        *(out) = &HB_ROT(node)->mtx;                        \
+        break;                                              \
+    case 2:                                                 \
+        HB_FLIP_MATRIX(mtx, HB_GOBJ(node)->frame);          \
+        EGSMath_MatrixInvert(&(mtx), &(mtx));               \
+        *(out) = &(mtx);                                    \
+        break;                                              \
+    case 3:                                                 \
+        HB_FLIP_MATRIX(mtx, HB_MODEL(node)->frame);         \
+        EGSMath_MatrixInvert(&(mtx), &(mtx));               \
+        *(out) = &(mtx);                                    \
+        break;                                              \
+    }
+
+static inline void CobjHotBoxGetOrigin(CobjNode *node, u8 type, VECTOR *out) {
+    CobjBoxBounds *b;
+
+    switch (type) {
+    case 1:
+        out->vx = -HB_ROT(node)->mtx.t[0];
+        out->vy = -HB_ROT(node)->mtx.t[1];
+        out->vz = -HB_ROT(node)->mtx.t[2];
+        break;
+    case 2:
+        out->vx = HB_GOBJ(node)->frame->t[0];
+        out->vy = HB_GOBJ(node)->frame->t[1];
+        out->vz = HB_GOBJ(node)->frame->t[2];
+        out->vy = -out->vy;
+        break;
+    case 3:
+        b = HB_MODEL(node)->bounds;
+        out->vx = b->max.vx + b->min.vx;
+        out->vy = b->max.vy + b->min.vy;
+        out->vz = b->max.vz + b->min.vz;
+        out->vx = HALVE(out->vx);
+        out->vy = HALVE(out->vy);
+        out->vz = HALVE(out->vz);
+        break;
+    }
+}
+
+static inline void CobjHotBoxGetBox(CobjNode *node, u8 type, CobjBoxBounds *box) {
+    VECTOR c;
+    s32 t;
+    s32 u;
+
+    switch (type) {
+    case 1:
+        box->min.vx = 0;
+        box->min.vy = 0;
+        box->min.vz = 0;
+        box->max = HB_ROT(node)->size;
+        break;
+    case 2:
+        *box = *HB_GOBJ(node)->bounds;
+        t = box->min.vy;
+        box->min.vy = box->max.vy;
+        box->max.vy = t;
+        box->min.vy = -box->min.vy;
+        box->max.vy = -box->max.vy;
+        break;
+    case 3:
+        *box = *HB_MODEL(node)->bounds;
+        u = box->min.vy;
+        box->min.vy = box->max.vy;
+        box->max.vy = u;
+        box->min.vy = -box->min.vy;
+        box->max.vy = -box->max.vy;
+        c.vx = box->max.vx + box->min.vx;
+        c.vy = box->max.vy + box->min.vy;
+        c.vz = box->max.vz + box->min.vz;
+        c.vx = HALVE(c.vx);
+        c.vy = HALVE(c.vy);
+        c.vz = HALVE(c.vz);
+        box->min.vx -= c.vx;
+        box->min.vy -= c.vy;
+        box->min.vz -= c.vz;
+        box->max.vx -= c.vx;
+        box->max.vy -= c.vy;
+        box->max.vz -= c.vz;
+        break;
+    }
+}
+
+s32 CobjHandleHotBoxLosXZ(CobjNode *node, CobjLosQuery *q, u8 *hit) {
+    VECTOR point;
+    VECTOR center;
+    VECTOR d;
+    VECTOR half;
+    VECTOR v;
+    s32 radius;
+    s32 adx;
+    s32 adz;
+    s32 reach;
+    s32 far;
+    s32 margin;
+    u8 type;
+
+    q->unk04 = q->unk08;
+    *hit = 0;
+    type = node->type;
+    radius = q->radius;
+    point = q->point;
+    CobjHotBoxGetCenter(node, type, &center);
+    d.vx = center.vx - point.vx;
+    adx = d.vx >= 0 ? d.vx : -d.vx;
+    if (radius < adx) {
+        return 1;
+    }
+    d.vz = center.vz - point.vz;
+    adz = d.vz >= 0 ? d.vz : -d.vz;
+    if (radius < adz) {
+        return 1;
+    }
+    margin = q->margin;
+    CobjHotBoxGetHalfSize(node, type, &v, &half);
+    reach = half.vx + half.vz + margin;
+    if (reach < adx || reach < adz) {
+        return 1;
+    }
+    far = adz;
+    if (adz < adx) {
+        far = adx;
+    }
+    if (reach < far) {
+        return 1;
+    }
+    if (type == 2 && node->gobj == q->unk08) {
+        return 1;
+    }
+    {
+        CobjSegment seg;
+        MATRIX mtx;
+        CobjBoxBounds box;
+        VECTOR hitPoint;
+        VECTOR hitNormal;
+        u8 unrotated;
+        MATRIX *m;
+
+        seg = q->seg;
+        CobjHotBoxIsUnrotated(node, type, &unrotated);
+        if (!unrotated) {
+            HB_GET_INV_MATRIX(node, type, mtx, &m);
+            EGSGeometry_TransformRay(&seg, m, &seg);
+        } else {
+            CobjHotBoxGetOrigin(node, type, &v);
+            seg.p0.vx -= v.vx;
+            seg.p0.vy -= v.vy;
+            seg.p0.vz -= v.vz;
+        }
+        CobjHotBoxGetBox(node, type, &box);
+        if (seg.p0.vx >= box.min.vx && seg.p0.vx <= box.max.vx && seg.p0.vz >= box.min.vz &&
+            seg.p0.vz <= box.max.vz) {
+            *hit = 1;
+            hitPoint = seg.p0;
+            hitNormal.vx = 0;
+            hitNormal.vy = 0;
+            hitNormal.vz = 0;
+        } else {
+            box.max.vy = 0x27100;
+            box.min.vy = -0x27100;
+            EGSGeometry_GetIntersectRaySegment2UnrotBox(&seg, &box, 0, hit, &hitPoint, &hitNormal);
+        }
+        if (*hit && (type != 2 || node->gobj != q->unk0C)) {
+            q->hit = 1;
+        }
+    }
+    return 1;
+}
 
 s32 CobjHandleHotBoxXZ(CobjHotBoxModel **box, s32 arg1, u8 *out) {
     CobjSector *sector = (*box)->display->sector;
@@ -401,7 +891,115 @@ s32 CobjHandleHotBoxXZ(CobjHotBoxModel **box, s32 arg1, u8 *out) {
     return 1;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/cobj", CobjHandleHotBox);
+void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
+
+/* Point query handed to CobjHandleHotBox */
+typedef struct CobjHotBoxQuery {
+    /* 0x00 */ s32 unk00;
+    /* 0x04 */ Gobj *unk04;
+    /* 0x08 */ VECTOR point;
+    /* 0x18 */ Gobj *self;
+    /* 0x1C */ s32 radius;
+} CobjHotBoxQuery;
+
+s32 CobjHandleHotBox(CobjNode *node, CobjHotBoxQuery *q, u8 *hit) {
+    VECTOR point;
+    VECTOR center;
+    VECTOR d;
+    VECTOR half;
+    VECTOR v;
+    s32 radius;
+    s32 adx;
+    s32 ady;
+    s32 adz;
+    s32 sum;
+    s32 far;
+    u8 type;
+
+    q->unk04 = q->self;
+    *hit = 0;
+    type = node->type;
+    radius = q->radius;
+    point = q->point;
+    CobjHotBoxGetCenter(node, type, &center);
+    d.vx = center.vx - point.vx;
+    adx = d.vx >= 0 ? d.vx : -d.vx;
+    if (radius < adx) {
+        return 1;
+    }
+    d.vy = center.vy - point.vy;
+    ady = d.vy >= 0 ? d.vy : -d.vy;
+    if (radius < ady) {
+        return 1;
+    }
+    d.vz = center.vz - point.vz;
+    adz = d.vz >= 0 ? d.vz : -d.vz;
+    if (radius < adz) {
+        return 1;
+    }
+    CobjHotBoxGetHalfSize(node, type, &v, &half);
+    sum = half.vx + half.vy + half.vz;
+    if (sum < adx || sum < ady || sum < adz) {
+        return 1;
+    }
+    if (ady < adx) {
+        far = adz;
+        if (far < adx) {
+            far = adx;
+        }
+    } else {
+        far = adz;
+        if (far < ady) {
+            far = ady;
+        }
+    }
+    if (half.vx > half.vy) {
+        if (half.vy < half.vz) {
+            sum = half.vx + half.vz;
+        } else {
+            sum = half.vy + half.vx;
+        }
+    } else if (half.vx < half.vz) {
+        sum = half.vy + half.vz;
+    } else {
+        sum = half.vy + half.vx;
+    }
+    if (sum < far) {
+        return 1;
+    }
+    if (type == 2 && node->gobj == q->self) {
+        return 1;
+    }
+    {
+        MATRIX mtx;
+        CobjBoxBounds box;
+        u8 unrotated;
+        MATRIX *m;
+
+        CobjHotBoxIsUnrotated(node, type, &unrotated);
+        if (!unrotated) {
+            HB_GET_INV_MATRIX(node, type, mtx, &m);
+            ApplyMatrixLV(m, &point, &point);
+            point.vx += m->t[0];
+            point.vy += m->t[1];
+            point.vz += m->t[2];
+        } else {
+            CobjHotBoxGetOrigin(node, type, &v);
+            point.vx -= v.vx;
+            point.vy -= v.vy;
+            point.vz -= v.vz;
+        }
+        CobjHotBoxGetBox(node, type, &box);
+        if (point.vx >= box.min.vx && point.vx <= box.max.vx && point.vy >= box.min.vy && point.vy <= box.max.vy &&
+            point.vz >= box.min.vz && point.vz <= box.max.vz) {
+            *hit = 1;
+            if (type == 2 && (node->flags & 2)) {
+                SysPostMessage(0x1A, 1, q->self->id, node->gobj->id, 0, 0, 0, 0);
+            }
+        }
+    }
+    return 1;
+}
 
 typedef void (*CobjNodeCallback)(CobjNode *node, s32 kind, s32 arg);
 

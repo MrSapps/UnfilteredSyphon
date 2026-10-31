@@ -397,9 +397,8 @@ void ObjectTeleportPlayer(s16 id, s32 sector) {
     }
 }
 
-#ifdef NON_MATCHING
-/* Register allocation: id and ref get s0/s2 swapped. */
-void ObjectRefMultiSYSPOSTMSG0(s16 id, s32 msg, s32 priority) {
+/* id is an s16 to callers (level.h); taken as s32 here, it is only narrowed where used. */
+void ObjectRefMultiSYSPOSTMSG0(s32 id, s32 msg, s32 priority) {
     s16 ref = id;
     u8 more = 1;
     Gobj *gobj;
@@ -411,15 +410,12 @@ void ObjectRefMultiSYSPOSTMSG0(s16 id, s32 msg, s32 priority) {
             if (gobj != NULL && gobj->npcState == 4) {
                 more = 0;
             }
-            SysPostMessage(msg, priority, id, ref, 0, 0, 0, 0);
+            SysPostMessage(msg, priority, (s16)id, ref, 0, 0, 0, 0);
         } else {
             more = 0;
         }
     } while (more);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", ObjectRefMultiSYSPOSTMSG0);
-#endif
 
 void ObjectBigExplosionFX(s16 id, VECTOR32 *pos, s32 radius, s32 shakeTicks, s32 flashTicks) {
     if (pos != NULL) {
@@ -863,8 +859,6 @@ void func_8002CFC4(Gobj *gobj, u32 state) {
     }
 }
 
-#ifdef NON_MATCHING
-/* One register: the else branch reads gobj->id through the part copy (a1) instead of a3. */
 void func_8002D190(Gobj *gobj, s16 type) {
     GameObjectHealth *armor = gobj->healthInfo;
     s32 state;
@@ -881,16 +875,18 @@ void func_8002D190(Gobj *gobj, s16 type) {
 
     if (armor->health < third) {
         state = 2;
+    } else if (armor->health < twoThirds) {
+        state = 1;
     } else {
-        state = armor->health < twoThirds;
+        state = 0;
     }
     if (type == 0x2C) {
         main = gobj;
         part = ObjectMatchToRefID(main->id, 0x38);
         part->healthInfo->health = main->healthInfo->health;
     } else {
-        part = gobj;
         main = gameObjectsInfo[gameObjectsInfo[gobj->id].refId].runtime;
+        part = gobj;
         main->healthInfo->health = part->healthInfo->health;
     }
     old = GOBJ_STATE(main);
@@ -912,14 +908,9 @@ void func_8002D190(Gobj *gobj, s16 type) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", func_8002D190);
-#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/object", D_80010F60);
 
-#ifdef NON_MATCHING
-/* Scheduling only: the kick table base (sp+0x60) is added after the index multiply */
 typedef struct ObjectKick {
     s32 up;
     s32 unk04;
@@ -989,8 +980,8 @@ void func_8002D328(Gobj *gobj, s16 type, s32 from) {
             { 2, -0x4A000, 0x4A000 }, { 2, 0x4A000, -0x4A000 }, { 2, 0, -0x94000 }, { 2, 0, -0xDB000 },
         };
 
-        i = rand() & 7;
-        kick = &kicks[i];
+        i = (rand() & 7) * sizeof(ObjectKick);
+        kick = (ObjectKick *)((u8 *)kicks + i);
         v.vz = 0;
         v.vx = 0;
         v.vy = kick->up * 0x1EB80;
@@ -1006,9 +997,6 @@ void func_8002D328(Gobj *gobj, s16 type, s32 from) {
     }
     SysPostMessage(10, 4, main->id, main->id, 0, 0, 0, 0);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", func_8002D328);
-#endif
 
 void func_8002D790(Gobj *gobj) {
     s16 *m = (s16 *)gobj->anim->frame;
@@ -1065,10 +1053,6 @@ void EFFECTSObjDispatch(SysMsg *msg) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/object", D_80010FD0);
 
-INCLUDE_RODATA("asm/main/nonmatchings/object", D_80010FDC);
-
-#ifdef NON_MATCHING
-/* Scheduling only: gExeTick is loaded before D_8010FF9C in the spark branch */
 /* Sparking electrical object: keeps re-posting message 10 to itself while active. */
 void EFFECTS2ObjDispatch(SysMsg *msg) {
     Gobj *gobj = gameObjectsInfo[msg->to].runtime;
@@ -1084,7 +1068,8 @@ void EFFECTS2ObjDispatch(SysMsg *msg) {
             pos.vz = gobj->anim->frame->pos.vz;
             pos.vy = -pos.vy;
             if (rand() & 1) {
-                color = (gExeTick ^ 1) & 1;
+                color = gExeTick ^ 1;
+                color &= 1;
                 SysSetSongVolPan(1, D_8010FF9C, gobj, -1, -1);
                 ParticleSparkShower(&pos, 0x10, D_801052E0[color]);
             }
@@ -1121,9 +1106,6 @@ void EFFECTS2ObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", EFFECTS2ObjDispatch);
-#endif
 
 /* Fire objects: show the flames, sets the player on fire on contact (message 26). */
 void FIREObjDispatch(SysMsg *msg) {
@@ -1358,7 +1340,248 @@ void LASERObjDispatch(SysMsg *msg) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/object", LIGHTObjDispatch);
+/* MoveInfo velocity as seen by the falling light */
+typedef struct LightMoveView {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ VECTOR32 vel;
+} LightMoveView;
+
+extern u32 D_801061C0; /* gWeaponInfo[0x13] word 0x14: bits 6..15 = blast damage */
+void ParticleGlassPoint(s16 id, s16 gobjId, VECTOR32 *pos);
+void ParticleFire(s16 id, VECTOR32 *pos, s32 arg2, s32 color, s32 arg4, s32 arg5, s32 arg6);
+s32 DamageRadius(s16 id, VECTOR32 *pos, s32 damage, s32 inner, s32 outer, s32 kind, u8 self);
+s32 PathGetNumPoints(Gobj *gobj);
+void PathGetPoint(Gobj *gobj, s32 index, VECTOR32 *out);
+s32 EGSDisplayGetAnimSector(GameObjectAnim *anim);
+void func_80148F20(Gobj *gobj, s16 type);
+
+static inline u8 LightHasLanded(MoveInfo *move) {
+    if (!((move->unk100[8] != 0 && (move->collFlags & 0x100000)) || move->unk100[1] == 0)) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vx < -0x2000 || ((LightMoveView *)move)->vel.vx > 0x2000) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vy < -0x2000 || ((LightMoveView *)move)->vel.vy > 0x2000) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vz < -0x2000 || ((LightMoveView *)move)->vel.vz > 0x2000) {
+        return 0;
+    }
+    return 1;
+}
+
+/* Lights: flickering lamps (0x6B, 0x6F), shootable lamps, falling lamps (0x6D). */
+void LIGHTObjDispatch(SysMsg *msg) {
+    Gobj *gobj = gameObjectsInfo[msg->to].runtime;
+    s32 type = GOBJ_TYPE(gobj->id);
+    VECTOR32 pos;
+    VECTOR32 other;
+    s32 dist;
+    ActivationList *list;
+    s32 i;
+    Gobj *obj;
+    u8 done;
+    u8 landed;
+
+    switch (msg->id) {
+    case 10:
+        if (type == 0x6B || type == 0x6F) {
+            if ((*(u32 *)gobj & 0xC8) == 0x48 && gobj->healthInfo->health > 0) {
+                if (--gobj->flags1 == 0) {
+                    gobj->flags1 = gobj->unk04;
+                    ObjectSetLightState(gobj, ((gobj->flags0 >> 1) ^ 1) & 1);
+                    if (gobj->anim->unk00[0xA] & 8) {
+                        if (!(gobj->flags0 & 2)) {
+                            EGSAnimShowDetailDef(gobj->anim);
+                        } else {
+                            EGSAnimHideDetailDef(gobj->anim);
+                        }
+                    }
+                }
+                SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+            }
+        } else if (type == 0x6D) {
+            done = 0;
+            pos = gobj->move->pos;
+            list = &objActivationList[gobj->unk04];
+            for (i = 0; i < list->count; i++) {
+                obj = list->infos[i]->runtime;
+                if (obj->healthInfo->health > 0) {
+                    other.vx = obj->anim->frame->pos.vx;
+                    other.vy = obj->anim->frame->pos.vy;
+                    other.vz = obj->anim->frame->pos.vz;
+                    other.vy = -other.vy;
+                    EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &other, &dist);
+                    if (dist < 0x60) {
+                        DamageGOBJ(-1, msg->from, obj->id, obj->healthInfo->health, 0x11);
+                    }
+                }
+            }
+            if ((gExeTick & 3) == (gobj->id & 3)) {
+                VECTOR32 at;
+                VECTOR32 dir = {0, 0, 0, 0};
+
+                at.vx = gobj->anim->frame->pos.vx;
+                at.vy = gobj->anim->frame->pos.vy;
+                at.vz = gobj->anim->frame->pos.vz;
+                at.vy = -at.vy;
+                ParticleExplosion(-1, &at, &dir, 0x800, 0);
+            }
+            landed = LightHasLanded(gobj->move);
+            if (landed) {
+                VECTOR32 hit;
+
+                if (gobj->flags0 & 2) {
+                    ObjectSetLightState(gobj, 0);
+                }
+                gobj->flags0 &= ~8;
+                MovementRemoveGobj(gobj);
+                hit.vx = gobj->anim->frame->pos.vx;
+                hit.vy = gobj->anim->frame->pos.vy;
+                hit.vz = gobj->anim->frame->pos.vz;
+                hit.vy = -hit.vy;
+                ParticleGlassPoint(-1, gobj->id, &hit);
+                ParticleFire(-1, &hit, 0x1000, -1, 0, 0xA, 0x1E);
+                DamageRadius(-1, &hit, (D_801061C0 >> 6) & 0x3FF, 0x140, 0x140, 0x11, 1);
+                GameCameraShakeStart(NULL, 5, 1, &gExploShakeVector, 0, &hit);
+                gobj->flags23 |= 2;
+                done = 1;
+            }
+            if (!done) {
+                SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 6:
+        gobj->flags0 |= 0x40;
+        if (type != 0x6F) {
+            if (type != 0x34) {
+                CobjAddWindowGobj(gobj, 1, 0, 0);
+            } else {
+                CobjAddBulletCollisionBoxGobj(gobj, 1, 0, 0);
+            }
+            if (type == 0x5E) {
+                CobjAddCollisionBoxGobj(gobj, 1, 0, 1, 1);
+            }
+        }
+        if ((type == 0x6B || type == 0x6F) && (*(u32 *)gobj & 0xC8) == 0x48 && gobj->healthInfo->health > 0) {
+            SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+        }
+        break;
+    case 5:
+        gobj->flags0 &= ~0x40;
+        if (type != 0x6F) {
+            if (type != 0x34) {
+                CobjRemoveWindowGobj(gobj);
+            } else {
+                CobjRemoveBulletCollisionBoxGobj(gobj);
+            }
+            if (type == 0x5E) {
+                CobjRemoveCollisionBoxGobj(gobj);
+            }
+        }
+        break;
+    case 20:
+    case 21:
+        if (gobj->healthInfo->health > 0) {
+            if (gobj->flags0 & 2) {
+                ObjectSetLightState(gobj, 0);
+            }
+            if (type != 0x6F) {
+                if (!(gobj->flags0 & 2)) {
+                    DamageGOBJ(-1, msg->from, gobj->id, gobj->healthInfo->health, 0xF);
+                }
+            } else {
+                gobj->flags0 &= ~8;
+                if (gobj->anim->unk00[0xA] & 8) {
+                    EGSAnimShowDetailDef(gobj->anim);
+                }
+            }
+        }
+        break;
+    case 26:
+        if (gobj->healthInfo->health > 0 && type == 0x5E) {
+            DamageGOBJ(-1, msg->from, gobj->id, gobj->healthInfo->health, 0xF);
+        }
+        break;
+    case 41:
+        if (gobj->healthInfo->health > 0 && type == 0x6B) {
+            *(s32 *)msg->data[0] = gobj->flags0 & 8;
+        }
+        break;
+    case 42:
+        if (gobj->healthInfo->health > 0) {
+            if (type == 0x6B) {
+                if (*(s32 *)msg->data[0] != 0) {
+                    gobj->flags0 |= 8;
+                } else if (gobj->anim->unk00[0xA] & 8) {
+                    ObjectSetLightState(gobj, 0);
+                    EGSAnimShowDetailDef(gobj->anim);
+                }
+            }
+            break;
+        }
+        gobj->flags1 |= 0x80;
+    case 13:
+        if (gobj->healthInfo->health <= 0 && !(gobj->flags0 & 0x80)) {
+            if (type != 0x34) {
+                gobj->flags0 |= 0x80;
+                if (type != 0x6D || msg->id != 13) {
+                    if (gobj->flags0 & 2) {
+                        ObjectSetLightState(gobj, 0);
+                    }
+                }
+                if (type == 0x6B) {
+                    gobj->flags0 &= ~8;
+                }
+                if (type == 0x6D && msg->id != 42) {
+                    if (!(gobj->flags0 & 8)) {
+                        VECTOR32 at;
+
+                        gobj->flags0 |= 8;
+                        MovementAddGobj(gobj);
+                        PathGetPoint(gobj, PathGetNumPoints(gobj) - 1, &at);
+                        gobj->move->unk12C = at.vy;
+                        gobj->unk04 = EGSDisplayGetAnimSector(gobj->anim);
+                        SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+                    }
+                } else {
+                    gobj->flags23 |= 2;
+                }
+            } else if (msg->id != 42) {
+                if (gobj->flags0 & 2) {
+                    ObjectSetLightState(gobj, 0);
+                }
+                if (gobj->unk04 == 0) {
+                    gobj->unk04 = 1;
+                    if (gobj->anim->unk00[0xA] & 8) {
+                        EGSAnimShowDetailDef(gobj->anim);
+                    }
+                    if (gobj->unk04 == 0) {
+                        GOBJ_HEALTH(gobj)->health = GOBJ_HEALTH(gobj)->armor;
+                    } else {
+                        gobj->flags0 |= 0x80;
+                    }
+                }
+            } else {
+                if (gobj->flags0 & 2) {
+                    ObjectSetLightState(gobj, 0);
+                }
+                gobj->flags0 |= 0x80;
+                if (gobj->anim->unk00[0xA] & 8) {
+                    EGSAnimShowDetailDef(gobj->anim);
+                }
+            }
+        } else {
+            gobj->flags23 |= 2;
+        }
+        break;
+    case 2:
+        func_80148F20(gobj, type);
+        break;
+    }
+}
 
 void ROTATINGObjDispatch(SysMsg *msg) {
     Gobj *gobj = gameObjectsInfo[msg->to].runtime;
@@ -1486,4 +1709,202 @@ void SPECIALObjDispatch(SysMsg *msg) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/object", TGTObjDispatch);
+void DamageGOBJHierarchy(s16 id, s16 from);
+void func_80149BD8(Gobj *gobj, s16 type);
+void EGSGeometry_GetFuzzyXZDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
+extern Gobj *gObjPlayer;
+
+static inline u8 TGTHasSettled(MoveInfo *move) {
+    if (!((move->unk100[8] != 0 && (move->collFlags & 0x100000)) || move->unk100[1] == 0)) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vx < -0x2000 || ((LightMoveView *)move)->vel.vx > 0x2000) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vy < -0x2000 || ((LightMoveView *)move)->vel.vy > 0x2000) {
+        return 0;
+    }
+    if (((LightMoveView *)move)->vel.vz < -0x2000 || ((LightMoveView *)move)->vel.vz > 0x2000) {
+        return 0;
+    }
+    if (move->unkA0.vx < -0x2000 || move->unkA0.vx > 0x2000) {
+        return 0;
+    }
+    if (move->unkA0.vy < -0x2000 || move->unkA0.vy > 0x2000) {
+        return 0;
+    }
+    if (move->unkA0.vz < -0x2000 || move->unkA0.vz > 0x2000) {
+        return 0;
+    }
+    return 1;
+}
+
+/* Targets: falling and breakable objects (0x2C falling, 0x3D/0x66 falling debris, ...). */
+void TGTObjDispatch(SysMsg *msg) {
+    Gobj *gobj = gameObjectsInfo[msg->to].runtime;
+    s16 type = GOBJ_TYPE(gobj->id);
+    VECTOR32 pos;
+    VECTOR32 at;
+    VECTOR32 hit;
+    s32 dist;
+    u8 intact;
+    u8 done;
+    Gobj *ref;
+    Gobj *other;
+    s16 rid;
+
+    switch (msg->id) {
+    case 10:
+        if (!gUsingSndBigFire && (*(u32 *)gobj & 0x48) == 0x40 && type == 0x2C) {
+            pos.vx = gobj->anim->frame->pos.vx;
+            pos.vy = gobj->anim->frame->pos.vy;
+            pos.vz = gobj->anim->frame->pos.vz;
+            pos.vy = -pos.vy;
+            SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+        } else if (gobj->move != NULL && (gobj->flags0 & 8)) {
+            done = 0;
+            if (type == 0x3D || type == 0x66) {
+                if ((gExeTick & 3) == (gobj->id & 3)) {
+                    at.vx = gobj->anim->frame->pos.vx;
+                    at.vy = gobj->anim->frame->pos.vy;
+                    at.vz = gobj->anim->frame->pos.vz;
+                    at.vy = -at.vy;
+                    ParticleExplosion(-1, &at, &gExploDir, 0x800, 0);
+                }
+                pos = ((LightMoveView *)gobj->move)->vel;
+                if (pos.vy <= 0) {
+                    hit.vx = gobj->anim->frame->pos.vx;
+                    hit.vy = gobj->anim->frame->pos.vy;
+                    hit.vz = gobj->anim->frame->pos.vz;
+                    hit.vy = -hit.vy;
+                    ParticleExplosion(-1, &hit, &gExploDir, 0x1000, 0);
+                    done = 1;
+                    MovementRemoveGobj(gobj);
+                    gobj->flags23 |= 2;
+                    gobj->flags0 &= ~8;
+                }
+            } else if (type == 0x2C) {
+                pos.vx = gobj->anim->frame->pos.vx;
+                pos.vy = gobj->anim->frame->pos.vy;
+                pos.vz = gobj->anim->frame->pos.vz;
+                pos.vy = -pos.vy;
+                if ((gExeTick & 3) == (gobj->id & 3)) {
+                    ParticleExplosion(-1, &pos, &gExploDir, 0x1000, 0);
+                }
+                at = gObjPlayer->move->pos;
+                EGSGeometry_GetFuzzyXZDistancePoint2Point(&pos, &at, &dist);
+                if ((u32)dist < 0x100 && gObjPlayer->healthInfo->health > 0 && !gPlayerOnFireFlag) {
+                    SysPostMessage(13, 4, GOBJ_ID_666, gPlayerOffset, 0, 0, 0, 0);
+                }
+                if (TGTHasSettled(gobj->move)) {
+                    ref = ObjectMatchToRefID(gobj->id, 0x38);
+                    gobj->flags0 &= ~8;
+                    gobj->unk20[0] |= 0x80;
+                    ref->unk20[0] |= 0x80;
+                    rid = gameObjectsInfo[gobj->id].refId;
+                    if (rid != -1) {
+                        other = gameObjectsInfo[rid].runtime;
+                        other->unk20[0] |= 0x80;
+                    } else {
+                        other = NULL;
+                    }
+                    MovementRemoveGobj(gobj);
+                    gobj->flags0 &= ~8;
+                    func_8002CE20(gobj);
+                    func_8002D790(gobj);
+                    done = 1;
+                    if (ref->id != gobj->id) {
+                        func_8002D790(ref);
+                    }
+                    if (other != NULL) {
+                        func_8002D790(other);
+                    }
+                }
+            }
+            if (!done) {
+                SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+            }
+        }
+        break;
+    case 6:
+        gobj->flags0 |= 0x40;
+        if ((*(u32 *)gobj & 0x88) == 0x80 && type == 0x2C) {
+            func_8002CE20(gobj);
+            SysPostMessage(10, 4, gobj->id, gobj->id, 0, 0, 0, 0);
+        }
+        CobjAddBulletCollisionBoxGobj(gobj, 1, 0, 0);
+        CobjAddCollisionBoxGobj(gobj, 1, 0, 1, type == 0x2C);
+        break;
+    case 5:
+        gobj->flags0 &= ~0x40;
+        if ((*(u32 *)gobj & 0x88) == 0x80 && type == 0x2C) {
+            func_8002CF58(gobj);
+        }
+        CobjRemoveBulletCollisionBoxGobj(gobj);
+        CobjRemoveCollisionBoxGobj(gobj);
+        break;
+    case 26:
+        if ((gobj->flags0 & 8) && type == 0x2C && gNotKilledByFallingObject) {
+            DamageGOBJ(-1, gobj->id, gPlayerOffset, gObjPlayer->healthInfo->armor + gObjPlayer->healthInfo->health,
+                       0x11);
+            gNotKilledByFallingObject = 0;
+        }
+        break;
+    case 13:
+        if (gobj->healthInfo->health <= 0) {
+            if (!(gobj->flags0 & 0x80)) {
+                intact = 1;
+                gobj->flags0 |= 0x80;
+                if (type == 0x45) {
+                    intact = 0;
+                    ((void (*)())ObjectElectronicDestruction)(gobj, msg->from);
+                } else if (type == 0x21 || type == 0x66 || type == 0x67 || type == 0x3D) {
+                    func_8002CAB0(gobj, type, msg->from, &intact);
+                } else if (type == 0x2C || type == 0x38) {
+                    intact = 0;
+                    func_8002D328(gobj, type, msg->from);
+                } else if (type == 0x44) {
+                    rid = gameObjectsInfo[gobj->id].refId;
+                    if (rid != -1) {
+                        gameObjectsInfo[rid].runtime->flags1 &= ~7;
+                        gameObjectsInfo[rid].runtime->flags1 |= 1;
+                        SysPostMessage(10, 4, gobj->id, rid, 0, 0, 0, 0);
+                    }
+                    intact = 0;
+                } else {
+                    if (type == 0x42) {
+                        gameObjectsInfo[(s16)gameObjectsInfo[gobj->id].refId].runtime->healthInfo->health = 1;
+                    }
+                    DamageGOBJHierarchy(gobj->id, msg->from);
+                }
+                if (intact) {
+                    if (!(gobj->anim->unk00[0xA] & 8)) {
+                        gobj->flags23 |= 2;
+                        ObjectRemoveAndIgnoreBulletHoles(gobj);
+                    } else {
+                        EGSAnimShowDetailDef(gobj->anim);
+                    }
+                }
+            }
+        } else if (type == 0x2C || type == 0x38) {
+            func_8002D190(gobj, type);
+        } else if (type != 0x21 && !(type == 0x66 || type == 0x67)) {
+            DamageGOBJHierarchy(gobj->id, msg->from);
+        }
+        break;
+    case 42:
+        if (gobj->healthInfo->health <= 0) {
+            gobj->flags0 |= 0x80;
+            if (!(gobj->anim->unk00[0xA] & 8)) {
+                gobj->flags23 |= 2;
+                ObjectRemoveAndIgnoreBulletHoles(gobj);
+            } else {
+                EGSAnimShowDetailDef(gobj->anim);
+            }
+        }
+        break;
+    case 2:
+        func_80149BD8(gobj, type);
+        break;
+    }
+}
