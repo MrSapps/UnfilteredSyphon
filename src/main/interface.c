@@ -2219,8 +2219,6 @@ s32 func_8003EECC(s32 delta) {
     return D_8010FFEC;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: the original keeps len in t2 (one extra move); otherwise the same code */
 void func_8003EF48(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
@@ -2232,15 +2230,15 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
     s32 t;
 
     for (i = 35; i >= 20; i--) {
-        lines[i].xy0 = lines[i - 12].xy0;
-        lines[i].xy1 = lines[i - 12].xy1;
-        lines[i].unk04 = lines[i - 12].unk04 + 4;
+        lines[i].xy0 = lines[i - 8].xy0;
+        lines[i].xy1 = lines[i - 8].xy1;
+        lines[i].unk04 = lines[i - 8].unk04 + 4;
     }
     if (fresh) {
         for (i = 20; i >= 12; i--) {
-            lines[i].xy0 = lines[i - 12].xy0;
-            lines[i].xy1 = lines[i - 12].xy1;
-            lines[i].unk04 = lines[i - 12].unk04 + 4;
+            lines[i].xy0 = lines[i - 8].xy0;
+            lines[i].xy1 = lines[i - 8].xy1;
+            lines[i].unk04 = lines[i - 8].unk04 + 4;
         }
     } else {
         for (i = 20; i >= 12; i--) {
@@ -2249,14 +2247,15 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
         }
     }
     if (scr->vz > 0) {
-        t = (*(IfaceCamera **)gCamera)->h * 60 / scr->vz;
+        w = (*(IfaceCamera **)gCamera)->h * 60 / scr->vz;
         size = 4;
-        if (t >= 4) {
-            size = t;
+        if (w >= 4) {
+            size = w;
         }
-        len = size * D_8010FFEC / 4;
-        half = len / 2;
-        prod = len * D_8010FFEC;
+        w = size * D_8010FFEC / 4;
+        half = w / 2;
+        prod = w * D_8010FFEC;
+        len = w;
         w = prod / 4;
         t = w / 3;
         lines[0].xy0 = XY(scr->vx - w * 2, scr->vy);
@@ -2293,9 +2292,6 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
         lines[i].xy0 = 0x04000400;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003EF48);
-#endif
 
 #ifdef NON_MATCHING
 /* regalloc (lines base in t2 instead of t1), same code otherwise; sibling of func_8003EF48 */

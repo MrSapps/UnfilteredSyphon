@@ -2519,12 +2519,30 @@ u8 func_800203F0(VECTOR32 *pos, GameCamPlane *plane, s32 radius) {
     return func_80020230(&p, (GameCamOutline *)&o, radius);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: track and the plane distance swap s0/s1 */
-void func_80020978(GameCamTrack *track) {
-    VECTOR32 n;
+static inline void iTrackStop(GameCamTrack *track, s32 dist, s32 d, s32 r) {
     VECTOR32 q;
     VECTOR32 p;
+
+    p.vx = EGSMathFIXDiv(track->vel.vx, dist);
+    p.vy = EGSMathFIXDiv(track->vel.vy, dist);
+    p.vz = EGSMathFIXDiv(track->vel.vz, dist);
+    d = d - r;
+    q.vx = EGSMathFIXMul(p.vx, d);
+    q.vy = EGSMathFIXMul(p.vy, d);
+    q.vz = EGSMathFIXMul(p.vz, d);
+    track->unk54.vx = q.vx - track->vel.vx;
+    track->unk54.vy = q.vy - track->vel.vy;
+    track->unk54.vz = q.vz - track->vel.vz;
+    track->unk64 = track->unk54;
+    track->unk74.vx = 0;
+    track->unk74.vy = 0;
+    track->unk74.vz = 0;
+}
+
+#ifdef NON_MATCHING
+/* else branch as an inline (track now in s1 as in the original); the original copies r into s3 for it and keeps d/dist in s0/s2, loading unk3C after the plane normal */
+void func_80020978(GameCamTrack *track) {
+    VECTOR32 n;
     s32 r = track->unk10 << 12;
     s32 dist = track->unk40;
     GameCamSVec *normal = track->plane->normal;
@@ -2545,20 +2563,7 @@ void func_80020978(GameCamTrack *track) {
         track->unk74.vy = track->unk54.vy - track->unk64.vy;
         track->unk74.vz = track->unk54.vz - track->unk64.vz;
     } else {
-        p.vx = EGSMathFIXDiv(track->vel.vx, dist);
-        p.vy = EGSMathFIXDiv(track->vel.vy, dist);
-        p.vz = EGSMathFIXDiv(track->vel.vz, dist);
-        d = d - r;
-        q.vx = EGSMathFIXMul(p.vx, d);
-        q.vy = EGSMathFIXMul(p.vy, d);
-        q.vz = EGSMathFIXMul(p.vz, d);
-        track->unk54.vx = q.vx - track->vel.vx;
-        track->unk54.vy = q.vy - track->vel.vy;
-        track->unk54.vz = q.vz - track->vel.vz;
-        track->unk64 = track->unk54;
-        track->unk74.vx = 0;
-        track->unk74.vy = 0;
-        track->unk74.vz = 0;
+        iTrackStop(track, dist, d, r);
     }
 }
 #else
@@ -2584,8 +2589,6 @@ void func_80020BB8(VECTOR32 *pos, s32 radius, s32 yLow, s32 yHigh, VECTOR32 *del
     box->max.vz = pos->vz + FIX12(MAX(delta->vz, 0) + rxz) + radius;
 }
 
-#ifdef NON_MATCHING
-/* the final 'not all beyond max.vz' test: the original fills the first branch's delay slot with the result 1 */
 u8 func_80020E90(GameCamBox *box, GameCamPlane *plane) {
     GameCamSVec *a = plane->verts[0];
     GameCamSVec *b = plane->verts[1];
@@ -2608,9 +2611,10 @@ u8 func_80020E90(GameCamBox *box, GameCamPlane *plane) {
         if (a->vz < box->min.vz && b->vz < box->min.vz && c->vz < box->min.vz) {
             return 0;
         }
-        return box->max.vz >= a->vz || box->max.vz >= b->vz || box->max.vz >= c->vz;
-    }
-    if (plane->count == 4) {
+        if (box->max.vz < a->vz && box->max.vz < b->vz && box->max.vz < c->vz) {
+            return 0;
+        }
+    } else if (plane->count == 4) {
         d = plane->verts[3];
         if (a->vy < box->min.vy && b->vy < box->min.vy && c->vy < box->min.vy && d->vy < box->min.vy) {
             return 0;
@@ -2627,13 +2631,14 @@ u8 func_80020E90(GameCamBox *box, GameCamPlane *plane) {
         if (a->vz < box->min.vz && b->vz < box->min.vz && c->vz < box->min.vz && d->vz < box->min.vz) {
             return 0;
         }
-        return box->max.vz >= a->vz || box->max.vz >= b->vz || box->max.vz >= c->vz || box->max.vz >= d->vz;
+        if (box->max.vz < a->vz && box->max.vz < b->vz && box->max.vz < c->vz && box->max.vz < d->vz) {
+            return 0;
+        }
+    } else {
+        return 0;
     }
-    return 0;
+    return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020E90);
-#endif
 
 extern GameCamFace *D_80128990; /* static collision faces */
 u8 func_80020E90(GameCamBox *box, GameCamPlane *plane);
@@ -3129,9 +3134,22 @@ static inline void iSetPathEnd(GameCamPath *path, VECTOR32 *pos) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: player/view swap s0/s1 */
 /* Points a script camera's path (and its linked watch object's path) at the player's default view. */
+/* The camera rotation matrix for an angle (RotMatrixYXZ with the signs flipped into
+ * the camera's handedness). */
+static inline void iAngleMatrix(VECTOR32 *angle, GOBJ_MATRIX *m) {
+    GameCamSVec svec;
+
+    svec.vx = -angle->vx;
+    svec.vy = angle->vy;
+    svec.vz = -angle->vz;
+    RotMatrixYXZ(&svec, m);
+    m->m[0][1] = -m->m[0][1];
+    m->m[1][0] = -m->m[1][0];
+    m->m[1][2] = -m->m[1][2];
+    m->m[2][1] = -m->m[2][1];
+}
+
 void func_80022548(Gobj *cam) {
     VECTOR32 eye;
     VECTOR32 watch;
@@ -3143,9 +3161,6 @@ void func_80022548(Gobj *cam) {
     VECTOR32 back;
     VECTOR32 base;
     GOBJ_MATRIX m;
-    GameCamSVec svec;
-    VECTOR32 d;
-    VECTOR32 dir;
     s32 start;
     GameCamPath *path;
     GameCamView *view;
@@ -3165,14 +3180,7 @@ void func_80022548(Gobj *cam) {
         rot = player->move->rot;
         angle = view->angle;
         angle.vy += rot.vy;
-        svec.vx = -angle.vx;
-        svec.vy = angle.vy;
-        svec.vz = -angle.vz;
-        RotMatrixYXZ(&svec, &m);
-        m.m[0][1] = -m.m[0][1];
-        m.m[1][0] = -m.m[1][0];
-        m.m[1][2] = -m.m[1][2];
-        m.m[2][1] = -m.m[2][1];
+        iAngleMatrix(&angle, &m);
         ApplyMatrixLV(&m, &view->offset, &offset);
         back.vx = 0;
         back.vy = 0;
@@ -3187,14 +3195,19 @@ void func_80022548(Gobj *cam) {
         eye.vx = watch.vx + back.vx;
         eye.vy = watch.vy + back.vy;
         eye.vz = watch.vz + back.vz;
-        d.vx = eye.vx - base.vx;
-        d.vy = eye.vy - base.vy;
-        d.vz = eye.vz - base.vz;
-        dir.vx = watch.vx - eye.vx;
-        dir.vy = watch.vy - eye.vy;
-        dir.vz = watch.vz - eye.vz;
-        GTEMath_VectorNormal(&dir, &dir);
-        func_80021230(&base, &d, &dir, &eye);
+        {
+            VECTOR32 d;
+            VECTOR32 dir;
+
+            d.vx = eye.vx - base.vx;
+            d.vy = eye.vy - base.vy;
+            d.vz = eye.vz - base.vz;
+            dir.vx = watch.vx - eye.vx;
+            dir.vy = watch.vy - eye.vy;
+            dir.vz = watch.vz - eye.vz;
+            GTEMath_VectorNormal(&dir, &dir);
+            func_80021230(&base, &d, &dir, &eye);
+        }
         path = NULL;
         LevelGetPathInfo(cam->id, &start, &path);
         iSetPathEnd(path, &eye);
@@ -3208,9 +3221,6 @@ void func_80022548(Gobj *cam) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80022548);
-#endif
 
 /* The path segment a mover is on: prev is the point it left, cur the one it heads for. */
 static inline void iPathSegment(Gobj *obj, s32 *prev, s32 *cur) {
@@ -3660,8 +3670,6 @@ void GameCameraSetScrimScrollRate(s32 rate) {
     D_80113B2C.scrimRate = -rate;
 }
 
-#ifdef NON_MATCHING
-/* the original does not cross-jump the two scroll-rate stores (sw stays in the abs branch's delay slot) */
 void func_80023D70(void) {
     VECTOR32 pos;
     VECTOR32 dir;
@@ -3693,7 +3701,7 @@ void func_80023D70(void) {
             for (i = 0; i < 13; i++) {
                 EGSDisplayAddPoly(display, &mPMI[i]);
             }
-            D_80113B2C.scrimRate = ABS(D_80113B2C.scrimRate);
+            D_80113B2C.scrimRate = D_80113B2C.scrimRate >= 0 ? D_80113B2C.scrimRate : -D_80113B2C.scrimRate;
         } else if (D_80113B2C.scrimRate > 0) {
             for (i = 0; i < 13; i++) {
                 EGSDisplayDeletePoly(display, &mPMI[i]);
@@ -3702,9 +3710,6 @@ void func_80023D70(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80023D70);
-#endif
 
 
 #ifndef NON_MATCHING
