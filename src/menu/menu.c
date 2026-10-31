@@ -1603,9 +1603,455 @@ s32 func_8013BBA0(void) {
     return 0;
 }
 
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013BBE4);
+/* Menu pad state */
+typedef struct MenuPad {
+    /* 0x0 */ u8 status; /* 0xFF: no pad */
+    /* 0x1 */ u8 unk1[3];
+    /* 0x4 */ u16 buttons;
+} MenuPad;
 
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013C530);
+
+#define MENU_DIR_LEFT 1
+#define MENU_DIR_RIGHT 2
+#define MENU_DIR_UP 3
+#define MENU_DIR_DOWN 4
+
+extern char *D_8013F77C; /* "no controller" */
+extern void (*D_8013FD08[])(void); /* per-menu select handlers */
+extern u32 D_8013FE0C; /* accept/default/cancel row selection */
+extern s32 D_8013FE10; /* direction being repeated */
+/* Held-button auto-repeat state: separate u16 statics in the original, which the
+ * data split lumped into D_8013FE14/D_8013FE18 (named here by address). */
+extern u16 mRepeatButtons asm("D_8013FE14");   /* buttons held last read */
+extern u16 mRepeatTicks asm("D_8013FE14+2");   /* reads since the last repeat */
+extern u16 mRepeatCount asm("D_8013FE18");     /* repeats so far */
+extern u16 mRepeatDelay asm("D_8013FE18+2");   /* reads between repeats */
+extern u16 D_8013FE1C; /* slider step */
+void EGSDeviceControllerRead(MenuPad **pad, s32 port);
+s32 func_8013B2B0(void);
+s32 func_8013B38C(void);
+s32 func_8013B820(s32 delta);
+void func_8013A60C(s32 cursor);
+void func_801396B4(void);
+void func_80139044(char *msg, u32 type, s32 cursor, void (*done)());
+void func_8013BBE4(u16 pressed);
+
+/* Bit-string access tolerant of an unaligned base (the pad buttons are tested
+ * through the address of a u16).  The two test variants differ only in whether
+ * the bit index is a fresh local or the parameter itself, which changes how the
+ * base address is kept in a loop. */
+static inline u32 BitTest(void *base, s32 n) {
+    u32 *words = base;
+    s32 bit = n;
+    s32 misalign = (u32)base & 3;
+    s32 word;
+    u32 mask;
+
+    if (misalign) {
+        bit = n + misalign * 8;
+        words = (u32 *)((u32)base & ~3);
+    }
+    word = bit >> 5;
+    mask = 1 << (bit & 0x1F);
+    return words[word] & mask;
+}
+
+static inline u32 BitTestAt(void *base, s32 bit) {
+    u32 *words = base;
+    s32 misalign = (u32)base & 3;
+    s32 word;
+    u32 mask;
+
+    if (misalign) {
+        bit = bit + misalign * 8;
+        words = (u32 *)((u32)base & ~3);
+    }
+    word = bit >> 5;
+    mask = 1 << (bit & 0x1F);
+    return words[word] & mask;
+}
+
+static inline void BitSet(void *base, s32 n) {
+    u32 *words = base;
+    s32 bit = n;
+    s32 misalign = (u32)base & 3;
+    s32 word;
+    u32 mask;
+
+    if (misalign) {
+        bit = n + misalign * 8;
+        words = (u32 *)((u32)base & ~3);
+    }
+    word = bit >> 5;
+    mask = 1 << (bit & 0x1F);
+    words[word] |= mask;
+}
+
+void JoystickSetFlightControls(u8 enable);
+void GameSysJoystickInit(void);
+void func_8013E324(void);
+
+/* Controller menu input: vibration and flight-control toggles, preset layouts,
+ * button assignment and the accept/default/cancel row. */
+void func_8013BBE4(u16 pressed) {
+    MenuItem *item = &D_8013FBD8[D_8013F7C4];
+    u32 used;
+    s32 i;
+    u32 n;
+    s32 action;
+    RECT *rect;
+
+    if (D_8013F7C4 < 4) {
+        if (BitTest(&pressed, 11)) {
+            func_8013EE78();
+            return;
+        }
+        if (BitTest(&pressed, 4)) {
+            func_80138EE4();
+            return;
+        }
+    }
+    switch (D_8013F7C4) {
+        case 4:
+        case 5:
+        case 6:
+        case 7:
+        case 8:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
+            action = D_8013F7C4 - 4;
+            for (i = 0; i < 9; i++) {
+                if (BitTest(&pressed, i)) {
+                    u8 old = D_8013FDEC[i];
+                    s32 j;
+
+                    if (old != action && old != 0xFF) {
+                        D_8013FBD8[old + 4].textIds[1] = TextReplaceString(D_8013FBD8[old + 4].textIds[1], D_801377E4);
+                    }
+                    for (j = 0; j < 9; j++) {
+                        if (D_8013FDEC[j] == action) {
+                            D_8013FDEC[j] = 0xFF;
+                        }
+                    }
+                    D_8013FDEC[i] = action;
+                    item->textIds[1] = TextReplaceString(item->textIds[1], gButtonStrings[i]);
+                    item = &D_8013FBD8[2];
+                    item->textIds[1] = TextReplaceString(item->textIds[1], D_8013F7AC[func_8013BB3C()]);
+                }
+            }
+            D_8013FE0C = 0;
+            break;
+        case 0:
+            if (BitTest(&pressed, 13)) {
+                EGSDeviceControllerVibrate(4, 0, 0);
+                func_80139150(item, 0, 1);
+            } else if (BitTest(&pressed, 15)) {
+                EGSDeviceControllerVibrate(3, 0, 0);
+                func_80139150(item, 1, 1);
+            }
+            D_8013FE0C = 0;
+            break;
+        case 1:
+            if (BitTest(&pressed, 13)) {
+                JoystickSetFlightControls(0);
+                func_80139150(item, 0, 1);
+            } else if (BitTest(&pressed, 15)) {
+                JoystickSetFlightControls(1);
+                func_80139150(item, 1, 1);
+            }
+            D_8013FE0C = 0;
+            break;
+        case 2:
+            D_8013FE0C = 0;
+            n = func_8013BB3C();
+            if (BitTest(&pressed, 13)) {
+                n++;
+            }
+            if (BitTest(&pressed, 15)) {
+                n--;
+            }
+            if (n < 2) {
+                for (i = 0; i < 9; i++) {
+                    gJoyMap[i] = D_8013FDF8[n][i];
+                }
+                GameSysJoystickInit();
+                func_8013E324();
+            }
+            break;
+        case 3:
+            break;
+        case 13:
+            if (BitTest(&pressed, 6)) {
+                switch (D_8013FE0C) {
+                    case 2:
+                        for (i = 0; i < 9; i++) {
+                            gJoyMap[i] = D_8013FDF8[0][i];
+                        }
+                        func_8013E324();
+                        break;
+                    case 1:
+                        used = 0;
+                        for (i = 0; i < 9; i++) {
+                            if (D_8013FDEC[i] != 0xFF) {
+                                BitSet(&used, D_8013FDEC[i]);
+                            }
+                        }
+                        for (i = 0; i < 9; i++) {
+                            if (!BitTestAt(&used, i)) {
+                                break;
+                            }
+                        }
+                        if (i == 9) {
+                            for (i = 0; i < 9; i++) {
+                                gJoyMap[i] = D_8013FDEC[i];
+                            }
+                            GameSysJoystickInit();
+                            func_80138EE4();
+                        } else {
+                            func_8013B8F8(i + 4);
+                        }
+                        break;
+                    case 0:
+                        func_8013E324();
+                        func_8013B8F8(2);
+                        break;
+                }
+                break;
+            }
+            if (BitTest(&pressed, 13)) {
+                switch (D_8013FE0C) {
+                    case 0:
+                        D_8013FE0C = 1;
+                        TextSetStringIntensity(item->textIds[0], 0x50, 0x82, 0xF0);
+                        TextSetStringIntensity(item->textIds[1], 0x8C, 0xF0, 0x8C);
+                        break;
+                    case 1:
+                        D_8013FE0C = 2;
+                        TextSetStringIntensity(item->textIds[1], 0x50, 0x82, 0xF0);
+                        TextSetStringIntensity(item->textIds[2], 0xF0, 0x78, 0x78);
+                        break;
+                }
+            } else if (BitTest(&pressed, 15)) {
+                switch (D_8013FE0C) {
+                    case 1:
+                        D_8013FE0C = 0;
+                        TextSetStringIntensity(item->textIds[0], 0xF0, 0x78, 0x78);
+                        TextSetStringIntensity(item->textIds[1], 0x50, 0x82, 0xF0);
+                        break;
+                    case 2:
+                        D_8013FE0C = 1;
+                        TextSetStringIntensity(item->textIds[1], 0x8C, 0xF0, 0x8C);
+                        TextSetStringIntensity(item->textIds[2], 0x50, 0x82, 0xF0);
+                        break;
+                }
+            }
+            rect = TextStringRect(item->textIds[D_8013FE0C], 0);
+            rect->x -= 3;
+            rect->y -= 2;
+            rect->w += 6;
+            rect->h += 4;
+            func_80138AD4(rect->x, rect->y, rect->w, rect->h);
+            break;
+    }
+}
+
+/* Reads the pad and drives the menu: cursor moves, value changes, auto-repeat. */
+void func_8013C530(void) {
+    MenuPad *pad;
+    u16 pressed;
+    s32 dir = 0;
+    s32 handled;
+    u16 buttons;
+
+    if (gSystemTick < D_8013FCA8) {
+        return;
+    }
+    EGSDeviceControllerRead(&pad, 0);
+    if (pad->status == 0xFF) {
+        if (mRepeatButtons != 0xFFFF) {
+            mRepeatButtons = 0xFFFF;
+            func_80139044(D_8013F77C, 0, 0, NULL);
+        }
+        return;
+    }
+    buttons = pad->buttons;
+    if (gSystemTick == D_8013FCA8) {
+        mRepeatButtons = buttons;
+        return;
+    }
+    if (!(buttons & mRepeatButtons)) {
+        pressed = buttons & ~mRepeatButtons;
+    } else {
+        pressed = 0;
+    }
+
+    if (BitTest(&pressed, 14)) {
+        dir = MENU_DIR_DOWN;
+    }
+    if (BitTest(&pressed, 12)) {
+        if (dir == MENU_DIR_DOWN) {
+            dir = 0;
+        } else {
+            dir = MENU_DIR_UP;
+        }
+    }
+    if (dir == 0) {
+        if (BitTest(&pressed, 15)) {
+            dir = MENU_DIR_LEFT;
+        }
+        if (BitTest(&pressed, 13)) {
+            if (dir == MENU_DIR_LEFT) {
+                dir = 0;
+            } else {
+                dir = MENU_DIR_RIGHT;
+            }
+        }
+    }
+
+    if (pressed != 0) {
+        handled = 0;
+        if (dir == MENU_DIR_DOWN) {
+            D_80138044[D_8013FCB4](D_8013F7C4 + 1);
+        }
+        if (dir == MENU_DIR_UP) {
+            D_80138044[D_8013FCB4](D_8013F7C4 - 1);
+        }
+        switch (D_8013FCB4) {
+            case 1:
+                if (dir == MENU_DIR_RIGHT) {
+                    handled = func_8013B38C();
+                }
+                if (dir == MENU_DIR_LEFT) {
+                    handled = func_8013B2B0();
+                }
+                break;
+            case 3:
+                if (dir == MENU_DIR_RIGHT) {
+                    handled = func_8013B820(D_8013FE1C);
+                }
+                if (dir == MENU_DIR_LEFT) {
+                    handled = func_8013B820(-D_8013FE1C);
+                }
+                break;
+            case 6:
+                if (dir == MENU_DIR_RIGHT) {
+                    func_8013A60C(D_8013F7C4 + 1);
+                }
+                if (dir == MENU_DIR_LEFT) {
+                    func_8013A60C(D_8013F7C4 - 1);
+                }
+                handled = 1;
+                break;
+            case 4:
+            case 9:
+                handled = 1;
+                break;
+            case 13:
+                switch (dir) {
+                    case 0:
+                        break;
+                    case MENU_DIR_UP:
+                        if (POSITION.y > 0x68) {
+                            POSITION.y--;
+                        }
+                        break;
+                    case MENU_DIR_DOWN:
+                        if (POSITION.y < 0x88) {
+                            POSITION.y++;
+                        }
+                        break;
+                    case MENU_DIR_LEFT:
+                        if (POSITION.x > 0xB0) {
+                            POSITION.x--;
+                        }
+                        break;
+                    case MENU_DIR_RIGHT:
+                        if (POSITION.x < 0xD0) {
+                            POSITION.x++;
+                        }
+                        break;
+                }
+                handled = 1;
+                break;
+        }
+        if (!handled) {
+            if (D_8013FCB4 == 0) {
+                if (dir == MENU_DIR_LEFT) {
+                    func_801396B4();
+                }
+            } else if (dir == MENU_DIR_RIGHT) {
+                while (D_8013FCB8 != 0) {
+                    func_80138EE4();
+                }
+                if (D_8013FCB4 != 0) {
+                    func_80138B1C(0);
+                }
+            }
+        }
+        mRepeatTicks = 0;
+        if (D_8013FCB4 == 4) {
+            func_8013BBE4(pressed);
+        } else {
+            if (BitTest(&pressed, 11)) {
+                func_8013EE78();
+            }
+            if (dir == 0) {
+                if (BitTest(&pressed, 4)) {
+                    if (D_8013FCB4 == 12 && D_8013F7C4 > 0) {
+                        func_8013A4F8(D_8013F7C4 - 1);
+                    } else {
+                        func_80138EE4();
+                    }
+                }
+                if (D_8013FD08[D_8013FCB4] != NULL && BitTest(&pressed, 6)) {
+                    buttons |= 0x800;
+                    D_8013FD08[D_8013FCB4]();
+                }
+            }
+        }
+    }
+
+    if (buttons & 0xF000) {
+        if (mRepeatButtons != 0 || D_8013FE10 == dir) {
+            mRepeatButtons = buttons;
+            mRepeatTicks++;
+            if (mRepeatTicks > mRepeatDelay) {
+                mRepeatTicks = 0;
+                mRepeatButtons = buttons & 0xFFF;
+                mRepeatCount++;
+            }
+            if (mRepeatCount >= 5) {
+                if (mRepeatDelay != 0) {
+                    mRepeatCount = 0;
+                    mRepeatDelay--;
+                } else {
+                    D_8013FE1C = (mRepeatCount >> 4) + 2;
+                }
+            }
+        } else {
+            mRepeatButtons = buttons;
+            mRepeatTicks = 0;
+            mRepeatCount = 0;
+            D_8013FE1C = 1;
+            D_8013FE10 = dir;
+            if ((dir == MENU_DIR_LEFT || dir == MENU_DIR_RIGHT || D_8013FCB4 == 13) && D_8013FCB4 != 6 &&
+                D_8013FCB4 != 4) {
+                mRepeatDelay = 1;
+            } else {
+                mRepeatDelay = 6;
+            }
+        }
+    } else {
+        mRepeatButtons = buttons;
+        D_8013FE10 = 0;
+        mRepeatCount = 0;
+    }
+    if (dir == MENU_DIR_UP || dir == MENU_DIR_DOWN) {
+        SysPlaySong(5, 2, 0, 0);
+    }
+}
 
 void func_8013CD40(u32 tag) {
     char name[24];

@@ -67,9 +67,7 @@ typedef struct JoyStickState {
     /* 0x20 */ s32 len;
     /* 0x24 */ s32 srcX; /* JoyDirInfo index the x part came from, -1: none */
     /* 0x28 */ s32 srcZ;
-    /* 0x2C */ u8 unk2C[8];
-    /* 0x34 */ s32 counter; /* aim stick (sticks[3]): hold counter */
-    /* 0x38 */ u8 unk38[4];
+    /* 0x2C */ VECTOR32 turn; /* camera stick (sticks[1]): camera turn; aim stick (sticks[3]): turn.vz counts the hold */
 } JoyStickState;
 
 /* Joystick controller state (the one instance is D_801056C8). */
@@ -98,8 +96,11 @@ typedef struct JoyController {
     /* 0x138 */ s32 unk138;
     /* 0x13C */ s32 unk13C;
     /* 0x140 */ u8 dirActive;
-    /* 0x141 */ u8 pad141[0xB];
+    /* 0x141 */ u8 pad141[3];
+    /* 0x144 */ s32 sniperZoom; /* sniper zoom step, -0x2D..0x2D */
+    /* 0x148 */ s32 panTicks;   /* first-person side pan, signed by direction, up to 20 */
     /* 0x14C */ s32 runTicks; /* 10 after a type 7 move, then counts down */
+    /* 0x150 */ u8 invertY;
 } JoyController;
 
 typedef struct JoyDirDefault {
@@ -811,10 +812,15 @@ typedef struct JoyCamera {
     /* 0x94C */ s32 angleFull; /* 0: only angle.vx is meaningful */
     /* 0x950 */ u8 unk950[0x34];
     /* 0x984 */ VECTOR32 angle;
-    /* 0x994 */ u8 unk994[0x388];
-    /* 0xD1C */ VECTOR32 unkD1C;
-    /* 0xD2C */ u8 unkD2C[0x14];
-    /* 0xD40 */ u8 unkD40;
+    /* 0x994 */ u8 unk994[0x240];
+    /* 0xBD4 */ s32 zoomFull; /* 0: only zoom.vx is meaningful */
+    /* 0xBD8 */ u8 unkBD8[4];
+    /* 0xBDC */ VECTOR32 zoom;
+    /* 0xBEC */ u8 unkBEC[0x130];
+    /* 0xD1C */ VECTOR32 move;      /* request for CameraAccessMoveInfo */
+    /* 0xD2C */ u8 unkD2C[4];
+    /* 0xD30 */ VECTOR32 moveFlags; /* which parts of move apply */
+    /* 0xD40 */ u8 moveCommit;
 } JoyCamera;
 
 extern JoyCamera *gCamera;
@@ -1131,7 +1137,328 @@ s32 func_80036D24(JoyController *joy) {
     return 1;
 }
 
+extern s32 gSniperMode;
+JoyCamera *SniperGetCam(void);
+void CameraAccessFrameInfo(void *camera, s32 op, s32 which, s32 arg3);
+void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom);
+void LOSGetGobjLOSTestPoint(Gobj *gobj, VECTOR32 *out);
+void LOSOverride(VECTOR32 *pos);
+
+/* A camera vector record that may hold only its x part. */
+#define JOY_CAM_ZOOM(cam, out)        \
+    if ((cam)->zoomFull == 0) {       \
+        (out).vx = (cam)->zoom.vx;    \
+    } else {                          \
+        (out) = (cam)->zoom;          \
+    }
+
+/* Angle of the look stick; behind the player when aiming. */
+#define JOY_LOOK_ANGLE(look) ratan2((look)->unit.vx, (look)->unit.vz)
+#define JOY_LOOK_ANGLE_BACK(look) (-ratan2((look)->unit.vx, -(look)->unit.vz))
+
+/* Turning towards the look stick (dead zone 0x11C, full at 0x11C + 2960). */
+#define JOY_SCALE_DEADZONE(speed, angle) ((JOY_FIX_TO_INT((speed) * 4) * (JOY_ABS(angle) - 0x11C)) / 2960 << 12)
+#define JOY_SCALE(speed, angle) ((JOY_FIX_TO_INT((speed) * 4) * JOY_ABS(angle)) / 4096 << 12)
+
+#ifdef NON_MATCHING
+/* draft: structure follows the asm, but speed lives in a stack slot (sp74) and the u8 flags spill; stack layout and regalloc differ */
+/* Look stick to camera: sniper zoom, side pans, and the camera turn rate. */
+s32 func_800374E8(JoyController *joy) {
+    VECTOR32 cam;
+    VECTOR32 flags;
+    u8 *pad;
+    VECTOR32 vec;
+    JoyStickState *move;
+    JoyStickState *look;
+    Gobj *gobj;
+    u8 still;
+    u8 fpsCam;
+    u8 behindCam;
+    s32 maxSpeed;
+    s32 speed;
+    s32 i;
+
+    still = 0;
+    move = &joy->sticks[1];
+    gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;
+    flags = D_800114C8;
+    look = &joy->sticks[2];
+    if ((gobj->cas->flags & 2) || JOY_TURNMOVE(gobj)->type == 5 || JOY_TURNMOVE(gobj)->type == 8 ||
+        JOY_TURNMOVE(gobj)->type == 9) {
+        still = 1;
+    }
+    fpsCam = 0;
+    behindCam = 0;
+    if (GameCameraCheckMode(0xE) || GameCameraCheckMode(0xF) || GameCameraCheckMode(0x10) ||
+        GameCameraCheckMode(0x11)) {
+        fpsCam = 1;
+        behindCam = 0;
+    }
+    if (GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) || GameCameraCheckMode(3) ||
+        GameCameraCheckMode(8)) {
+        behindCam = 1;
+    }
+
+    if (gSniperMode == 2 || gSniperMode == 3) {
+        VECTOR32 zoom;
+
+        EGSDeviceControllerRead(&pad, 0);
+        if (JoyBitMask(pad + 4, 4)) {
+            if (joy->sniperZoom > 0) {
+                joy->sniperZoom = 0;
+            } else {
+                i = joy->sniperZoom - 0x2D;
+                if (i < -0x2D) {
+                    i = -0x2D;
+                }
+                joy->sniperZoom = i;
+            }
+        } else if (JoyBitMask(pad + 4, 5) && joy->sniperZoom >= 0) {
+            i = joy->sniperZoom + 0x2D;
+            if (i > 0x2D) {
+                i = 0x2D;
+            }
+            joy->sniperZoom = i;
+        } else {
+            joy->sniperZoom = 0;
+        }
+        SniperGetCam()->move.vx = joy->sniperZoom;
+        SniperGetCam()->moveCommit = 1;
+        CameraAccessMoveInfo(SniperGetCam(), 3, 8, 1);
+        CameraAccessFrameInfo(gCamera, 0, 0, 4);
+        vec = gCamera->move;
+        JOY_CAM_ZOOM(SniperGetCam(), zoom);
+        InterfaceSetSniperDoodads(vec.vx, vec.vy, zoom.vx);
+    } else {
+        joy->sniperZoom = 0;
+    }
+
+    if (GameCameraCheckMode(0xE) || GameCameraCheckMode(0xF) || GameCameraCheckMode(0x10)) {
+        VECTOR32 los;
+        VECTOR32 eye;
+        VECTOR32 *override;
+
+        vec = D_800114C8;
+        i = JOY_ABS(joy->panTicks);
+        override = NULL;
+        if (i < 1 || i > 19) {
+            LOSGetGobjLOSTestPoint(gobj, &los);
+            eye.vx = gCamera->display->frame->pos.vx;
+            eye.vy = gCamera->display->frame->pos.vy;
+            override = &los;
+            eye.vz = gCamera->display->frame->pos.vz;
+            eye.vy = -eye.vy;
+            los.vx = eye.vx;
+            los.vz = eye.vz;
+        }
+        LOSOverride(override);
+        if (joy->unk030 == 1) {
+            vec.vx = 0x80;
+            if (joy->panTicks <= 0) {
+                joy->panTicks = 1;
+            } else if (joy->panTicks < 20) {
+                joy->panTicks++;
+            }
+        } else if (joy->unk030 == 2) {
+            vec.vx = -0x80;
+            if (joy->panTicks >= 0) {
+                joy->panTicks = -1;
+            } else if (joy->panTicks >= -19) {
+                joy->panTicks--;
+            }
+        } else {
+            vec.vx = 0;
+            joy->panTicks = 0;
+        }
+        flags.vx = 1;
+        flags.vy = 0;
+        flags.vz = 0;
+        gCamera->move = vec;
+        gCamera->moveFlags = flags;
+        gCamera->moveCommit = 0;
+        CameraAccessMoveInfo(gCamera, 1, 1, 1);
+    } else {
+        joy->panTicks = 0;
+        LOSOverride(NULL);
+    }
+
+    if (gSniperMode >= 2) {
+        maxSpeed = 0x2D000;
+        speed = maxSpeed;
+    } else {
+        if (!fpsCam && behindCam) {
+            maxSpeed = 0x4C000;
+            if (gobj->cas->active != 10 && !(gobj->cas->flags & 0x8000) && gobj->cas->active != 12 &&
+                gobj->cas->active != 7 && !(gobj->cas->flags & 0x2000) && gobj->cas->active != 4 &&
+                !(gobj->cas->flags & 0x1000)) {
+                maxSpeed = 0x72000;
+            }
+        } else {
+            maxSpeed = 0x4C000;
+        }
+        speed = maxSpeed;
+        if (JOY_VEC_NONZERO(look->unit)) {
+            if (gobj->cas->active == 10 || (gobj->cas->flags & 0x8000) || gobj->cas->active == 12 ||
+                gobj->cas->active == 7 || (gobj->cas->flags & 0x2000)) {
+                if (JOY_ABS(look->unit.vz) >= 0xA4A) {
+                    speed = 0;
+                }
+            } else if (gobj->cas->active == 4 || (gobj->cas->flags & 0x1000)) {
+                speed = 0;
+            } else if (joy->unk030 != 0) {
+                i = JOY_FIX_TO_INT(speed * 4);
+                if (JOY_ABS(JOY_LOOK_ANGLE(look)) > 0x400) {
+                    speed = (i / 4) << 12;
+                } else {
+                    speed = (i * JOY_ABS(JOY_LOOK_ANGLE(look))) / 4096 << 12;
+                }
+            } else if (!still) {
+                if (look->srcX == 1 || look->srcZ == 1 || look->srcX == 0 || look->srcZ == 0) {
+                    if (joy->aimState >= 2) {
+                        if (JOY_ABS(JOY_LOOK_ANGLE_BACK(look)) - 0x11C <= 0) {
+                            speed = 0;
+                        } else {
+                            speed = JOY_SCALE_DEADZONE(speed, JOY_LOOK_ANGLE_BACK(look));
+                        }
+                    } else if (JOY_ABS(JOY_LOOK_ANGLE(look)) - 0x11C <= 0) {
+                        speed = 0;
+                    } else {
+                        speed = JOY_SCALE_DEADZONE(speed, JOY_LOOK_ANGLE(look));
+                    }
+                } else if (joy->aimState >= 2) {
+                    speed = JOY_SCALE(speed, JOY_LOOK_ANGLE_BACK(look));
+                } else {
+                    speed = JOY_SCALE(speed, JOY_LOOK_ANGLE(look));
+                }
+            }
+        }
+    }
+
+    speed = EGSMathFIXMul(speed, fpsCam ? move->len : look->len);
+    if ((look->srcX == 1 || look->srcZ == 1 || look->srcX == 0 || look->srcZ == 0) && !still && behindCam) {
+        move->turn.vz = 0;
+        if (move->dir.vx > 0) {
+            move->turn.vx = speed;
+        } else if (move->dir.vx < 0) {
+            move->turn.vx = -speed;
+        } else {
+            move->turn.vx = 0;
+        }
+    } else {
+        VECTOR32 rate;
+        VECTOR32 cur;
+        VECTOR32 side;
+        s32 along;
+        s32 across;
+
+        if (fpsCam) {
+            if (gSniperMode >= 2) {
+                rate.vy = 0x126;
+                rate.vz = 0x1000;
+                JOY_CAM_ZOOM(SniperGetCam(), rate);
+                rate.vy = rate.vy * rate.vx / 827;
+            } else {
+                rate.vy = 0x80;
+                rate.vz = 0x266;
+            }
+        } else {
+            rate.vy = 0x199;
+            rate.vz = 0x1000;
+        }
+        if (rate.vy > 0x1000) {
+            rate.vy = 0x1000;
+        }
+        if (rate.vz > 0x1000) {
+            rate.vz = 0x1000;
+        }
+        rate.vy = EGSMathFIXMul(rate.vy, speed);
+        rate.vz = EGSMathFIXMul(rate.vz, maxSpeed);
+        if (speed != 0 && rate.vy < 0x3D) {
+            rate.vy = 0x3D;
+        }
+        if (maxSpeed != 0 && rate.vz < 0x3D) {
+            rate.vz = 0x3D;
+        }
+        cur = move->turn;
+        vec = move->unit;
+        if (vec.vx == 0 && vec.vy == 0 && vec.vz == 0 && JOY_VEC_NONZERO(cur)) {
+            GTEMath_VectorNormal(&cur, &vec);
+            vec.vx = -vec.vx;
+            vec.vz = -vec.vz;
+            vec.vy = -vec.vy;
+        }
+        side.vy = 0;
+        side.vx = vec.vz;
+        side.vz = -vec.vx;
+        JoyDot(&cur, &vec, &along);
+        JoyDot(&cur, &side, &across);
+        if (along > speed) {
+            along = along - rate.vz < speed ? speed : along - rate.vz;
+        } else if (along >= 0) {
+            along = along + rate.vy > speed ? speed : along + rate.vy;
+        } else {
+            along = along + rate.vz > 0 ? 0 : along + rate.vz;
+        }
+        if (across > 0) {
+            across = across - rate.vy < 0 ? 0 : across - rate.vy;
+        } else if (across < 0) {
+            across = across + rate.vy > 0 ? 0 : across + rate.vy;
+        }
+        vec.vx = EGSMathFIXMul(vec.vx, along);
+        vec.vy = EGSMathFIXMul(vec.vy, along);
+        vec.vz = EGSMathFIXMul(vec.vz, along);
+        side.vx = EGSMathFIXMul(side.vx, across);
+        side.vy = EGSMathFIXMul(side.vy, across);
+        side.vz = EGSMathFIXMul(side.vz, across);
+        move->turn.vx = vec.vx + side.vx;
+        move->turn.vy = vec.vy + side.vy;
+        move->turn.vz = vec.vz + side.vz;
+    }
+
+    cam.vx = move->turn.vz;
+    cam.vz = 0;
+    cam.vy = move->turn.vx;
+    if (JOY_ABS(cam.vx) > 0x1000) {
+        cam.vx = JOY_FIX_TO_INT(cam.vx);
+    } else {
+        cam.vx = cam.vx > 0 ? 1 : cam.vx >> 31;
+    }
+    if (JOY_ABS(cam.vy) > 0x1000) {
+        cam.vy = JOY_FIX_TO_INT(cam.vy);
+    } else {
+        cam.vy = cam.vy > 0 ? 1 : cam.vy >> 31;
+    }
+    if (joy->invertY == 0) {
+        cam.vx = -cam.vx;
+    }
+    if (joy->aimState == 3) {
+        cam.vy = 0x800;
+    }
+    flags.vx = 1;
+    flags.vy = 1;
+    flags.vz = 0;
+    gCamera->move = cam;
+    gCamera->moveFlags = flags;
+    gCamera->moveCommit = 1;
+    CameraAccessMoveInfo(gCamera, 3, 6, 1);
+    if (GameCameraCheckMode(0) || GameCameraCheckMode(1) || GameCameraCheckMode(2) || GameCameraCheckMode(3) ||
+        GameCameraCheckMode(8)) {
+        VECTOR32 none;
+
+        none = D_800114C8;
+        flags.vx = 1;
+        flags.vy = 0;
+        flags.vz = 0;
+        gCamera->move = none;
+        gCamera->moveFlags = flags;
+        gCamera->moveCommit = 0;
+        CameraAccessMoveInfo(gCamera, 1, 6, 2);
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/joystick", func_800374E8);
+#endif
 
 
 /* Joystick-side view of MovementInfo.charMove (movement.c's CharacterMovement). */
@@ -1176,11 +1503,11 @@ void func_80038720(JoyController *joy) {
         if (state < 2 ? lowY < v.vz : highY < v.vz) {
             next = 0;
         } else if (state == 1) {
-            aim->counter = -1;
+            aim->turn.vz = -1;
             next = 2;
         } else if (state == 2) {
-            if ((double)aim->counter > -2.0) {
-                aim->counter = aim->counter - 1;
+            if ((double)aim->turn.vz > -2.0) {
+                aim->turn.vz = aim->turn.vz - 1;
                 next = 2;
             } else {
                 next = 4;
@@ -1302,15 +1629,15 @@ done:
     if (joy->aimState >= 2 && (fpsCam || GameCameraCheckMode(9))) {
         GameCameraCurrentModeGetDefaultDistance(&dist);
         dist = dist >= 0 ? dist >> 1 : -(-dist >> 1);
-        gCamera->unkD1C.vx = dist;
-        gCamera->unkD40 = 0;
+        gCamera->move.vx = dist;
+        gCamera->moveCommit = 0;
         CameraAccessMoveInfo(gCamera, 1, 5, 1);
     }
     GameCameraSetAction(action);
 }
 
 s32 func_80036D24(JoyController *joy);
-void func_800374E8(JoyController *joy);
+s32 func_800374E8(JoyController *joy);
 void func_800389E0(JoyController *joy);
 void func_80038720(JoyController *joy);
 
@@ -1498,7 +1825,7 @@ s32 func_80039B24(JoyController *joy) {
             break;
         }
     }
-    InterfaceWeaponSelect((i < JOY_MAPPED_BUTTONS && JoyTestBit(pad + 4, i)) ? !JoyTestBit(pad + 4, 0xB) : 0, dir);
+    InterfaceWeaponSelect((i < JOY_MAPPED_BUTTONS && JoyBitMask(pad + 4, i)) ? !JoyBitMask(pad + 4, 0xB) : 0, dir);
     return 1;
 }
 #else
