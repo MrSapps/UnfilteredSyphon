@@ -47,6 +47,6 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, baseext]
       - [0x9B0, c, baseext]
-      - [0x3A24, data, data]
-      - { start: 0x42F8, type: bss, vram: 0x801452D8, name: bss }
+      - [0x3A24, .data, baseext]
+      - { start: 0x42F8, type: .bss, vram: 0x801452D8, name: baseext }
   - [0x42F8]

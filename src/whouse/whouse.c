@@ -8,24 +8,72 @@
 #define WHOUSE_TYPE_SWITCH_B 0x7B     /* electric fence power switch */
 #define WHOUSE_TYPE_FENCE 0x60        /* electric fence segment */
 
-/* whouse.ovl statics, still defined in the overlay's asm .data/.bss */
-extern void *D_801426FC;      /* "sniffers remaining" text */
-extern void *D_80142700;      /* "N more sniffers" format */
-extern void *D_80142704;      /* name/use string for the special NPC */
-extern u8 D_80142708[];       /* texture animation tables */
-extern u8 D_8014270C[];
-extern u8 D_8014272C[];
-extern u8 D_80142730[];
-extern u8 D_80142750[];       /* inwhouse objectives/timers save info */
-extern u8 D_80142778[];       /* whouse objectives/timers save info */
-extern void **D_8014277C;     /* -> objective message table */
-extern char D_801427A0[];     /* objective text buffer (0x40) */
-extern s32 D_801427E0;        /* only reset here */
-extern s16 D_801427E4;        /* teleport target for the meeting movie */
-extern s16 D_801427E8;        /* number of sniffers */
-extern s16 D_801427EC;        /* sniffers used */
-extern u8 D_801427F0;         /* special NPC hit already reported */
-extern u8 D_80140FE4[];       /* objective format (rodata) */
+/*
+ * The bss items sit 4 bytes apart, as aspsx 2.56's .lcomm rule lays them out
+ * (docs/data_migration.md).  aspsx 2.77 and maspsx pack them by size instead, so
+ * both builds get explicit padding.
+ */
+#define BSS_PAD2(n) static s16 n;
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0}; /* also the empty objective format */
+
+static char *D_801426AC[2] = {
+    "INCOMING FROM LIAN:\n\nGabe, we don't have much time.  Rhoemer's gone to war, and there's no "
+    "telling how long Phagan's guards can hold his men back before he finds the backup sequencing "
+    "computers in the missile silo.  The entrance to the silo is in Warehouse 76.  \n",
+    "You're also going to have to find Phagan's head of European operations.  He's got the codes "
+    "you'll need when you reach the DNA computers in the silo.  And there are several viral carriers "
+    "in crates down there.  Find and tag them for later pickup and disposal by CBDC.",
+};
+Briefing whouseBriefings = {
+    {"Almaty, Kazakhstan", "Warehouse District", "09:07 19:00\n"}, 2, D_801426AC,
+};
+static char *D_801426C8[1] = {
+    "INCOMING FROM LIAN:\n\nYou've got to hurry, Gabe.  Warehouse 76 is burning to the ground.  The "
+    "whole place could collapse at any minute.  Aramov says you should be able to find a freight "
+    "elevator that feeds directly into the mining tunnels surrounding the silo.  Be careful.",
+};
+Briefing inwhouseBriefings = {
+    {"Almaty, Kazakhstan", "Warehouse 76", "09:07 19:45\n"}, 1, D_801426C8,
+};
+static char *D_801426E0[5] = {
+    "Find and interrogate Erikson",
+    "Turn off power to electric fences",
+    (char *)D_80140FE4, /* replaced by the sniffer count text (D_801427A0) */
+    "Find warehouse 76",
+    "Find freight elevator",
+};
+static char *D_801426F4[1] = {"Do not kill Erikson before you've gotten the computer codes"};
+static char *D_801426F8[1] = {"Get out before the building collapses in 15 minutes"};
+static char *D_801426FC = "Locate and tag %d%s viral cache%s"; /* "sniffers remaining" text */
+static char *D_80142700 = "Viral carrier tagged. %d remaining"; /* "N more sniffers" format */
+static char *D_80142704 = "Erikson"; /* name/use string for the special NPC */
+/* texture animation tables */
+static s32 D_80142708[1] = {0x010002C0};
+static s32 D_8014270C[8] = {
+    0x010002D0, 0x010002E0, 0x010002F0, 0x014002C0, 0x014002D0, 0x014002E0, 0x014002F0, 0x018002C0,
+};
+static s32 D_8014272C[1] = {0x000002C0};
+static s32 D_80142730[8] = {
+    0x000002D0, 0x000002E0, 0x000002F0, 0x004002D0, 0x004002E0, 0x004002F0, 0x008002D0, 0x008002E0,
+};
+static LevelObjectives D_80142750 = {5, D_801426E0, 1, D_801426F8}; /* inwhouse objectives/timers */
+static LevelObjectives D_80142778 = {5, D_801426E0, 1, D_801426F4}; /* whouse objectives/timers */
+
+static char D_801427A0[0x40]; /* objective text buffer */
+static s32 D_801427E0;        /* only reset here */
+static s16 D_801427E4; BSS_PAD2(D_801427E4_pad) /* teleport target for the meeting movie */
+static s16 D_801427E8; BSS_PAD2(D_801427E8_pad) /* number of sniffers */
+static s16 D_801427EC; BSS_PAD2(D_801427EC_pad) /* sniffers used */
+static u8 D_801427F0; BSS_PAD3(D_801427F0_pad)  /* special NPC hit already reported */
 
 /* main.exe */
 extern u8 gElectricFenceFlag;
@@ -85,7 +133,7 @@ void iInwhouseInit(s32 mode) {
     InterfaceStartCountdownAfterGameCam(900, 0, InwhouseTimerEndCallback);
     gLevelAlerted = 1;
     npcSetLevelAlert();
-    SaveObjectivesNTimersReinit(D_80142750, 0);
+    SaveObjectivesNTimersReinit(&D_80142750, 0);
     LevelObjectiveAdd(4, -1);
     if (gObjectives != NULL) {
         count = gObjectives->count;
@@ -105,7 +153,7 @@ void iInwhouseInit(s32 mode) {
 }
 
 static void func_80141760(void) {
-    StringObjectiveObjectsRemaining2(D_801427A0, D_801426FC, gRemainingMsg, D_80140FE4, D_801427EC, D_801427E8);
+    StringObjectiveObjectsRemaining2(D_801427A0, D_801426FC, gRemainingMsg, (char *)D_80140FE4, D_801427EC, D_801427E8);
 }
 
 static void func_801417B4(s16 id, s16 by) {
@@ -191,8 +239,6 @@ static s32 func_80141AEC(s16 id) {
     return 3;
 }
 
-INCLUDE_RODATA("asm/whouse/nonmatchings/whouse", D_80140FE4);
-
 static void func_80141C44(s16 id) {
     s32 ref;
 
@@ -246,8 +292,8 @@ void iWhouseInit(void) {
     D_801427F0 = 0;
     gLevelAlerted = 1;
     npcSetLevelAlert();
-    D_8014277C[2] = D_801427A0;
-    SaveObjectivesNTimersReinit(D_80142778, 0);
+    D_80142778.primaryTexts[2] = D_801427A0;
+    SaveObjectivesNTimersReinit(&D_80142778, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(0, -1);
         LevelObjectiveAdd(1, -1);

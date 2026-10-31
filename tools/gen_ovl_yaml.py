@@ -57,6 +57,20 @@ C_OVERLAYS = {"levspec", "baseext", "cave", "chopper", "subway", "subway2", "par
               "museum", "whouse", "title", "init", "menu", "movie"}
 # Where the game TU ends and linked Psy-Q library code (kept as asm) begins.
 LIB_START = {"movie": 0x80138B70}  # DecDCTReset (libpress), then libcard/libmcrd
+# Overlays whose C file defines its own .data/.bss (docs/data_migration.md).
+DATA_FROM_C = {"subway2", "whouse", "levspec", "cave", "baseext", "park", "museum", "subway",
+               "chopper", "init", "title", "park2", "movie", "menu"}
+# Splat blobs that follow the C object's .rodata/.data/.bss: (section, vram) of each piece
+# (library data, or the commons psylink lays out after the TU's own .bss).
+DATA_PIECES = {
+    "chopper": [("bss", 0x801457A0)],   # chopperPos (common)
+    "title": [("bss", 0x80145080)],
+    "park2": [("bss", 0x801449A0)],
+    # libpress LIBPRESS/BUILD/DecDCTvlc2, libmcrd LIBMCRD/USERFUNC/BIOS, libcard; then
+    # the gHuffmanTable common
+    "movie": [("rodata", 0x801377F0), ("data", 0x8013BBD4), ("bss", 0x8013CBBC)],
+    "menu": [("bss", 0x8013FEE8)],  # the commons mSfxSampleCanBePlayedAgain .. mMap
+}
 
 
 def main():
@@ -87,6 +101,9 @@ def main():
                 elif k == "rdata":
                     if name in C_OVERLAYS:
                         subs.append(f"      - [0x{rom(s.start):X}, .rodata, {name}]")
+                        for sec, a in DATA_PIECES.get(name, []):
+                            if sec == "rodata":
+                                subs.append(f"      - [0x{rom(a):X}, rodata, rdata_{rom(a):X}]")
                     else:
                         subs.append(f"      - [0x{rom(s.start):X}, rodata, rdata]")
                 elif k == "text":
@@ -97,7 +114,13 @@ def main():
                     else:
                         subs.append(f"      - [0x{rom(s.start):X}, asm, text]")
                 elif k == "data":
-                    subs.append(f"      - [0x{rom(s.start):X}, data, data]")
+                    if name in DATA_FROM_C:
+                        subs.append(f"      - [0x{rom(s.start):X}, .data, {name}]")
+                    else:
+                        subs.append(f"      - [0x{rom(s.start):X}, data, data]")
+                    for sec, a in DATA_PIECES.get(name, []):
+                        if sec == "data":
+                            subs.append(f"      - [0x{rom(a):X}, data, data_{rom(a):X}]")
                 elif k == "bss":
                     bss = s
             end = rom(bss.start) if bss else len(data)
@@ -109,7 +132,14 @@ def main():
                 lines.append(f"    bss_size: 0x{bss.end - bss.start:X}")
             lines.append("    subsegments:")
             lines += subs
-            if bss:
+            if bss and name in DATA_FROM_C:
+                lines.append(
+                    f"      - {{ start: 0x{end:X}, type: .bss, vram: 0x{bss.start:08X}, name: {name} }}"
+                )
+                for sec, a in DATA_PIECES.get(name, []):
+                    if sec == "bss":
+                        lines.append(f"      - {{ type: bss, vram: 0x{a:08X}, name: bss_{a:08X} }}")
+            elif bss:
                 lines.append(
                     f"      - {{ start: 0x{end:X}, type: bss, vram: 0x{bss.start:08X}, name: bss }}"
                 )

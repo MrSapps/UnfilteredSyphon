@@ -1,0 +1,6 @@
+mFileBuffer = 0x80145098;
+titleBss = 0x80144920; // size:0x760
+D_80144884 = 0x80144884; // size:0x54
+D_801448DC = 0x801448DC; // size:0x18
+mTitleSelection = 0x80145080; // size:0x18
+mTitleScreenSprite = 0x80145330; // size:0x58

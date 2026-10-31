@@ -13,28 +13,105 @@
 #define MUSEUM_TYPE_56 0x56
 #define MUSEUM_TYPE_PLANE_ANCHOR 0x44
 
-/* museum.ovl statics, still defined in the overlay's asm .data/.bss */
-extern u8 D_80143E18[]; /* texture animation sources/targets */
-extern u8 D_80143E1C[];
-extern u8 D_80143E20[];
-extern u8 D_80143E24[];
-extern u8 D_80143E28[];
-extern u8 D_80143E2C[];
-extern u8 D_80143E30[];
-extern u8 D_80143E54[];
-extern u8 D_80143E78[];
-extern u8 D_80143E9C[];
-extern u8 D_80143EC0[];
-extern u8 D_80143EE4[];
-extern void *D_80143E10; /* "Benton" */
-extern void *D_80143E14; /* "Gate Control Panel" */
-extern u8 D_80143F08[];  /* museum saved objective state */
-extern u8 D_80143F30[];  /* museum2 saved objective state */
-extern s32 D_80143F58[]; /* XA tracks of the Aramov taunts */
-extern u32 D_80143F80;   /* next taunt */
-extern s16 D_8014405C;   /* object id of the path mover */
-extern u8 D_80144060;    /* lock code hint played */
-extern u8 D_80144064;    /* hostage shot */
+/*
+ * The bss items sit 4 bytes apart, as aspsx 2.56's .lcomm rule lays them out
+ * (docs/data_migration.md).  aspsx 2.77 and maspsx pack them by size instead, so
+ * both builds get explicit padding.
+ */
+#define BSS_PAD2(n) static s16 n;
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+
+static char *D_80143DBC[2] = {
+    "AGENCY DIRECTIVE:\n\nYour mission is to shadow industrialist Jonathan Phagan, the founder and "
+    "president of Pharcom Industries.  We know that he's meeting tonight with Rhoemer, and that he "
+    "was involved with the incident in DC.\n",
+    "You must follow him unnoticed and record the meeting.  If any guard spots you, the mission "
+    "will be over.  Kill if you have to, but kill silently.  After observing the meeting, capture "
+    "Phagan alive for further questioning.",
+};
+Briefing museumBriefings = {
+    {"New York City", "PHARCOM Exposition Center", "08:25 19:00\n"}, 2, D_80143DBC,
+};
+static char *D_80143DD8[4] = {
+    "Shadow Phagan to secret meeting",
+    "Find security cardkeys",
+    "Capture Phagan alive",
+    "Capture Aramov and Phagan alive",
+};
+static char *D_80143DE8[1] = {
+    "Do not allow yourself to be spotted until you reach the meeting.  Do not shoot Phagan.",
+};
+static char *D_80143DEC[2] = {
+    "INCOMING FROM LIAN:\n\nGabe, Aramov has Phagan in the dinosaur exhibit.  She's going to kill "
+    "him after she gets the information she's looking for.  She wants to know about something "
+    "called Syphon Filter.  \n",
+    "Our orders are to capture Phagan alive, so you've got to stop her.  Plus, Markinson just "
+    "radioed - you're not to kill Aramov either.  You've got to bring them both in alive.  Good luck.",
+};
+Briefing museum2Briefings = {
+    {"New York City", "PHARCOM Exposition Center", "08:25 19:15\n"}, 2, D_80143DEC,
+};
+static char *D_80143E08[2] = {"Do not allow Phagan to die", "Do not kill Aramov"};
+static char *D_80143E10 = "Benton";
+static char *D_80143E14 = "Gate Control Panel";
+/* texture animation sources (VRAM x, y) */
+static s16 D_80143E18[2] = {0x1C0, 0x20};
+static s16 D_80143E1C[2] = {0x1C0, 0x40};
+static s16 D_80143E20[2] = {0x1C0, 0x60};
+static s16 D_80143E24[2] = {0x1C0, 0x80};
+static s16 D_80143E28[2] = {0x1C0, 0xA0};
+static s16 D_80143E2C[2] = {0x1C0, 0xC0};
+/* texture animation frames (VRAM x, y) */
+static s16 D_80143E30[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static s16 D_80143E54[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static s16 D_80143E78[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static s16 D_80143E9C[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static s16 D_80143EC0[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static s16 D_80143EE4[18] = {
+    0x1D0, 0x00, 0x1D0, 0x20, 0x1D0, 0x40, 0x1D0, 0x60, 0x1D0, 0x80,
+    0x1D0, 0xA0, 0x1D0, 0xC0, 0x1D0, 0xE0, 0x1E0, 0x00,
+};
+static LevelObjectives D_80143F08 = {4, D_80143DD8, 1, D_80143DE8}; /* museum saved objective state */
+static LevelObjectives D_80143F30 = {4, D_80143DD8, 2, D_80143E08}; /* museum2 saved objective state */
+/* XA tracks of the Aramov taunts */
+static s32 D_80143F58[10] = {0x122, 0x187, 0x123, 0x186, 0x188, 0x125, 0x18E, 0x18B, 0x120, 0x189};
+
+/*
+ * The 0xD8-byte target info sits 4-aligned right after the taunt counter, so the two
+ * are one object (a separate >8-byte .lcomm would be 16-aligned).  The counter is
+ * reached through its own label: as an array element or struct member cc1 would keep
+ * its address in a register.
+ */
+static u32 D_80143F80_s[0x37];
+extern u32 D_80143F80;                      /* next taunt (= D_80143F80_s[0]) */
+#define D_80143F84 ((u8 *)&D_80143F80_s[1]) /* target info */
+static s16 D_8014405C; BSS_PAD2(D_8014405C_pad) /* object id of the path mover */
+static u8 D_80144060; BSS_PAD3(D_80144060_pad)  /* lock code hint played */
+static u8 D_80144064; BSS_PAD3(D_80144064_pad)  /* hostage shot */
 
 extern void *gElevatorCallSwitchMsg;
 extern void *gAramovMsg;
@@ -115,7 +192,6 @@ static inline u8 PathIsStopped(PathState *path) {
 
 extern ActivationList *objActivationList;
 extern VECTOR32 gExploDir;
-extern u8 D_80143F84[]; /* target info (bss) */
 
 #define RT_PATH(rt) (*(PathState **)&(rt)->move)
 
@@ -279,8 +355,6 @@ static s32 func_80141BA8(s16 id) {
     return ret;
 }
 
-INCLUDE_RODATA("asm/museum/nonmatchings/museum", D_80140FE4);
-
 static void func_80141C20(s16 id) {
     if (!gMissionFailed) {
         gameObjectsInfo[gLevelSpecificNpcID].runtime->flags23 |= 2;
@@ -356,7 +430,7 @@ static void func_80141F94(void) {
 
     D_8014405C = -1;
     D_80144060 = 0;
-    SaveObjectivesNTimersReinit(D_80143F08, 0);
+    SaveObjectivesNTimersReinit(&D_80143F08, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(0, -1);
         if (gObjectives != NULL) {
@@ -626,7 +700,7 @@ void iMuseum2Init(void) {
     EGSDisplayQueueInterrupt(func_801416C4, 40, 0);
     EGSDisplayQueueInterrupt(func_80141704, 50, 0);
     D_80144064 = 0;
-    SaveObjectivesNTimersReinit(D_80143F30, 0);
+    SaveObjectivesNTimersReinit(&D_80143F30, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(1, -1);
         LevelObjectiveAdd(3, -1);
@@ -684,6 +758,10 @@ void iMuseum2Init(void) {
     }
     gDefaultLevelDmgFX = 11;
 }
+
+#ifndef _PSYQ
+__asm__(".set D_80143F80, D_80143F80_s\n");
+#endif /* FIXME: aspsx has no equate here; under _PSYQ psylink resolves D_80143F80 */
 
 #ifdef NON_MATCHING
 /* Only the prologue differs: cc1 schedules the $ra save after the id sign extension. */

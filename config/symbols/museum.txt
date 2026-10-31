@@ -3,3 +3,4 @@ PlaneFallSetup = 0x80143324; // type:func
 TGTMUSEUMObjDispatch = 0x8014365C; // type:func
 TGTMUSEUM2ObjDispatch = 0x80143B9C; // type:func
 museum2Briefings = 0x80143DF4;
+museumBriefings = 0x80143DC4;

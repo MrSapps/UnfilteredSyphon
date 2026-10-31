@@ -66,40 +66,102 @@ typedef struct CaveRuntime {
 #define FALLING_STATE(rt) ((rt)->flags1 & 7)
 #define FALLING_SET_STATE(rt, s) ((rt)->flags1 = ((rt)->flags1 & 0xF8) | (s))
 
-/* cave.ovl statics, still defined in the overlay's asm .data/.bss */
-extern void *D_80143C6C;   /* locked-door string (cave) */
-extern void *D_80143C70;   /* use string (default switch) */
-extern void *D_80143C74;   /* switch thrown status message */
-extern void *D_80143C78;   /* use string (types 0x1C/0x7A) */
-extern void *D_80143C7C;   /* use string (kind 1) */
-extern void *D_80143C80;   /* computer status message */
-extern void *D_80143C84;   /* locked-door string (silo) */
-extern void *D_80143C88;   /* use string (silo, kind 3) */
-extern void *D_80143C8C;   /* use string (silo, kind 1) */
-extern u8 D_80143C90[];    /* cave objectives/timers save info */
-extern u8 D_80143CB8[];    /* silo objectives/timers save info */
-extern void **D_80143CBC;  /* silo objective message table */
-extern u8 D_80143CE0[];    /* camera shake vectors */
-extern u8 D_80143CF0[];
-extern u8 D_80143D00[];
-extern u8 D_80143D10[];    /* missile launch camera shake vector */
-extern u8 D_80143D20[];    /* computer camera shake state */
-extern u8 D_80143D64[];    /* falling objects camera shake state */
-extern s16 D_80143DA8;     /* falling objects triggered */
-extern s16 D_80143DAC;     /* falling objects landed */
-extern u8 D_80143DB0;      /* explosives total */
-extern u8 D_80143DB4;      /* explosives set / computer uses */
-extern u8 D_80143DB8;      /* switch thrown */
-extern u8 D_80143DBC;      /* locked message played */
-extern s32 D_80143DC0;     /* height below which the missile exhaust kills the player */
-extern s16 D_80143DC8;     /* silo missile object */
-extern s16 D_80143DCC;     /* Rhoemer (boss fight movie / message target) */
-extern s16 D_80143DD0;     /* Rhoemer at the missile console */
-extern u8 D_80143DD4;      /* hit-the-device warning played */
-extern u8 D_80143DD8;      /* missile launched */
-extern u8 D_80143DDC;
-extern u8 D_80143DE0;      /* special NPC hit warning played */
-extern s16 museumBriefings; /* (misnamed .bss) game-cam script played at the special NPC */
+/*
+ * The bss items sit 4 bytes apart, as aspsx 2.56's .lcomm rule lays them out
+ * (docs/data_migration.md).  aspsx 2.77 and maspsx pack them by size instead, so
+ * both builds get explicit padding.
+ */
+#define BSS_PAD2(n) static s16 n;
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+
+static char *D_80143BF8[2] = {
+    "INCOMING FROM LIAN:\n\nGabe, you're almost there.  According to Aramov, there's a series of mining "
+    "tunnels you'll have to find your way through to reach the silo.\n",
+    "The whole site has become seismically unstable due to the explosions topside.  Watch out for "
+    "cave-ins, and hostiles.  Rhoemer's men have found an alternate route into the tunnels.  The place "
+    "should be crawling with them.",
+};
+Briefing caveBriefings = {
+    {"Almaty, Kazakhstan", "Abandoned Mine", "09:07 20:00\n"}, 2, D_80143BF8,
+};
+static char *D_80143C14[2] = {
+    "INCOMING FROM LIAN:\n\nYou've done it!  The entire power grid for the tunnels is off-line, so the "
+    "laser fields should be gone.  The silo is now running on emergency back up cells, so you'll still "
+    "be able to access the DNA computers when you get there.\n",
+    "You should have a clear line to the silo from there, if you can find a way out of that power room.  "
+    "And bear in mind, that explosion has likely made the entire site even more unstable.  Keep moving.",
+};
+Briefing cave2Briefings = {
+    {"Almaty, Kazakhstan", "Abandoned Mine", "09:07 20:15\n"}, 2, D_80143C14,
+};
+static char *D_80143C30[2] = {
+    "INCOMING FROM LIAN:\n\nThis is bad, very bad.  That Devyatka is primed to launch, and I don't think "
+    "we can reverse the countdown.  Our only hope is that you get the disarm codes directly off the hull "
+    "of the missile and enter them at a command computer.\n",
+    "If you make it, we can get the Syphon Filter DNA sequences, but if not, I think my being infected "
+    "is the least of our worries.  Hurry, Gabe.",
+};
+Briefing siloBriefings = {
+    {"Almaty, Kazakhstan", "Missile Silo", "09:07 20:30\n"}, 2, D_80143C30,
+};
+static char *D_80143C4C[5] = {
+    "Destroy power room",
+    "Find missile silo",
+    "Retrieve missile destruct codes",
+    "Access missile command computer",
+    ".", /* replaced by gEliminateRhoemerMsg in the silo */
+};
+static char *D_80143C60[3] = {
+    "Do not shoot at the missile",
+    "Destruct codes must be retrieved before the missile launches",
+    "Command computer must be accessed within 3 minutes after launch",
+};
+static char *D_80143C6C = "No Power";                   /* locked-door string (cave) */
+static char *D_80143C70 = "Power Relay";                /* use string (default switch) */
+static char *D_80143C74 = "Power rerouted to elevator"; /* switch thrown status message */
+static char *D_80143C78 = "Elevator Control Panel";     /* use string (types 0x1C/0x7A) */
+static char *D_80143C7C = "Control Panel";              /* use string (kind 1) */
+static char *D_80143C80 = "Safety Released";            /* computer status message */
+static char *D_80143C84 = "Need missile codes";         /* locked-door string (silo) */
+static char *D_80143C88 = "R-9 Devyatka Missile";       /* use string (silo, kind 3) */
+static char *D_80143C8C = "Command Computer";           /* use string (silo, kind 1) */
+static LevelObjectives D_80143C90 = {5, D_80143C4C};                /* cave objectives/timers save info */
+static LevelObjectives D_80143CB8 = {5, D_80143C4C, 3, D_80143C60}; /* silo objectives/timers save info */
+/* camera shake vectors */
+static VECTOR32 D_80143CE0 = {0, 1, 0, 0};
+static VECTOR32 D_80143CF0 = {1, 4, 1, 0};
+static VECTOR32 D_80143D00 = {2, 8, 2, 0};
+static VECTOR32 D_80143D10 = {9, 9, 9, 0}; /* missile launch camera shake vector */
+
+/* camera shake states: one .lcomm (a separate 0x44-byte one would be 16-aligned) */
+static struct {
+    u8 computer[0x44]; /* computer camera shake state */
+    u8 falling[0x44];  /* falling objects camera shake state */
+} D_80143D20;
+static s16 D_80143DA8; BSS_PAD2(D_80143DA8_pad) /* falling objects triggered */
+static s16 D_80143DAC; BSS_PAD2(D_80143DAC_pad) /* falling objects landed */
+static u8 D_80143DB0; BSS_PAD3(D_80143DB0_pad)  /* explosives total */
+static u8 D_80143DB4; BSS_PAD3(D_80143DB4_pad)  /* explosives set / computer uses */
+static u8 D_80143DB8; BSS_PAD3(D_80143DB8_pad)  /* switch thrown */
+static u8 D_80143DBC; BSS_PAD3(D_80143DBC_pad)  /* locked message played */
+static s32 D_80143DC0;                          /* height below which the missile exhaust kills the player */
+static s16 D_80143DC4; BSS_PAD2(D_80143DC4_pad) /* game-cam script played at the special NPC */
+static s16 D_80143DC8; BSS_PAD2(D_80143DC8_pad) /* silo missile object */
+static s16 D_80143DCC; BSS_PAD2(D_80143DCC_pad) /* Rhoemer (boss fight movie / message target) */
+static s16 D_80143DD0; BSS_PAD2(D_80143DD0_pad) /* Rhoemer at the missile console */
+static u8 D_80143DD4; BSS_PAD3(D_80143DD4_pad)  /* hit-the-device warning played */
+static u8 D_80143DD8; BSS_PAD3(D_80143DD8_pad)  /* missile launched */
+static u8 D_80143DDC; BSS_PAD3(D_80143DDC_pad)
+static u8 D_80143DE0; BSS_PAD3(D_80143DE0_pad)  /* special NPC hit warning played */
 
 /* main.exe */
 extern s32 gExeTick;
@@ -171,19 +233,19 @@ static void func_801417E8(CaveRuntime *rt) {
         D_80143DA8++;
         SysPostMessage(10, 4, first->id, next, 0, 0, 0, 0);
     }
-    GameCameraShakeStart(0, tick - gExeTick + D_80143DA8, 1, D_80143D00, 0, 0);
+    GameCameraShakeStart(0, tick - gExeTick + D_80143DA8, 1, &D_80143D00, 0, 0);
 }
 
 static s32 func_80141958(void) {
     switch (++D_80143DB4) {
     case 1:
         TextStatusMessage(D_80143C80, 0);
-        GameCameraShakeStart(D_80143D20, -1, 1, D_80143CE0, 0, 0);
+        GameCameraShakeStart(D_80143D20.computer, -1, 1, &D_80143CE0, 0, 0);
         SysPlaySong(0, 0x18, 0, 0);
         break;
     case 2:
         TextStatusMessage(D_80143C80, 0);
-        GameCameraShakeModifyMagnitude(D_80143D20, D_80143CF0);
+        GameCameraShakeModifyMagnitude(D_80143D20.computer, &D_80143CF0);
         break;
     case 3:
         LevelDoEOL(0);
@@ -267,7 +329,7 @@ void iCaveInit(void) {
     D_80143DAC = 0;
     D_80143DB8 = 0;
     D_80143DBC = 0;
-    SaveObjectivesNTimersReinit(D_80143C90, 0);
+    SaveObjectivesNTimersReinit(&D_80143C90, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(1, -1);
     }
@@ -307,7 +369,7 @@ static void *func_80141F24(s16 id, s16 kind) {
 void iCave2Init(void) {
     D_80143DA8 = 1;
     D_80143DAC = 0;
-    SaveObjectivesNTimersReinit(D_80143C90, 0);
+    SaveObjectivesNTimersReinit(&D_80143C90, 0);
     LevelObjectiveAdd(1, -1);
     LevelSetEOLCallback(func_80141EFC);
     SetUseStringCallback(func_80141F24);
@@ -336,7 +398,7 @@ static void func_80142004(void) {
             gameObjectsInfo[i].runtime->flags23 |= 2;
         }
     }
-    GameCameraShakeStart(0, 0x140, 1, D_80143D10, 0, 0);
+    GameCameraShakeStart(0, 0x140, 1, &D_80143D10, 0, 0);
 }
 
 static void func_8014217C(s32 unused) {
@@ -375,8 +437,6 @@ void SiloMissileStart(s16 id) {
     func_80142004();
     SysPostMessage(10, 4, id, id, 0, 0, 0, 0);
 }
-
-INCLUDE_RODATA("asm/cave/nonmatchings/cave", D_80140FE4);
 
 
 static const VECTOR32 D_801416E4 = { 0, 0x100, 0, 0 }; /* missile climb per tick */
@@ -477,7 +537,7 @@ static void func_801428E0(s16 id) {
 
     if (id == gLevelSpecificNpcID2 && !gDeviceDetonated) {
         gGameCamScriptEndCallback = func_801428B8;
-        SysPostMessage(0x12, SYS_MSG_IMMEDIATE, gPlayerOffset, museumBriefings, 0, 0, 0, 0);
+        SysPostMessage(0x12, SYS_MSG_IMMEDIATE, gPlayerOffset, D_80143DC4, 0, 0, 0, 0);
         return;
     }
     if (id != GOBJ_ID_666 && gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type == 0x6C) {
@@ -607,8 +667,8 @@ void iSiloInit(void) {
     D_80143DC8 = -1;
     D_80143DD4 = 0;
     D_80143DCC = -1;
-    museumBriefings = -1;
-    SaveObjectivesNTimersReinit(D_80143CB8, (s32)&timer);
+    D_80143DC4 = -1;
+    SaveObjectivesNTimersReinit(&D_80143CB8, (s32)&timer);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(2, -1);
         LevelObjectiveAdd(3, -1);
@@ -616,7 +676,7 @@ void iSiloInit(void) {
             gObjectives->unk24 |= 7;
         }
     }
-    D_80143CBC[4] = gEliminateRhoemerMsg;
+    D_80143CB8.primaryTexts[4] = (char *)gEliminateRhoemerMsg;
     silo = NULL;
     DamageSetDamagedCallback(func_80142804);
     DamageSetDestroyedCallback(func_801428E0);
@@ -659,7 +719,7 @@ void iSiloInit(void) {
                         D_80143DCC = ref;
                         ref = gameObjectsInfo[ref].refId;
                         if (ref != -1) {
-                            museumBriefings = ref;
+                            D_80143DC4 = ref;
                         }
                     }
                 }
@@ -772,7 +832,7 @@ void FALLINGObjDispatch(SysMsg *msg) {
                         pos.vz = rt->anim->frame->pos.vz;
                         pos.vy = -pos.vy;
                         ParticleSmoke(-1, &pos, gExploDir, 0x1000, 1);
-                        GameCameraShakeStop(D_80143D64);
+                        GameCameraShakeStop(D_80143D20.falling);
                         SysStopSong(0, 0x18);
                     }
                 }
@@ -795,7 +855,7 @@ void FALLINGObjDispatch(SysMsg *msg) {
                     ref = gameObjectsInfo[other->id].refId;
                 } while (ref != -1);
             }
-            GameCameraShakeStart(D_80143D64, -1, 1, D_80143CF0, 0, 0);
+            GameCameraShakeStart(D_80143D20.falling, -1, 1, &D_80143CF0, 0, 0);
             SysExeTickQueueTimer((void (*)(s32))func_801417E8, (rt->flags1 & 0x80) ? PathGetVelocity(rt) : 10, (s32)rt);
         }
         break;

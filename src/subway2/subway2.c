@@ -6,21 +6,55 @@
 #define SUBWAY2_TYPE_BOMB 0x58
 #define SUBWAY2_TYPE_DEVICE 0x76
 
-/* subway2.ovl statics, still defined in the overlay's asm .data/.bss */
-extern GameObjectRuntime *D_801420AC; /* cop linked to the bomb */
-extern s16 D_801420B0;                /* bomb object id */
-extern s16 D_801420B4;                /* device object id */
-extern u8 D_801420B8;                 /* countdown running */
-extern u8 D_801420BC;                 /* bomb armed */
-extern void *D_80142070;              /* status messages */
-extern void *D_80142080;
-extern s32 D_80142074;
-extern s32 D_80142078;
-extern s32 D_8014207C;
+/*
+ * The bss items sit 4 bytes apart, as aspsx 2.56's .lcomm rule lays them out
+ * (docs/data_migration.md).  aspsx 2.77 and maspsx pack them by size instead, so
+ * both builds get explicit padding.
+ */
+#define BSS_PAD2(n) static s16 n;
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+
+static char *D_80142040[2] = {
+    "INCOMING FROM BENTON:\n\nYou're lucky to be alive. Ten square blocks of downtown D.C. "
+    "just sank 20 feet into the ground.  It looks like Rhoemer had the entire subway wired to "
+    "explode as part of his escape plan.  \n",
+    "It's likely you've cut his time table short, and that he's still down there with you.  "
+    "Aramov and Girduex also remain unaccounted for.  Don't let Rhoemer escape that terminal, "
+    "and be aware that you're now completely cut off from all reinforcements.",
+};
+Briefing subway2Briefings = {
+    {"Washington DC", "Georgia Street Subway", "08:23 23:45\n"}, 2, D_80142040,
+};
+static char *D_8014205C[3] = {
+    "Locate explosives cache",
+    "Blow open passage to street and protect CBDC agent",
+    ".", /* replaced by gEliminateRhoemerMsg once the bomb is armed */
+};
+static char *D_80142068[2] = {"Do not kill any CBDC agent", "Do not damage any bomb"};
+static char *D_80142070 = "C4 taken"; /* status messages */
+static char *D_80142074 = "Need Explosives";
+static char *D_80142078 = "Blocked Passage";
+static char *D_8014207C = "Gas Mains";
+static char *D_80142080 = "Gas Mains Closed";
+/* the original .rdata ends in 3 stray bytes of linker padding */
+static const char D_801412CD = 'r', D_801412CE = 'a', D_801412CF = 'm';
+static LevelObjectives D_80142084 = {3, D_8014205C, 2, D_80142068}; /* saved objective/timer state */
+
+static GameObjectRuntime *D_801420AC; /* cop linked to the bomb */
+static s16 D_801420B0; BSS_PAD2(D_801420B0_pad) /* bomb object id */
+static s16 D_801420B4; BSS_PAD2(D_801420B4_pad) /* device object id */
+static u8 D_801420B8; BSS_PAD3(D_801420B8_pad)  /* countdown running */
+static u8 D_801420BC; BSS_PAD3(D_801420BC_pad)  /* bomb armed */
 extern s32 D_801077FC;
-extern u8 D_80142084[];           /* saved objective/timer state */
-typedef struct { u8 unk00[8]; void *msg; } Subway2Objective;
-extern Subway2Objective *D_80142088;
 extern u8 gEliminateRhoemerMsg[];
 
 static void func_801412D0();
@@ -221,7 +255,7 @@ static void func_80141AC0(s16 id) {
 }
 
 static s32 func_80141B78(void) {
-    return D_80142074;
+    return (s32)D_80142074;
 }
 
 static s32 func_80141B88(s16 id, s16 kind) {
@@ -229,10 +263,10 @@ static s32 func_80141B88(s16 id, s16 kind) {
         if (id != GOBJ_ID_666 && gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type == SUBWAY2_TYPE_BOMB_SWITCH) {
             return D_801077FC;
         }
-        return D_80142078;
+        return (s32)D_80142078;
     }
     if (kind == 4) {
-        return D_8014207C;
+        return (s32)D_8014207C;
     }
     return 0;
 }
@@ -255,7 +289,7 @@ void iSubway2Init(s32 mode) {
     D_801420B8 = 0;
     D_801420BC = 0;
     InterfaceViralRadarInit();
-    SaveObjectivesNTimersReinit(D_80142084, 0);
+    SaveObjectivesNTimersReinit(&D_80142084, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(2, -1);
     }
@@ -265,7 +299,7 @@ void iSubway2Init(s32 mode) {
         gSysMovieDoneCallback = func_80141C34;
     }
     gUsingSndBigFire = 1;
-    D_80142088->msg = gEliminateRhoemerMsg;
+    D_80142084.primaryTexts[2] = (char *)gEliminateRhoemerMsg;
     SysStopSong(0, 0x18);
 
     DamageSetDamagedCallback(func_80141400);
@@ -312,4 +346,3 @@ void iSubway2Init(s32 mode) {
     gDefaultLevelDmgFX = 11;
 }
 
-INCLUDE_RODATA("asm/subway2/nonmatchings/subway2", D_80140FE4);

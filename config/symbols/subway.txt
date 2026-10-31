@@ -3,4 +3,3 @@ iSubway3Init = 0x80144814; // type:func
 TRAINObjDispatch = 0x80144AF4; // type:func
 subwayBriefings = 0x80145584;
 subway3Briefings = 0x801455A0;
-mFlamethrowerEndNormal = 0x801455D0;

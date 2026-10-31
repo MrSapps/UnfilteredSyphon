@@ -45,5 +45,5 @@ segments:
     subsegments:
       - [0x0, .rodata, init]
       - [0x344, c, init]
-      - [0x5E40, data, data]
+      - [0x5E40, .data, init]
   - [0x5EE8]

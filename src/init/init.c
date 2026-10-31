@@ -69,16 +69,6 @@ typedef struct LevelData {
     /* 0x7C */ s32 gabeSector;
 } LevelData;
 
-/* init.ovl rodata, still in asm */
-extern void (*D_80145C54[])(s32); /* level init function per level */
-extern char D_80145CD4[];         /* "%s.OVL" */
-extern char D_80145D14[];         /* "bin/init.c" */
-extern char D_80145DAC[];         /* "bin/..\\s\\objinit.c" */
-
-/* init.ovl data, still in asm */
-extern char *D_8014BA30[]; /* overlay name per level */
-extern s32 D_8014BAD4;     /* in LevelLoadCallback */
-extern u16 gLoadingString;
 extern s32 gInterfaceCurrentMode;
 void TextUpdate(void);
 void InterfaceAnimate(void);
@@ -113,8 +103,6 @@ int strcmp(const char *, const char *);
 extern u8 gINTRFACEHog[];
 extern u8 gSPFXHog[];
 extern u8 gMultiTextures[];
-extern char D_80145D20[]; /* "\\COMMON\\INTRFACE" */
-extern char D_80145D34[]; /* "\\COMMON\\SPFX" */
 typedef struct EGSHog {
     /* 0x00 */ void *data;
     /* 0x04 */ u8 unk04[0xC];
@@ -188,9 +176,65 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h);
 static void func_80147F38(s16 id);
 
 
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145BF0);
+static const s32 initHeader[5] = {0, 1, 1, 1, 0};
 
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145C54);
+/* overlay name per level */
+static char *D_8014BA30[20] = {
+    "SUBWAY", "SUBWAY2", "SUBWAY",  "PARK",    "PARK2",   "MUSEUM",  "MUSEUM",
+    "BASEEXT", "BASEEXT", "CHOPPER", "BASEEXT", "LEVSPEC", "LEVSPEC", "LEVSPEC",
+    "WHOUSE", "WHOUSE", "CAVE",    "CAVE",    "CAVE",    "SUBWAY",
+};
+
+/* briefing per level, in the level overlays (shared addresses: absolute) */
+static Briefing *D_8014BA80[20] = {
+    (Briefing *)0x80145584, /* subwayBriefings */
+    (Briefing *)0x80142048, /* subway2Briefings */
+    (Briefing *)0x801455A0, /* subway3Briefings */
+    (Briefing *)0x80142848, /* parkBriefings */
+    (Briefing *)0x80143354, /* park2Briefings */
+    (Briefing *)0x80143DC4, /* museumBriefings */
+    (Briefing *)0x80143DF4, /* museum2Briefings */
+    (Briefing *)0x80144A0C, /* baseextBriefings */
+    (Briefing *)0x80144A28, /* bunkerBriefings */
+    (Briefing *)0x801454D8, /* chopperPreSwitchBriefings */
+    (Briefing *)0x80144A44, /* baseext2Briefings */
+    (Briefing *)0x801429A0, /* churchBriefings */
+    (Briefing *)0x801429B8, /* church2Briefings */
+    (Briefing *)0x801429D4, /* catacombsBriefings */
+    (Briefing *)0x801426B4, /* whouseBriefings */
+    (Briefing *)0x801426CC, /* inwhouseBriefings */
+    (Briefing *)0x80143C00, /* caveBriefings */
+    (Briefing *)0x80143C1C, /* cave2Briefings */
+    (Briefing *)0x80143C38, /* siloBriefings */
+    (Briefing *)0x80145584, /* subwayBriefings */
+};
+
+u16 gLoadingString = 0xFFFF;
+static s32 D_8014BAD4 = 0; /* in LevelLoadCallback */
+
+/* level init function per level, in the level overlays (absolute) */
+static void (*const D_80145C54[20])(s32) = {
+    (void (*)(s32))0x80142E90, /* iSubwayInit */
+    (void (*)(s32))0x80141C74, /* iSubway2Init */
+    (void (*)(s32))0x80144814, /* iSubway3Init */
+    (void (*)(s32))0x801420F0, /* iParkInit */
+    (void (*)(s32))0x80141578, /* iPark2Init */
+    (void (*)(s32))0x80141F94, /* iMuseumInit */
+    (void (*)(s32))0x80142E88, /* iMuseum2Init */
+    (void (*)(s32))0x80142B0C, /* iBaseextInit */
+    (void (*)(s32))0x80143CBC, /* iBunkerInit */
+    (void (*)(s32))0x80144BD0, /* iChopperLevelInit */
+    (void (*)(s32))0x80143258, /* iBaseext2Init */
+    (void (*)(s32))0x80142674, /* iChurchInit */
+    (void (*)(s32))0x80142674, /* iChurchInit */
+    (void (*)(s32))0x80141F28, /* iCatacombsInit */
+    (void (*)(s32))0x80141E18, /* iWhouseInit */
+    (void (*)(s32))0x80141620, /* iInwhouseInit */
+    (void (*)(s32))0x80141D48, /* iCaveInit */
+    (void (*)(s32))0x80141F48, /* iCave2Init */
+    (void (*)(s32))0x80142EFC, /* iSiloInit */
+    (void (*)(s32))0x80142E90, /* iSubwayInit */
+};
 
 /* Opens \<dir>\<name>.HOG;1; returns nonzero on success. */
 static s32 func_80145F34(char *dir, char *name, s32 arg2, s32 arg3) {
@@ -336,12 +380,10 @@ static void func_801462CC(void) {
     sprintf(path, "\\%s\\%s.DAT;1", name, name);
     gLevData = &levdata;
     SysLoadData(path, &gLevData, 0x800);
-    sprintf(ovl, D_80145CD4, D_8014BA30[gSysInfo.level]);
+    sprintf(ovl, "%s.OVL", D_8014BA30[gSysInfo.level]);
     SysLoadOverlay(ovl, D_80140FE0, 1);
     EGSDisplaySetCollideXZ(gLevData->collideX, gLevData->collideZ);
 }
-
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145CD4);
 
 /* GameObjectModelInfo as seen by LevelCreateGOBJ. */
 typedef struct InitModelInfo {
@@ -483,6 +525,11 @@ INCLUDE_ASM("asm/init/nonmatchings/init", func_801466C8);
 #endif
 
 /* Allocates the runtime ("gobj") of every visible placed object. */
+/* named: the asm func_80146C6C uses them too */
+static const char D_80145D14[] = "bin/init.c";
+static const char D_80145D20[] = "\\COMMON\\INTRFACE";
+static const char D_80145D34[] = "\\COMMON\\SPFX";
+
 static void func_80146B14(void) {
     InitRuntime *rt;
     s32 i;
@@ -625,11 +672,6 @@ void ClearHeapBelow(s32 *top) {
     }
 }
 
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145D14);
-
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145D20);
-
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145D34);
 
 typedef struct EnterArgs {
     /* 0x00 */ u8 unk00[0xC];
@@ -651,7 +693,6 @@ extern void *gLevelStartHeap;
 extern char *gLoadedStringFmt;
 extern char *gLoadingStringFmt;
 extern char *gLevelPrettyNames[];
-extern Briefing *D_8014BA80[]; /* briefing per level */
 extern u8 gStartedEOLFade;
 extern s16 gGabeSector;
 void GameCameraInit(void);
@@ -741,7 +782,7 @@ void ENTEROverlay(EnterArgs *args) {
     } else {
         sprintf(str, "\\FOG\\%s.FOG;1", gLevelNames[gSysInfo.level]);
         EGSFileOpenFog(str);
-        sprintf(str, D_80145CD4, D_8014BA30[gSysInfo.level]);
+        sprintf(str, "%s.OVL", D_8014BA30[gSysInfo.level]);
         SysLoadOverlay(str, D_80140FE0, 1);
         InitStreaming();
         sprites = gInitHeap;
@@ -1098,10 +1139,10 @@ static void func_80147F38(s16 id) {
     LevelGetModel("KEYCARD.GMD", frame);
     LevelGetModel("XEYCARD.GMD", &xmodel);
     if (model == 0) {
-        EGSDebugAssert(1, 0, D_80145DAC, 0xFA);
+        EGSDebugAssert(1, 0, "bin/..\\s\\objinit.c", 0xFA);
     }
     if (xmodel == 0) {
-        EGSDebugAssert(1, 0, D_80145DAC, 0xFB);
+        EGSDebugAssert(1, 0, "bin/..\\s\\objinit.c", 0xFB);
     }
     if (model != 0) {
         info = &gameObjectsInfo[id];
@@ -1128,8 +1169,6 @@ static void func_80147F38(s16 id) {
     }
     rt->healthInfo = (GameObjectHealth *)gameObjectsInfo[rt->id].unk38;
 }
-
-INCLUDE_RODATA("asm/init/nonmatchings/init", D_80145DAC);
 
 void AUTOPICKUPObjInit(InitRuntime *rt) {
     GameObjectHealth *health;

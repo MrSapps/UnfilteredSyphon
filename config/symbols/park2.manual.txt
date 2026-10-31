@@ -1,0 +1,2 @@
+mFlamethrowerEndNormal = 0x801455D0;
+D_801447C4 = 0x801447C4; // size:0x108

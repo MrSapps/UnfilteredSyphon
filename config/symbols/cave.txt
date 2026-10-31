@@ -8,4 +8,3 @@ FALLINGObjDispatch = 0x801435DC; // type:func
 caveBriefings = 0x80143C00;
 cave2Briefings = 0x80143C1C;
 siloBriefings = 0x80143C38;
-museumBriefings = 0x80143DC4;

@@ -47,6 +47,7 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, chopper]
       - [0x558, c, chopper]
-      - [0x44F0, data, data]
-      - { start: 0x4598, type: bss, vram: 0x80145578, name: bss }
+      - [0x44F0, .data, chopper]
+      - { start: 0x4598, type: .bss, vram: 0x80145578, name: chopper }
+      - { type: bss, vram: 0x801457A0, name: bss_801457A0 }
   - [0x4598]

@@ -2,5 +2,3 @@ iMuseumInit = 0x80141F94; // type:func
 iParkInit = 0x801420F0; // type:func
 parkBriefings = 0x80142848;
 parkObjectives = 0x80142898;
-church2Briefings = 0x801429B8;
-catacombsBriefings = 0x801429D4;

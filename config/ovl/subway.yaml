@@ -47,6 +47,6 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, subway]
       - [0x668, c, subway]
-      - [0x459C, data, data]
-      - { start: 0x4700, type: bss, vram: 0x801456E0, name: bss }
+      - [0x459C, .data, subway]
+      - { start: 0x4700, type: .bss, vram: 0x801456E0, name: subway }
   - [0x4700]

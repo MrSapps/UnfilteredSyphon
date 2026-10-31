@@ -22,8 +22,9 @@ Inputs (from the modern build, run `python3 configure.py && ninja` first):
            (tools/psyq_liborder.py; extracted into <out>/lib) instead of the lib_*.s asm
            objects, cut the library part out of the splat data blobs, and let psylink
            lay out all commons (see docs/psyq_build.md)
---obj TU=FILE  use FILE (e.g. a ccpsx-compiled OBJ) for main TU <TU> instead of
-           converting build/src/main/<TU>.c.o
+--obj TU=FILE  use FILE (e.g. a ccpsx-compiled OBJ) for TU <TU> instead of
+           converting build/src/main/<TU>.c.o (or, for an overlay TU, build/src/<TU>/<TU>.c.o;
+           its sections and clashing symbols are renamed like a converted object's)
 
 Writes <out>/siphon.lnk; link with tools/psyq_link.sh.
 """
@@ -324,12 +325,16 @@ def main():
             elif "/assets/main/" in o:
                 ren[".data"] = os.path.basename(o)[:-len(".bin.o")]
             dst = os.path.join(a.out, "obj", o[len("build/"):-2] + ".obj")
-            tu = os.path.basename(o)[:-len(".c.o")] if o.endswith(".c.o") and mod == "main" else None
+            tu = os.path.basename(o)[:-len(".c.o")] if o.endswith(".c.o") else None
+            if mod != "main" and tu != mod:
+                tu = None
             if tu in swap:
                 dst = os.path.join(a.out, "obj", "swap", tu + ".obj")
                 os.makedirs(os.path.join(ROOT, os.path.dirname(dst)), exist_ok=True)
                 data = open(swap[tu], "rb").read()
-                if a.libs:
+                if mod != "main":
+                    data = elf2psyq.rename_obj(data, sections=ren)
+                elif a.libs:
                     data = elf2psyq.commons_to_xrefs(data)
                 open(os.path.join(ROOT, dst), "wb").write(data)
                 swapped.add(dst)
@@ -418,6 +423,11 @@ def main():
 
     # convert
     for mod, o, dst, ren, trunc in plan:
+        if dst in swapped and mod != "main" and symren.get(mod):
+            absdst = os.path.join(ROOT, dst)
+            data = elf2psyq.rename_obj(open(absdst, "rb").read(), symbols=symren[mod])
+            open(absdst, "wb").write(data)
+            continue
         if dst in swapped or o is None or trunc:
             continue
         absdst = os.path.join(ROOT, dst)

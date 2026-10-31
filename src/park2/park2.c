@@ -6,19 +6,10 @@
 #define PARK2_TYPE_HANS 0x3C   /* Hans (the boss): killing him ends the level */
 #define PARK2_TYPE_42 0x42
 
-/* park2.ovl statics, still defined in the overlay's asm .data/.bss */
-extern u8 D_80143370[];       /* objectives/timers info */
-extern u8 D_80143464[];       /* random XA list played when Hans dies */
-extern u8 D_801447BC;         /* bomb destroyed */
-extern s32 D_8014497C;        /* BOSS.HOG handle */
-extern s32 D_80144980[];      /* blocks loaded from BOSS.HOG */
-extern s32 gHansAnimFiles[];  /* 0-terminated list of anim file names */
-extern u8 mHansActionInfo[];
-extern u8 mHansAnimInfo[];
 extern u8 D_80145930;
 extern s32 D_8014593C;
 extern s32 D_80145940;
-extern char D_801412B0[];   /* "bin/park2.c" (.rodata, shared with BOSSObjDispatch) */
+extern const char D_801412B0[]; /* "bin/park2.c", defined after iBossLoadHog (used by BOSSObjDispatch too) */
 
 void SysSoundPlayRandXA(void *list);
 void LevelDoEOL(s32 arg0);
@@ -108,11 +99,6 @@ typedef struct ObjMatrix {
                      : "r"(arg)                                                        \
                      : SCRATCH_CLOBBERS)
 
-extern BossRuntime *D_801447C0;  /* Hans */
-extern s32 D_801447A8;           /* Hans' weapon attached */
-extern s32 D_801447B0;           /* ticks the player has been in Hans' sight */
-extern s32 D_801447B4;
-extern s32 D_801447B8;           /* last seen gPlayerNumConsecutiveHits */
 
 /* Flamethrower effect state */
 typedef struct EGSFrame {
@@ -178,16 +164,7 @@ typedef struct SpriteBank {
 
 #define FLAME_JET_COUNT 48
 
-extern PointSource D_80144950;   /* Hans' muzzle light */
-extern PointSource D_801447C4[]; /* flame lights (one per 8 jet segments) */
-extern PointSource D_801448CC[]; /* jet lights (one per 16 jet segments) */
-extern s32 mFlameHandle[];       /* fire particle handles */
-extern FlamePoly mFlamethrowerJet[FLAME_JET_COUNT];
-extern FlameJetPos mFlamethrowerJetPos[FLAME_JET_COUNT];
-extern EGSFrame *mFlamePools[6];
 extern SpriteBank *D_80105E28;
-extern Vec4 mFlamethrowerEnd[FLAME_JET_COUNT];  /* where each jet segment is aimed */
-extern Vec4 D_801455D0[FLAME_JET_COUNT];        /* surface normal hit by each segment */
 extern u8 gPlayerOnFireFlag;
 
 void CameraGetDisplay(void **camera, s32 *display);
@@ -201,7 +178,6 @@ void WeaponGetTip(BossRuntime *obj, Vec4 *tip);
 void AnimateGobjRequestAim(BossRuntime *obj, Vec4 *at, s32 arg2, s32 arg3);
 void GTEMath_VectorNormal(Vec4 *in, Vec4 *out);
 
-extern s32 D_801447AC; /* next jet segment to fire */
 
 /* 12-bit fixed point to integer, rounding toward zero */
 #define FIX12(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
@@ -215,10 +191,6 @@ void EGSDisplayPointSourceFrame(PointSource *ps, EGSFrame *frame);
 void EGSDisplayPointSourceOn(); /* (ps) or (ps, pos) */
 void ParticleFireFade(s16 handle);
 void ParticleFireShow(s16 handle, s32 *pos, s32 arg2, s32 arg3);
-extern u8 D_80143398[];          /* random XA lists */
-extern u8 D_801433DC[];
-extern u8 D_80143420[];
-extern u8 D_801434A8[];
 extern s32 gPlayerNumConsecutiveHits;
 
 int rand(void);
@@ -249,6 +221,161 @@ void func_8014210C(s32 seg, s32 *pos, s32 arg2);
 static void func_80141398(s16 id, s16 by, s32 arg2, s32 arg3);
 static void func_80141528(s32 arg0, s16 weapon, s32 arg2, s32 arg3);
 static void func_801416E4(void);
+
+void DamageDeathCAS(), DamageGobjCAS(), MovementGobjMoveCAS();
+extern u32 gBoxStand[];
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+
+static char *D_8014334C[2] = {
+    "INCOMING FROM BENTON:\n\nLogan, it should be pretty simple now - take out Girdeux.  But check "
+    "your fire.  If any explosives go off in that room, that viral bomb will blow and take out half "
+    "the eastern seaboard.  Also, Girdeux is likely to be wearing full body armor.  You'll have to "
+    "find a weakpoint in his defense.\n",
+    "Don't let your history with Girdeux cloud your judgement, Logan.  If you fail, thousands will "
+    "die tonight.  I don't want to see a repeat of Costa Rica.",
+};
+Briefing park2Briefings = {
+    {"Washington DC", "Freedom Memorial", "08:24 01:15\n"}, 2, D_8014334C,
+};
+static char *D_80143368[1] = {"Kill Girdeux"};
+static char *D_8014336C[1] = {"Do not use grenades or Girdeux's bomb may be damaged"};
+static LevelObjectives D_80143370 = {1, D_80143368, 1, D_8014336C}; /* objectives/timers info */
+static const s32 D_80141248 = 2; /* unreferenced */
+/* random XA lists */
+static s16 D_80143398[34] = {0, 0, 0xEE, 0xEF, 0xF0, 0xF1, 0xF2, 0xF3, 0xFD, 0xFF, 0xFA, 0x101, -1};
+static s16 D_801433DC[34] = {0, 0, 0xEB, 0xEC, 0xF6, 0xFC, 0xF4, 0xFB, 0xF5, 0xED, -1};
+static s16 D_80143420[34] = {0, 0, 0xE8, 0xE9, 0xEA, -1};
+static s16 D_80143464[34] = {0, 0, 0xE6, 0xE7, -1};
+static s16 D_801434A8[34] = {0, 0, 0xF7, 0xF8, 0xF9, 0xFE, 0x100, -1};
+/* 0-terminated list of anim file names */
+s32 gHansAnimFiles[8] = {
+    (s32)"B1DEATH.HAN", (s32)"B1IDLE.HAN", (s32)"B1IDLE2.HAN", (s32)"B1STHIT.HAN",
+    (s32)"B1STHIT2.HAN", (s32)"B1STTAL.HAN", (s32)"WK0.HAN", 0,
+};
+/* Hans' action sequences and action table (raw words, like playcas.c's) */
+u32 seq_hans_stand[12] = {
+    3, 0xFFFF0002, 1, 0xFF, 0, 0, 0xFFFF, 0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+u32 seq_hans_walk[12] = {
+    3, 0xFFFF0002, 6, 0xFF, 0, 0, 0xFFFF, 0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+static u32 D_8014356C[12] = {
+    3, 0xFFFF0000, 0, 0x3106FF, 0, 0, 0xFFFF, 0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+u32 seq_hans_hit[12] = {
+    3, 0xFFFF0000, 3, 0xFF, 0, 0, 0xFFFF, 0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+u32 seq_hans_fall[24] = {
+    0x10003, 0xFFFF0000, 0x96, 0x230AFF, 0, 0, 0x20003, 0xFFFF0000, 0x96, 0x230AFF, 0, 0, 0x30003,
+    0xFFFF0000, 0x64, 0x230AFF, 0, 0, 0xFFFF, 0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+u32 seq_hans_land[30] = {
+    0x10023, 0xFFFF0000, 0x97, 0x212B0CFF, 0, 0, 0x20023, 0xFFFF0000, 0x97, 0x212B0CFF, 0, 0,
+    0x30023, 0xFFFF0000, 0x65, 0x212B0CFF, 0, 0, 0x2B, 0xFFFF0000, 0xFF, 0x301FF, 0, 0, 0xFFFF,
+    0xFFFF0000, 0xFF, 0xFF, 0, 0,
+};
+u32 mHansActionInfo[1089] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 2, 1, 0, 0, 0x100, 0, 0, 0, 0, (u32)gBoxStand, 0,
+    0, 2, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0,
+    0x316, 4, 0, 0xC0280, 0, 0, 0, (u32)MovementGobjMoveCAS, 0, 0, 0, 6, 5, 0, 0x83400, 2, 0xC,
+    (u32)seq_hans_stand, 0, 0, 0, 0, 6, 6, 0, 0x83400, 4, 0xA, (u32)seq_hans_walk, 0, 0, 0, 0, 6, 7,
+    0, 0x1400, 8, 6, (u32)seq_hans_walk, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0,
+    0, 9, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0xA, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0,
+    0xB, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0xC, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0,
+    0xD, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0xE, 0, 0x40000, 0, 0, (u32)seq_hans_hit,
+    (u32)DamageGobjCAS, 0xD, 0, 0, 0, 0xF, 0, 0, 0x40000, 0, (u32)D_8014356C, (u32)DamageDeathCAS,
+    0x20, 0, 0, 0, 0x10, 0, 0, 0x40000, 0, (u32)D_8014356C, (u32)DamageDeathCAS, 0x20, 0, 0, 0,
+    0x11, 0, 0, 0x40000, 0, (u32)D_8014356C, (u32)DamageDeathCAS, 0x20, 0, 0, 0, 0x12, 0, 0,
+    0x40000, 0, (u32)D_8014356C, (u32)DamageDeathCAS, 0x20, 0, 0, 0, 0x13, 0, 0, 0, 0, 0, 0, 0,
+    (u32)gBoxStand, 0, 0, 0x14, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 6, 0x15, 0, 0x1002400, 0,
+    0x80000, 0, 0, 7, 0, 0, 6, 0x16, 0, 0x1002400, 0, 0x80000, 0, 0, 8, 0, 0, 0, 0x17, 0, 0, 0, 0,
+    0, 0, 0, (u32)gBoxStand, 0, 0, 0x19, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x1B, 0, 0, 0,
+    0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x1C, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x1D, 0, 0,
+    0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x1E, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x1F, 0,
+    0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x20, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x21,
+    0, 0x40000, 0, 0x18000, (u32)seq_hans_land, 0, 0, 0, 0, 0, 0x22, 0, 0, 0, 0, 0, 0, 0,
+    (u32)gBoxStand, 0, 0, 0x23, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x24, 0, 0, 0, 0, 0, 0,
+    0, (u32)gBoxStand, 0, 0, 0x25, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x26, 0, 0, 0, 0, 0,
+    0, 0, (u32)gBoxStand, 0, 0, 0x27, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x28, 0, 0, 0, 0,
+    0, 0, 0, (u32)gBoxStand, 0, 0, 0x29, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2A, 0, 0, 0,
+    0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2B, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2C, 0, 0,
+    0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2D, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2E, 0,
+    0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x2F, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x30,
+    0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x31, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0x2012,
+    0x33, 0, 0x1008000, 0x8000, 0x800000, (u32)seq_hans_fall, 0, 0, 0, 0, 0, 0x34, 0, 0, 0, 0, 0, 0,
+    0, (u32)gBoxStand, 0, 0, 0x35, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x36, 0, 0, 0, 0, 0,
+    0, 0, (u32)gBoxStand, 0, 0, 0x37, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x38, 0, 0, 0, 0,
+    0, 0, 0, (u32)gBoxStand, 0, 0, 0x39, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x3A, 0, 0, 0,
+    0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x3B, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x3C, 0, 0,
+    0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x3D, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x3E, 0,
+    0x40000, 0, 0x18000, (u32)seq_hans_land, 0, 0, 0, 0, 0, 0x3F, 0, 0, 0, 0, 0, 0, 0,
+    (u32)gBoxStand, 0, 0, 0x40, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x41, 0, 0, 0, 0, 0, 0,
+    0, (u32)gBoxStand, 0, 0, 0x42, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x43, 0, 0, 0, 0, 0,
+    0, 0, (u32)gBoxStand, 0, 0, 0x44, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x45, 0, 0, 0, 0,
+    0, 0, 0, (u32)gBoxStand, 0, 0, 0x46, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x47, 0, 0, 0,
+    0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x48, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x49, 0, 0,
+    0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x4A, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x4B, 0,
+    0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x4C, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x4D,
+    0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x4E, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0,
+    0x4F, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x50, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0,
+    0, 0x51, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0x52, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand,
+    0, 0, 0x53, 0, 0, 0, 0, 0, 0, 0, (u32)gBoxStand, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+static s32 D_801447A8 = 0; /* Hans' weapon attached */
+static s32 D_801447AC = 0; /* next jet segment to fire */
+
+/*
+ * .bss.  The original has these 4-aligned (an aspsx with 2.56's .lcomm rule);
+ * aspsx 2.77 and maspsx would 16-align the light arrays, and as one C struct the
+ * code would share its base address.  So it is laid out here (aspsx would put
+ * any .lcomm in front of it).
+ */
+extern s32 D_801447B0;              /* ticks the player has been in Hans' sight */
+extern s32 D_801447B4;
+extern s32 D_801447B8;              /* last seen gPlayerNumConsecutiveHits */
+extern u8 D_801447BC;               /* bomb destroyed */
+extern BossRuntime *D_801447C0;     /* Hans */
+extern PointSource D_801447C4[6];   /* flame lights (one per 8 jet segments) */
+extern PointSource D_801448CC[3];   /* jet lights (one per 16 jet segments) */
+extern PointSource D_80144950;      /* Hans' muzzle light */
+extern s32 D_8014497C;              /* BOSS.HOG handle */
+extern s32 D_80144980[8];           /* blocks loaded from BOSS.HOG */
+__asm__(".bss\n"
+        "\t.align 2\n"
+        "D_801447B0:\n\t.space 4\n"
+        "D_801447B4:\n\t.space 4\n"
+        "D_801447B8:\n\t.space 4\n"
+        "D_801447BC:\n\t.space 4\n"
+        "D_801447C0:\n\t.space 4\n"
+        "D_801447C4:\n\t.space 0x108\n"
+        "D_801448CC:\n\t.space 0x84\n"
+        "D_80144950:\n\t.space 0x2C\n"
+        "D_8014497C:\n\t.space 4\n"
+        "D_80144980:\n\t.space 0x20\n"
+        ".text\n");
+
+/* commons: psylink lays them out after the .bss */
+EGSFrame *mFlamePools[6];
+Vec4 mFlamethrowerEnd[FLAME_JET_COUNT]; /* where each jet segment is aimed */
+FlamePoly mFlamethrowerJet[FLAME_JET_COUNT];
+s32 mFlameHandle[6];                    /* fire particle handles */
+Vec4 mFlamethrowerEndNormal[FLAME_JET_COUNT]; /* surface normal hit by each segment */
+u8 mHansAnimInfo[0xE0];
+FlameJetPos mFlamethrowerJetPos[FLAME_JET_COUNT];
 
 static void func_80141360(s16 id, s16 by) {
     if (by == gPlayerOffset) {
@@ -303,7 +430,7 @@ void iPark2Init(void) {
     s32 j;
 
     D_801447BC = 0;
-    SaveObjectivesNTimersReinit(D_80143370, 0);
+    SaveObjectivesNTimersReinit(&D_80143370, 0);
     LevelObjectiveAdd(0, -1);
     if (gObjectives != NULL) {
         count = gObjectives->count;
@@ -365,8 +492,6 @@ void BossCASInit(BossObj *obj, s32 mode, s32 arg2) {
     }
 }
 
-INCLUDE_RODATA("asm/park2/nonmatchings/park2", D_80140FE4);
-
 void iBossLoadHog(void) {
     char path[0x20];
     s32 i;
@@ -381,7 +506,7 @@ void iBossLoadHog(void) {
 }
 
 
-INCLUDE_RODATA("asm/park2/nonmatchings/park2", D_801412B0);
+const char D_801412B0[] = "bin/park2.c";
 
 
 static s32 func_801418C8(void) {
@@ -632,10 +757,10 @@ static void func_801422DC(void) {
             cur.x = jet->vel[0];
             cur.y = jet->vel[1];
             cur.z = jet->vel[2];
-            EGSGeometry_VectorReflectAboutUnitNormal(&cur, &D_801455D0[i], &cur);
-            D_801455D0[i].x = 0;
-            D_801455D0[i].y = 0;
-            D_801455D0[i].z = 0;
+            EGSGeometry_VectorReflectAboutUnitNormal(&cur, &mFlamethrowerEndNormal[i], &cur);
+            mFlamethrowerEndNormal[i].x = 0;
+            mFlamethrowerEndNormal[i].y = 0;
+            mFlamethrowerEndNormal[i].z = 0;
             jet->vel[0] = cur.x >> 2;
             jet->vel[2] = cur.z >> 2;
         }
@@ -710,7 +835,7 @@ static void func_801422DC(void) {
         EGSDisplayTransformWorldToScreen(&cur, &cur);
         h = cur.x - nxt.x;
         w = cur.y - nxt.y;
-        if (D_801455D0[i].x == 0 && D_801455D0[i].y == 0 && D_801455D0[i].z == 0) {
+        if (mFlamethrowerEndNormal[i].x == 0 && mFlamethrowerEndNormal[i].y == 0 && mFlamethrowerEndNormal[i].z == 0) {
             w >>= 1;
             h >>= 1;
         } else {
@@ -808,7 +933,7 @@ static s32 func_80142BF4(Vec4 *target) {
             end->z = D_801447C0->target->aim[2];
         }
         mFlamethrowerEnd[D_801447AC].y = ((PlayerObj *)gObjPlayer)->move->groundY;
-        nrm = &D_801455D0[D_801447AC];
+        nrm = &mFlamethrowerEndNormal[D_801447AC];
         nrm->x = D_801447C0->target->normal[0];
         nrm->y = D_801447C0->target->normal[1];
         nrm->z = D_801447C0->target->normal[2];

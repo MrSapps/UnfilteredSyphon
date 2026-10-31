@@ -366,6 +366,23 @@ def _skip_expr(b, p):
 
 def commons_to_xrefs(b):
     """Rewrite an SN OBJ so that its common (XBSS) declarations become XREFs."""
+    return rewrite_obj(b, commons_as_xrefs=True)
+
+
+def rename_obj(b, sections=None, symbols=None):
+    """Rewrite an SN OBJ with its sections ({old: new}) and symbols (XDEF, XREF,
+    local and common names; {old: new}) renamed."""
+    return rewrite_obj(b, sections=sections or {}, symbols=symbols or {})
+
+
+def rewrite_obj(b, commons_as_xrefs=False, sections=None, symbols=None):
+    sections = sections or {}
+    symbols = symbols or {}
+
+    def name_at(q):
+        """the record bytes from the pstr at q on, renamed"""
+        n = b[q + 1:q + 1 + b[q]].decode("latin-1")
+        return pstr(sections.get(n, n) if op == 16 else symbols.get(n, n))
     out = bytearray(b[:4])
     p = 4
     while p < len(b):
@@ -378,24 +395,19 @@ def commons_to_xrefs(b):
             q += 2 + struct.unpack_from("<H", b, q)[0]
         elif op == 10:
             q = _skip_expr(b, q + 3)
-        elif op == 12:
-            q += 8 + 1 + b[q + 8]
-        elif op == 14:
-            q += 2 + 1 + b[q + 2]
-        elif op == 16:
-            q += 5 + 1 + b[q + 5]
-        elif op == 18:
-            q += 6 + 1 + b[q + 6]
+        elif op in (12, 14, 16, 18, 48):
+            hdr = {12: 8, 14: 2, 16: 5, 18: 6, 48: 8}[op]
+            q += hdr + 1 + b[q + hdr]
+            rec = bytes([op]) + b[p + 1:p + 1 + hdr] + name_at(p + 1 + hdr)
+            if op == 48 and commons_as_xrefs:
+                rec = b"\x0e" + rec[1:3] + rec[9:]
+            out += rec
+            p = q
+            continue
         elif op == 20:
             q += 3 + 1 + b[q + 3]
         elif op == 28:
             q += 2 + 1 + b[q + 2]
-        elif op == 48:
-            sym = b[q:q + 2]
-            q += 8 + 1 + b[q + 8]
-            out += b"\x0e" + sym + b[p + 9:q]
-            p = q
-            continue
         elif op == 74:
             q += 28
             q += 1 + b[q]

@@ -162,100 +162,12 @@ typedef struct MapLocation {
     /* 0x03 */ s8 y;
 } MapLocation;
 
-/* "bin/menu.c" (the asserts here don't use the usual "s/..." path) */
-extern char D_8013807C[];
-#define ASSERT_MENU(cond, line) if (!(cond)) EGSDebugAssert(1, 0, D_8013807C, line)
+/* "bin/menu.c" (the asserts here don't use the usual "s/..." path), defined below */
+#define ASSERT_MENU(cond, line) if (!(cond)) EGSDebugAssert(1, 0, (char *)D_8013807C, line)
 
 /* The 0xF000-byte work buffer is reused: slider boxes, or the weapon description strings */
 #define MENU_BOXES ((MenuBox *)D_8013FE78)
 #define MENU_STRINGS ((char **)D_8013FE78)
-
-/* menu.ovl statics, still defined in the overlay's asm .rodata/.data/.bss */
-extern char D_801377E4[]; /* "" */
-extern void (*D_80138044[])(s32 cursor); /* per-menu setup */
-extern char *D_8013F744[];
-extern char *D_8013F74C[]; /* help line per mode */
-extern char *D_8013F778;
-extern char *D_8013F780; /* quit prompt */
-extern char *D_8013F784; /* restart-from-start prompt */
-extern char *D_8013F788; /* restart prompt */
-extern char *D_8013F774; /* "no objectives" */
-extern char *D_8013F78C;
-extern char *D_8013F790;
-extern char *D_8013F794;
-extern char *D_8013F798; /* objectives heading */
-extern char *D_8013F79C; /* completed heading */
-extern char *D_8013F7A0; /* map: "you are here" */
-extern char *D_8013F7A4; /* map: objective location */
-extern char *D_8013F7A8;
-extern char *D_8013F7AC[]; /* controller configuration names */
-extern u8 D_8013F7C0; /* menu text window */
-extern u8 D_8013F7C1;
-extern u8 D_8013F7C2; /* help line window */
-extern u8 D_8013F7C3; /* weapon rounds window */
-extern char *D_8013F7B8[2];
-extern s32 D_8013F7C4; /* cursor / current value */
-extern s32 D_8013F7C8; /* first item whose text still has to be built */
-extern s32 D_8013F7CC;
-extern MenuItem D_8013F86C[]; /* main menu */
-extern MenuItem D_8013F7D0[]; /* briefing menu */
-extern u16 *D_8013F904;
-extern MenuItem D_8013F908[]; /* debug menu */
-extern MenuItem D_8013FA7C[]; /* sound menu */
-extern MenuItem D_8013FAA0;
-extern MenuItem D_8013FBD8[]; /* controller menu */
-extern char *D_8013FB98[][2]; /* objective rows: check mark, text */
-extern char *D_8013FC80; /* dialog message */
-extern s32 D_8013FC90;
-extern char **D_8013FC94;
-extern u16 *D_8013FC98;
-extern u32 D_8013FC9C; /* dialog type */
-extern void (*D_8013FCA0)(); /* dialog callback */
-extern u32 D_8013FCA4; /* tick the menu opened at */
-extern u32 D_8013FCA8;
-extern MenuItem *D_8013FCBC; /* items of the current menu */ /* tick of the next briefing page turn */
-extern u8 D_8013FCAC[];
-extern s32 D_8013FCB4; /* current menu */
-extern u8 D_8013FCB8; /* menu stack depth */
-extern u8 D_8013FCC0[]; /* items per menu */
-extern s32 D_8013FDE8; /* current help line */
-extern MenuItem *D_8013FCD0[]; /* items of each menu */
-extern void (*D_8013FD40[])(void); /* per-menu before-build handlers */
-extern void (*D_8013FD78[])(void); /* per-menu after-build handlers */
-extern void (*D_8013FDB0[])(void); /* per-menu leave handlers */
-extern u8 D_8013FDEC[];
-extern u8 D_8013FDF8[][9];
-extern u16 D_8013FE20[]; /* text ids of the menu strings */
-extern u16 D_8013FE26[];
-#define D_8013FE66 D_8013FE20[35] /* status line text id */
-extern TextChar *D_8013FE6C; /* briefing text characters */
-extern TextChar *D_8013FE68; /* menu characters */
-extern TextChar *D_8013FE70; /* help line characters */
-extern s32 D_8013FE74; /* EGS file handle */
-extern s32 D_8013FE88; /* menu hog header */
-extern void *D_8013FE78; /* work buffer */
-extern RECT D_8013FE7C; /* saved CLUT area */
-extern u32 *D_8013FE84; /* CLUT backup */
-extern s32 D_8013FE8C;
-extern s32 D_8013FE90;
-extern s32 D_8013FE94;
-extern s32 D_8013FE98;
-extern s32 D_8013FE9C; /* highlight step */
-extern s32 D_8013FEA0;
-extern s32 D_8013FEA4;
-extern s32 D_8013FEA8;
-extern MenuQuad *D_8013FEBC;
-extern MenuQuadPair *D_8013FEC0;
-extern MenuQuad *D_8013FEC4;
-extern u16 D_8013FEC8[];
-extern MenuStackEntry D_8013FED4[];
-extern u8 mSfxSampleCanBePlayedAgain;
-extern MapLocation *mObjectiveMapLocations[];
-extern MapLocation mPlayerMapLocation;
-extern s32 (*D_8013FB4C[])(s32 map, VECTOR32 *pos, ScreenPos *out); /* map locator per level */
-extern s8 D_8013FAD0[][6]; /* player arrow shape per direction */
-extern char *D_8013F740; /* "you" row text */
-extern TextChar *mMap; /* weapon icons */
 
 /* main.exe */
 extern s32 gJoyMap[];
@@ -297,7 +209,6 @@ void WeaponSelect(Gobj *obj, s32 weapon, s32 arg2);
 extern char *gUseMsgs[];
 extern char *gButtonStrings[];
 extern s32 gPacketAreaMallocSize;
-extern s32 mIncomingInterfaceMode;
 u8 JoystickGetFlightControls(void);
 u8 LevelZoom(s32 arg0);
 void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
@@ -363,6 +274,430 @@ void func_8013E5B0(void);
 void func_8013E98C(void);
 void func_8013F144(void);
 
+/* this file, for the tables below */
+s32 MapLocateBaseExt(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateChurch(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateChurch2(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateInWhouse(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateMuseum(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateMuseum2(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocatePark(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateSilo(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateSubway(s32 map, VECTOR32 *pos, u32 *out);
+s32 MapLocateWhouse(s32 map, VECTOR32 *pos, u32 *out);
+void funcEvSpIOEx(s32 delta);
+void func_801396B4(void);
+void func_80139710(void);
+void func_80139738(void);
+void func_801398A4(void);
+void func_80139994(void);
+void func_801399C4(void);
+void func_80139B54(void);
+void func_80139C54(void);
+void func_80139CE4(void);
+void func_80139D24(void);
+void func_80139FFC(s32 cursor);
+void func_8013A220(s32 cursor);
+void func_8013A60C(s32 cursor);
+void func_8013AC64(u32 value);
+void func_8013ACA4(void);
+void func_8013ACAC(s32 delta);
+void func_8013AE30(void);
+void func_8013AFC8(void);
+void func_8013B04C(void);
+void func_8013B464(s32 delta);
+void func_8013B8F8(s32 cursor);
+void func_8013D04C(void);
+void func_8013D19C(void);
+void func_8013D95C(void);
+void func_8013DC98(void);
+void func_8013DEEC(void);
+void func_8013DFB0(void);
+void func_8013E184(void);
+void func_8013E278(void);
+void func_8013E30C(void);
+void func_8013E324(void);
+void func_8013E480(void);
+
+static const s32 D_801377E4[5] = {0, 1, 1, 1, 0}; /* its first word doubles as "" */
+
+/*
+ * .bss.  The original assembler word-aligned every .lcomm (docs/data_migration.md);
+ * aspsx 2.77 and maspsx align an n-byte .lcomm to n rounded up to a power of two, so
+ * the items > 4 bytes that sit at 4-aligned offsets are split into 4-byte pieces.
+ */
+static u16 D_8013FE20[36]; /* text ids of the menu strings */
+#define D_8013FE26 (&D_8013FE20[3])
+#define D_8013FE66 D_8013FE20[35] /* status line text id */
+static TextChar *D_8013FE68; /* menu characters */
+static TextChar *D_8013FE6C; /* briefing text characters */
+static TextChar *D_8013FE70; /* help line characters */
+static s32 D_8013FE74; /* EGS file handle */
+static void *D_8013FE78; /* work buffer */
+static s32 D_8013FE7C_xy, D_8013FE7C_wh; /* saved CLUT area */
+#define D_8013FE7C (*(RECT *)&D_8013FE7C_xy)
+static u32 *D_8013FE84; /* CLUT backup */
+static s32 D_8013FE88; /* menu hog header */
+static s32 D_8013FE8C;
+static s32 D_8013FE90;
+static s32 D_8013FE94;
+static s32 D_8013FE98;
+static s32 D_8013FE9C; /* highlight step */
+static s32 D_8013FEA0;
+static s32 D_8013FEA4;
+static s32 D_8013FEA8;
+static s32 D_8013FEAC, D_8013FEB0, D_8013FEB4, D_8013FEB8; /* unused */
+static MenuQuad *D_8013FEBC;
+static MenuQuadPair *D_8013FEC0;
+static MenuQuad *D_8013FEC4;
+static u16 D_8013FEC8[2], D_8013FECC[2], D_8013FED0[2]; /* main menu text ids (D_8013FEC8[0..4]) */
+static MenuStackEntry D_8013FED4[2], D_8013FED8[2], D_8013FEDC[2], D_8013FEE0[2], D_8013FEE4[2]; /* menu stack (D_8013FED4[0..9]) */
+/* commons, laid out by the linker after the .bss */
+u8 mSfxSampleCanBePlayedAgain;
+s32 mIncomingInterfaceMode;
+MapLocation mPlayerMapLocation;
+TextChar *mMap; /* weapon icons */
+
+/* .data (and the level map tables in .rdata) */
+static char *D_8013F5C8[5] = { /* main menu */
+    "Map\n",
+    "Objectives\n",
+    "Parameters\n",
+    "Weapons\n",
+    "Options\n",
+};
+static char *D_8013F5DC[7] = { /* options menu */
+    "Review Briefing",
+    "Restart Mission",
+    "Restart At Last Checkpoint",
+    "Select Previous Mission",
+    "Game Settings",
+    "Quit Game",
+    "Cheats",
+};
+static char *D_8013F5F8[23] = { /* debug menu */
+    "Select Level",
+    "Invincibility",
+    " on",
+    " off",
+    "Toggle CObj drawing",
+    "Resurrect Gabriel",
+    "Debug Display",
+    " on",
+    " off",
+    "Lots o' Bullets",
+    "Poly Debug",
+    " on",
+    " off",
+    "Invisible",
+    " on",
+    " off",
+    "To first zoom point",
+    "End Level",
+    "Save Game",
+    "NPCs on Radar",
+    " on",
+    " off",
+    "Complete Objectives",
+};
+static char *D_8013F654[19] = { /* level names */
+    "Subway District",
+    "Destroyed Subway",
+    "Tunnel Chase",
+    "Washington Park",
+    "Freedom Memorial",
+    "Expo Center Hunt",
+    "Expo Center Search",
+    "Terrorist Base",
+    "Base Bunker",
+    "Base Radar Tower",
+    "Base Escape",
+    "Secret Prison Top",
+    "Secret Prison Bottom",
+    "Catacombs",
+    "Warehouse District",
+    "Warehouse 76",
+    "Mining Tunnels",
+    "Silo Access Tunnels",
+    "Missile Silo",
+};
+static char *D_8013F6A0[9] = { /* sound menu */
+    "Sound FX\n",
+    "Music\n",
+    "Voice-over\n",
+    "Controller",
+    "Gamma Level",
+    "\nInterface\t",
+    "on ",
+    "off",
+    "Screen Centering",
+};
+static char *D_8013F6C4[30] = { /* controller menu */
+    "   Aim\t\t\t\t  ",
+    "?",
+    "   Use\t\t\t\t  ",
+    "?",
+    "   Target Lock\t\t  ",
+    "?",
+    "   Strafe Left\t\t  ",
+    "?",
+    "   Strafe Right\t\t  ",
+    "?",
+    "   Roll\t\t\t\t  ",
+    "?",
+    "   Kneel\t\t\t\t  ",
+    "?",
+    "   Shoot\t\t\t\t  ",
+    "?",
+    "   Change Weapon\t  ",
+    "?",
+    "   Cancel   ",
+    "Accept   ",
+    "Reset",
+    "Vibration\t",
+    "on ",
+    "off",
+    "Invert Aim\t",
+    "yes ",
+    "no",
+    "\nController Configuration:",
+    "Preset config\t",
+    "zzzzzzzzz",
+};
+static char *D_8013F73C = "Adjust game lighting levels by moving bar up or down"; /* brightness help */
+static char *D_8013F740 = "Current Location"; /* "you" row text */
+static char *D_8013F744[2] = {
+    "\nNo\t",
+    "Yes",
+};
+static char *D_8013F74C[10] = { /* help line per mode */
+    "%x select\t%t exit menu",
+    "%x select\t%t back",
+    "%t back",
+    "%x next\t%t back",
+    "Press new button for action",
+    "%x accept\t%t cancel",
+    "Press %x to continue",
+    "%x equip\t%t back",
+    "%x select",
+    "%t exit menu",
+};
+static char *D_8013F774 = "  none"; /* "no objectives" */
+static char *D_8013F778 = "Cannot change weapons while hanging";
+static char *D_8013F77C = "Controller missing.\n\nPlease reinsert controller into controller port 1 and press the START button to continue"; /* "no controller" */
+static char *D_8013F780 = "Do you really want to abort this game?"; /* quit prompt */
+static char *D_8013F784 = "Do you really want to restart this mission?"; /* restart-from-start prompt */
+static char *D_8013F788 = "Do you really want to restart at the last checkpoint?"; /* restart prompt */
+static char *D_8013F78C = "Mission Objectives:";
+static char *D_8013F790 = "\nCompleted Objectives:";
+static char *D_8013F794 = "\nFailed Objectives:";
+static char *D_8013F798 = "Mission Parameters:"; /* objectives heading */
+static char *D_8013F79C = "\nFailed Parameters:"; /* completed heading */
+static char *D_8013F7A0 = "No Reconnaissance\nData Available"; /* map: "you are here" */
+static char *D_8013F7A4 = "Location Unknown"; /* map: objective location */
+static char *D_8013F7A8 = "Use D-Pad to center the image.\n\nHit %x to save  %t to Cancel";
+static char *D_8013F7AC[3] = { /* controller configuration names */
+    "Standard",
+    "Alternate",
+    "Custom",
+};
+static char *D_8013F7B8[2] = {
+    "Ammo: ",
+    "../...",
+};
+static u8 D_8013F7C0 = 255; /* menu text window */
+static u8 D_8013F7C1 = 255;
+static u8 D_8013F7C2 = 255; /* help line window */
+static u8 D_8013F7C3 = 255; /* weapon rounds window */
+static s32 D_8013F7C4 = 0; /* cursor / current value */
+static s32 D_8013F7C8 = 0; /* first item whose text still has to be built */
+static s32 D_8013F7CC = -1;
+static MenuItem D_8013F7D0[13] = { /* briefing menu */
+    {1, 0, D_8013FE20},
+    {1, 0, &D_8013FE20[3]},
+    {1, 0, &D_8013FE20[6]},
+    {1, 0, &D_8013FE20[9]},
+    {1, 0, &D_8013FE20[12]},
+    {1, 0, &D_8013FE20[15]},
+    {1, 0, &D_8013FE20[18]},
+    {1, 0, &D_8013FE20[21]},
+    {1, 0, &D_8013FE20[24]},
+    {1, 0, &D_8013FE20[27]},
+    {1, 0, &D_8013FE20[30]},
+    {1, 0, &D_8013FE20[33]},
+    {1, 0, &D_8013FE20[34]},
+};
+static MenuItem D_8013F86C[5] = { /* main menu */
+    {1, D_8013F5C8, D_8013FEC8},
+    {1, &D_8013F5C8[1], &D_8013FEC8[1]},
+    {1, &D_8013F5C8[2], D_8013FECC},
+    {1, &D_8013F5C8[3], &D_8013FECC[1]},
+    {1, &D_8013F5C8[4], D_8013FED0},
+};
+static MenuItem D_8013F8A8[7] = { /* options menu */
+    {1, D_8013F5DC, D_8013FE20},
+    {1, &D_8013F5DC[1], &D_8013FE20[1]},
+    {1, &D_8013F5DC[2], &D_8013FE20[2]},
+    {1, &D_8013F5DC[3], &D_8013FE20[3]},
+    {1, &D_8013F5DC[4], &D_8013FE20[4]},
+    {1, &D_8013F5DC[5], &D_8013FE20[5]},
+    {1, &D_8013F5DC[6], &D_8013FE20[6]},
+};
+static MenuItem D_8013F8FC[1] = { /* brightness */
+    {1, &D_8013F73C, D_8013FE20},
+};
+#define D_8013F904 (D_8013F8FC[0].textIds)
+static MenuItem D_8013F908[12] = { /* debug menu */
+    {1, D_8013F5F8, D_8013FE20},
+    {1, &D_8013F5F8[16], &D_8013FE20[1]},
+    {1, &D_8013F5F8[22], &D_8013FE20[22]},
+    {3, &D_8013F5F8[1], &D_8013FE20[2]},
+    {1, &D_8013F5F8[4], &D_8013FE20[5]},
+    {1, &D_8013F5F8[5], &D_8013FE20[6]},
+    {3, &D_8013F5F8[6], &D_8013FE20[7]},
+    {1, &D_8013F5F8[9], &D_8013FE20[10]},
+    {3, &D_8013F5F8[10], &D_8013FE20[11]},
+    {3, &D_8013F5F8[19], &D_8013FE20[19]},
+    {3, &D_8013F5F8[13], &D_8013FE20[14]},
+    {1, &D_8013F5F8[17], &D_8013FE20[18]},
+};
+static MenuItem D_8013F998[19] = { /* level select */
+    {1, D_8013F654, D_8013FE20},
+    {1, &D_8013F654[1], &D_8013FE20[1]},
+    {1, &D_8013F654[2], &D_8013FE20[2]},
+    {1, &D_8013F654[3], &D_8013FE20[3]},
+    {1, &D_8013F654[4], &D_8013FE20[4]},
+    {1, &D_8013F654[5], &D_8013FE20[5]},
+    {1, &D_8013F654[6], &D_8013FE20[6]},
+    {1, &D_8013F654[7], &D_8013FE20[7]},
+    {1, &D_8013F654[8], &D_8013FE20[8]},
+    {1, &D_8013F654[9], &D_8013FE20[9]},
+    {1, &D_8013F654[10], &D_8013FE20[10]},
+    {1, &D_8013F654[11], &D_8013FE20[11]},
+    {1, &D_8013F654[12], &D_8013FE20[12]},
+    {1, &D_8013F654[13], &D_8013FE20[13]},
+    {1, &D_8013F654[14], &D_8013FE20[14]},
+    {1, &D_8013F654[15], &D_8013FE20[15]},
+    {1, &D_8013F654[16], &D_8013FE20[16]},
+    {1, &D_8013F654[17], &D_8013FE20[17]},
+    {1, &D_8013F654[18], &D_8013FE20[18]},
+};
+#define D_8013FAA0 (D_8013FA7C[3])
+static MenuItem D_8013FA7C[7] = { /* sound menu */
+    {1, D_8013F6A0, D_8013FE20},
+    {1, &D_8013F6A0[1], &D_8013FE20[1]},
+    {1, &D_8013F6A0[2], &D_8013FE20[2]},
+    {3, &D_8013F6A0[5], &D_8013FE20[5]},
+    {1, &D_8013F6A0[4], &D_8013FE20[4]},
+    {1, &D_8013F6A0[8], &D_8013FE20[8]},
+    {1, &D_8013F6A0[3], &D_8013FE20[3]},
+};
+static s8 D_8013FAD0[8][6] = {6, 0, -3, 3, -3, -3, 4, 4, -4, 0, 0, -5, -1, 6, -4, -4, 3, -3, -5, 4, 0, -6, 5, 0, -6, 0, 3, -3, 3, 3, -5, -5, 6, 0, 0, 4, -1, -6, 3, 3, -4, 4, 5, -5, 0, 3, -5, 0}; /* player arrow shape per direction */
+const MapLocation mSubwayMapLocations[5] = {{0, 0, 1, -84}, {1, 0, 48, 83}, {2, 0, -17, -67}, {3, 1, -11, 3}, {4, 1, 28, -14}};
+const MapLocation mSubway2MapLocations[3] = {{0, 255, 0, 0}, {1, 1, -19, -12}, {2, 1, -32, -78}};
+const MapLocation mParkMapLocations[5] = {{0, 255, 0, 0}, {1, 0, 31, -8}, {2, 0, 14, -24}, {3, 0, 13, -44}, {4, 0, 15, -85}};
+const MapLocation mBaseExtMapLocations[6] = {{0, 255, 0, 0}, {1, 255, 0, 0}, {2, 0, 70, 37}, {3, 0, 39, 8}, {4, 255, 0, 0}, {5, 0, -12, -46}};
+const MapLocation mMuseumMapLocations[4] = {{0, 0, 8, -34}, {1, 255, 0, 0}, {2, 0, 27, 69}, {3, 255, 0, 0}};
+const MapLocation mMuseum2MapLocations[4] = {{0, 255, 0, 0}, {1, 255, 0, 0}, {2, 255, 0, 0}, {2, 0, -47, 62}};
+const MapLocation mChurch2MapLocations[3] = {{0, 255, 0, 0}, {1, 255, 0, 0}, {2, 0, 23, -41}};
+const MapLocation mWhouseMapLocations[4] = {{0, 255, 0, 0}, {1, 255, 0, 0}, {2, 255, 0, 0}, {3, 0, 28, 0}};
+const MapLocation mSiloMapLocations[6] = {{0, 255, 0, 0}, {1, 255, 0, 0}, {2, 0, 6, 56}, {3, 0, 54, 42}, {4, 0, 54, 42}, {5, 255, 0, 0}};
+const MapLocation *mObjectiveMapLocations[19] = {
+    mSubwayMapLocations, mSubway2MapLocations, 0, mParkMapLocations, mParkMapLocations,
+    mMuseumMapLocations, mMuseum2MapLocations, mBaseExtMapLocations, 0, 0,
+    mBaseExtMapLocations, 0, 0, 0, mWhouseMapLocations, 0, 0, 0, mSiloMapLocations,
+};
+typedef s32 (*MapLocator)(s32 map, VECTOR32 *pos, ScreenPos *out);
+static MapLocator D_8013FB4C[19] = { /* map locator per level */
+    (MapLocator)MapLocateSubway,   (MapLocator)MapLocateSubway,   0,
+    (MapLocator)MapLocatePark,     (MapLocator)MapLocatePark,     (MapLocator)MapLocateMuseum,
+    (MapLocator)MapLocateMuseum2,  (MapLocator)MapLocateBaseExt,  0,
+    0,                             (MapLocator)MapLocateBaseExt,  (MapLocator)MapLocateChurch,
+    (MapLocator)MapLocateChurch2,  0,                             (MapLocator)MapLocateWhouse,
+    (MapLocator)MapLocateInWhouse, 0,                             0,
+    (MapLocator)MapLocateSilo,
+};
+static char *D_8013FB98[8][2] = { /* objective rows: check mark, text */
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+    {"- ", 0},
+};
+static MenuItem D_8013FBD8[14] = { /* controller menu */
+    {3, &D_8013F6C4[21], &D_8013FE20[21]},
+    {3, &D_8013F6C4[24], &D_8013FE20[24]},
+    {2, &D_8013F6C4[28], &D_8013FE20[28]},
+    {1, &D_8013F6C4[27], &D_8013FE20[27]},
+    {2, D_8013F6C4, D_8013FE20},
+    {2, &D_8013F6C4[2], &D_8013FE20[2]},
+    {2, &D_8013F6C4[4], &D_8013FE20[4]},
+    {2, &D_8013F6C4[6], &D_8013FE20[6]},
+    {2, &D_8013F6C4[8], &D_8013FE20[8]},
+    {2, &D_8013F6C4[10], &D_8013FE20[10]},
+    {2, &D_8013F6C4[12], &D_8013FE20[12]},
+    {2, &D_8013F6C4[14], &D_8013FE20[14]},
+    {2, &D_8013F6C4[16], &D_8013FE20[16]},
+    {3, &D_8013F6C4[18], &D_8013FE20[18]},
+};
+static char *D_8013FC80 = 0; /* dialog message */
+static MenuItem D_8013FC84[1] = { /* dialog */
+    {1, &D_8013FC80, D_8013FE20},
+};
+static s32 D_8013FC90 = 0;
+static char **D_8013FC94 = 0;
+static u16 *D_8013FC98 = &D_8013FE20[1];
+static u32 D_8013FC9C = 0; /* dialog type */
+static void (*D_8013FCA0)() = 0; /* dialog callback */
+static u32 D_8013FCA4 = -1; /* tick the menu opened at */
+static u32 D_8013FCA8 = -1; /* tick of the next briefing page turn */
+static u8 D_8013FCAC[5] = {8, 10, 11, 7, 5}; /* submenu per main menu row */
+static s32 D_8013FCB4 = 0; /* current menu */
+static u8 D_8013FCB8 = 0; /* menu stack depth */
+static MenuItem *D_8013FCBC = 0; /* items of the current menu */
+static u8 D_8013FCC0[14] = {5, 12, 19, 7, 14, 7, 2, 0, 0, 1, 0, 0, 0, 0}; /* items per menu */
+static MenuItem *D_8013FCD0[14] = { /* items of each menu */
+    D_8013F86C, D_8013F908, D_8013F998, D_8013FA7C, D_8013FBD8, D_8013F8A8, D_8013FC84,
+    D_8013F7D0, D_8013F7D0, D_8013F8FC, D_8013F7D0, D_8013F7D0, D_8013F7D0, 0,
+};
+static void (*D_8013FD08[14])(void) = { /* per-menu select handlers */
+    func_801396B4, func_80139738, func_80139994, func_801399C4, 0, func_801398A4,
+    func_80139C54, func_80139B54, 0, func_80139CE4, 0, 0, func_80139710, func_80139D24,
+};
+static void (*D_8013FD40[14])(void) = { /* per-menu before-build handlers */
+    0, 0, func_8013E30C, 0, 0, 0, 0, func_8013D04C, func_8013D19C, 0, func_8013D95C,
+    func_8013DC98, func_8013DEEC, func_8013DFB0,
+};
+static void (*D_8013FD78[14])(void) = { /* per-menu after-build handlers */
+    0, func_8013E184, 0, func_8013E278, func_8013E324, 0, 0, 0, 0, func_8013E480, 0, 0, 0,
+    0,
+};
+static void (*D_8013FDB0[14])(void) = { /* per-menu leave handlers */
+    0, 0, 0, func_8013AE30, 0, 0, 0, 0, func_8013AE8C, func_8013AFC8, 0, 0, 0,
+    func_8013B04C,
+};
+static s32 D_8013FDE8 = 0xA; /* current help line */
+static u8 D_8013FDEC[9] = {255, 255, 255, 255, 255, 255, 255, 255, 255};
+static u8 D_8013FDF8[2][9] = {3, 4, 0, 2, 1, 5, 6, 7, 8, 1, 2, 7, 6, 5, 4, 0, 3, 8}; /* controller presets */
+static u32 D_8013FE0C = 0; /* accept/default/cancel row selection */
+static s32 D_8013FE10 = 0; /* direction being repeated */
+static u16 mRepeatButtons = 0x840; /* buttons held last read */
+static u16 mRepeatTicks = 0x0; /* reads since the last repeat */
+static u16 mRepeatCount = 0x0; /* repeats so far */
+static u16 mRepeatDelay = 0x4; /* reads between repeats */
+static u16 D_8013FE1C = 0x1; /* slider step */
+
+/* per-menu setup */
+static void (*const D_80138044[14])(s32 cursor) = {
+    func_80139FFC, funcEvSpIOEx, func_80139D64, func_8013B464, func_8013B8F8, func_80139D64, func_8013A60C,
+    func_8013ACAC, func_8013A744, (void (*)(s32))func_8013AC64, func_8013A220, func_8013A220, func_8013A4F8,
+    (void (*)(s32))func_8013ACA4,
+};
+/* the asserts' file name (the original source path, not the usual "s/..."); asm uses it too */
+static const char D_8013807C[] = "bin/menu.c";
 void iMenuVolumeMusicStop(void) {
     SysPauseSound(1);
     SysStopSong(1, 0);
@@ -370,6 +705,23 @@ void iMenuVolumeMusicStop(void) {
         SysStopXA();
     }
 }
+
+#ifndef _PSYQ
+/* addresses inside the data above that the asm functions use */
+__asm__(".set D_8013F7D4, D_8013F7D0+4\n"
+        ".set D_8013F7D8, D_8013F7D0+8\n"
+        ".set D_8013FB9C, D_8013FB98+4\n"
+        ".set D_8013FBE0, D_8013FBD8+8\n"
+        ".set D_8013FBF8, D_8013FBD8+0x20\n"
+        ".set D_8013FCC8, D_8013FCC0+8\n"
+        ".set D_8013FCCC, D_8013FCC0+12\n"
+        ".set D_8013FE26, D_8013FE20+6\n"
+        ".set D_8013FE64, D_8013FE20+0x44\n"
+        ".set D_8013FE96, D_8013FE94+2\n"
+        ".set D_8013FE9A, D_8013FE98+2\n"
+        ".set D_8013FEA6, D_8013FEA4+2\n"
+        ".set D_8013FEAA, D_8013FEA8+2\n");
+#endif
 
 s32 MapLocateSubway(s32 map, VECTOR32 *pos, u32 *out) {
     s32 ret = 0;
@@ -774,29 +1126,6 @@ void func_80139710(void) {
     func_8013A4F8(D_8013F7C4 + 1);
 }
 
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", D_801377E4);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mSubwayMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mSubway2MapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mParkMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mBaseExtMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mMuseumMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mMuseum2MapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mChurch2MapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mWhouseMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", mSiloMapLocations);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", D_80138044);
-
-INCLUDE_RODATA("asm/menu/nonmatchings/menu", D_8013807C);
 
 #ifdef NON_MATCHING
 /* gObjectives/0xFF swap v0/v1 and gMissionFailed store is scheduled early */
@@ -1146,7 +1475,7 @@ void func_8013A60C(s32 cursor) {
 
 void func_8013A744(s32 cursor) {
     s32 old;
-    MapLocation *loc;
+    const MapLocation *loc;
     s32 map;
     s32 i;
     s32 xy;
@@ -1616,17 +1945,6 @@ typedef struct MenuPad {
 #define MENU_DIR_UP 3
 #define MENU_DIR_DOWN 4
 
-extern char *D_8013F77C; /* "no controller" */
-extern void (*D_8013FD08[])(void); /* per-menu select handlers */
-extern u32 D_8013FE0C; /* accept/default/cancel row selection */
-extern s32 D_8013FE10; /* direction being repeated */
-/* Held-button auto-repeat state: separate u16 statics in the original, which the
- * data split lumped into D_8013FE14/D_8013FE18 (named here by address). */
-extern u16 mRepeatButtons asm("D_8013FE14");   /* buttons held last read */
-extern u16 mRepeatTicks asm("D_8013FE14+2");   /* reads since the last repeat */
-extern u16 mRepeatCount asm("D_8013FE18");     /* repeats so far */
-extern u16 mRepeatDelay asm("D_8013FE18+2");   /* reads between repeats */
-extern u16 D_8013FE1C; /* slider step */
 void EGSDeviceControllerRead(MenuPad **pad, s32 port);
 s32 func_8013B2B0(void);
 s32 func_8013B38C(void);
@@ -1728,7 +2046,7 @@ void func_8013BBE4(u16 pressed) {
                     s32 j;
 
                     if (old != action && old != 0xFF) {
-                        D_8013FBD8[old + 4].textIds[1] = TextReplaceString(D_8013FBD8[old + 4].textIds[1], D_801377E4);
+                        D_8013FBD8[old + 4].textIds[1] = TextReplaceString(D_8013FBD8[old + 4].textIds[1], (char *)D_801377E4);
                     }
                     for (j = 0; j < 9; j++) {
                         if (D_8013FDEC[j] == action) {
@@ -2665,7 +2983,7 @@ void func_8013EE78(void) {
     MenuLine *line;
 
     if (D_8013FE66 != 0xFFFF) {
-        TextRemoveString(TextReplaceString(D_8013FE66, D_801377E4));
+        TextRemoveString(TextReplaceString(D_8013FE66, (char *)D_801377E4));
         D_8013FE66 = 0xFFFF;
     }
     TextRemoveWindowNow(D_8013F7C0);

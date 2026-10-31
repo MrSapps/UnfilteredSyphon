@@ -26,42 +26,42 @@ typedef struct DrawEnv {
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
-/* the asserts here carry "bin/movie.c", not the usual "s/..." path */
+static const char D_801377E4[] = "bin/movie.c"; /* the asserts' __FILE__ (also used by asm) */
 #define ASSERT_MOVIE(cond) if (!(cond)) EGSDebugAssert(1, 0, D_801377E4, __LINE__)
 
-/* Player state (movie.ovl .data/.bss, still defined in asm) */
-extern s32 D_8013BB80;          /* EGS file handle */
-extern s32 D_8013BB84;          /* screen x */
-extern s32 D_8013BB88;          /* screen y */
-extern s32 D_8013BB8C;          /* last frame, -1 for all */
-extern void (*D_8013BB90)();    /* done callback */
-extern void *D_8013BB94;         /* work buffer */
-extern s32 D_8013BB98;          /* work buffer size */
-extern s32 D_8013BB9C;          /* number of decode buffers */
-extern u32 *D_8013BBA0;         /* ring buffer */
-extern u8 *D_8013BBA4[2];       /* decode buffers */
-extern u8 *D_8013BBAC[2];       /* slice buffers */
-extern s32 D_8013BBB4;          /* ring buffer sectors */
-extern s32 D_8013BBB8;          /* current decode buffer */
-extern s32 D_8013BBBC;          /* current slice buffer */
-extern u8 gMovieOpenFlag;
-extern u8 D_8013BBC1;           /* first frame */
-extern u8 D_8013BBC2;
-extern u8 D_8013BBC3;           /* frame drawn */
-extern u8 D_8013BBC4;           /* end of stream */
-extern u8 D_8013BBC5;           /* paused */
-extern u8 D_8013BBC6;           /* loop */
-extern u8 D_8013BBC7;           /* needs restart */
-extern s32 D_8013BBC8;          /* colour mode (1: 24-bit) */
-extern u32 D_8013BBCC;          /* frame count */
-extern u32 D_8013BBD0;          /* current frame */
-extern u32 D_8013CBA4;          /* decode buffer size */
-extern s32 D_8013CBA8;          /* slice size in words */
-extern MovieRect D_8013CBAC;    /* movie rect on screen */
-extern MovieRect D_8013CBB4;    /* current slice rect */
-extern u32 *gHuffmanTable;
+/* Player state; the library modules linked after this TU own the rest of movie.ovl's data */
+static s32 D_8013BB80 = 0;          /* EGS file handle */
+static s32 D_8013BB84 = 0;          /* screen x */
+static s32 D_8013BB88 = 0;          /* screen y */
+static s32 D_8013BB8C = -1;         /* last frame, -1 for all */
+static void (*D_8013BB90)() = 0;    /* done callback */
+static void *D_8013BB94 = 0;        /* work buffer */
+static s32 D_8013BB98 = 0;          /* work buffer size */
+static s32 D_8013BB9C = 2;          /* number of decode buffers */
+static u32 *D_8013BBA0 = 0;         /* ring buffer */
+static u8 *D_8013BBA4[2] = {0, 0};  /* decode buffers */
+static u8 *D_8013BBAC[2] = {0, 0};  /* slice buffers */
+static s32 D_8013BBB4 = 35;         /* ring buffer sectors */
+static s32 D_8013BBB8 = 0;          /* current decode buffer */
+static s32 D_8013BBBC = 0;          /* current slice buffer */
+u8 gMovieOpenFlag = 0;
+static u8 D_8013BBC1 = 0;           /* first frame */
+static u8 D_8013BBC2 = 0;
+static u8 D_8013BBC3 = 1;           /* frame drawn */
+static u8 D_8013BBC4 = 1;           /* end of stream */
+static u8 D_8013BBC5 = 0;           /* paused */
+static u8 D_8013BBC6 = 0;           /* loop */
+static u8 D_8013BBC7 = 0;           /* needs restart */
+static s32 D_8013BBC8 = 0;          /* colour mode (1: 24-bit) */
+static u32 D_8013BBCC = 0x7FFFFFFF; /* frame count */
+static u32 D_8013BBD0 = 0;          /* current frame */
+static u32 D_8013CBA4;              /* decode buffer size */
+static s32 D_8013CBA8;              /* slice size in words */
+static MovieRect D_8013CBAC;        /* movie rect on screen */
+static MovieRect D_8013CBB4;        /* current slice rect */
+u32 *gHuffmanTable;                 /* a common: laid out after the libraries' .bss */
 extern s32 StCdIntrFlag;
-extern char D_801377E4[];       /* "bin/movie.c" */
+
 
 s32 EGSFileRewind(s32 file);
 void EGSFileStreamPlay(s32 file, s32 arg1, s32 arg2);
@@ -555,31 +555,3 @@ s32 EGSMovieWaitTillFinishDrawFrame(void) {
 #else
 INCLUDE_ASM("asm/movie/nonmatchings/movie", EGSMovieWaitTillFinishDrawFrame);
 #endif
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_801377E4);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_801377F0);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_8013780C);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_8013781C);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_8013782C);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_80137840);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", jtbl_80137868);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_801378E8);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_80137910);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_80137934);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_80137960);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_80137990);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_801379B0);
-
-INCLUDE_RODATA("asm/movie/nonmatchings/movie", D_801379C0);

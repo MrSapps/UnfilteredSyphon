@@ -148,17 +148,115 @@ s32 NPCCheckGenerators(void);
 void NPCDisableGenerator(s32 id);
 
 /* chopper.ovl statics, still defined in the overlay's asm .data/.bss */
+/*
+ * chopper.ovl's own data.  bss items 4 bytes apart are laid out as aspsx 2.56's .lcomm
+ * rule does (docs/data_migration.md); aspsx 2.77 and maspsx pack them by size, so both
+ * builds get explicit padding.  0x80145578..0x8014571F holds Vec4s and arrays at 4- or
+ * 8-aligned offsets, which cannot be separate statics (a > 8-byte .lcomm is 16-aligned):
+ * it is two storage blocks, and the code keeps addressing the parts through the original
+ * labels (extern + .set below; under _PSYQ psylink's equates give them).
+ */
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+
+static char *D_801454D0[2] = {
+    "INCOMING FROM LIAN:\n\nGabe, they've found me, and I'm under heavy fire.  These woods are "
+    "swarming with troops.  But I can't take off until you disable the base's radar tracking "
+    "system, or I'll be shot out of the sky.\n",
+    "Hurry and disable that radar - there's a panel on the assembly itself.  Destroy it if you "
+    "have to.  As soon as you do, I'll be able to dust off and get you out of there.  Hurry, I "
+    "can't hold them off much longer...",
+};
+Briefing chopperPreSwitchBriefings = {
+    {"Rozovka, Kazakhstan", "Rhoemer's Base", "09:01 21:30\n"}, 2, D_801454D0,
+};
+static char *D_801454EC[2] = {
+    "INCOMING FROM MARKINSON:\n\nStay focused on the mission, Logan.  Yes, Lian is dead, but "
+    "you've got more pressing concerns.  You've got to get out of there on foot now and still arm "
+    "those explosives, or her death will have meant nothing.  The time for revenge is later.  \n",
+    "The attack chopper they've sent after you is an old Russian prototype Ki-33, built primarily "
+    "for troop transport.  It was never put into production because of it's weak armor plating, "
+    "necessary for high speeds and heavy payloads.  You should be able to take it out if you're "
+    "careful... and fast.  ",
+};
+/* briefings once the generator is down */
+static Briefing D_801454F4 = {
+    {"Rozovka, Kazakhstan", "Rhoemer's Base", "09:01 21:31\n"}, 2, D_801454EC,
+};
+static char *D_80145508[2] = {"Disable radar tracking", "Shoot down attack helicopter"};
+static char *D_80145510 = "Radar Tracking Override."; /* use string */
+static u32 D_80145514 = 0x01000240;                  /* texture animation */
+static u32 D_80145518[4] = {0x01000250, 0x01000260, 0x01000270, 0x01400240}; /* its frames */
+static LevelObjectives D_80145528 = {2, D_80145508}; /* saved objective/timer state */
+static s32 D_80145550 = 0;
+static s32 D_80145554 = 0;
+static s32 D_80145558 = 0;
+static s32 D_8014555C = 0;
+static s32 D_80145560 = 0;
+static u8 D_80145564 = 0;
+static u8 D_80145565 = 0;
+static u8 D_80145566 = 0;
+static u8 D_80145567 = 0;
+static u8 D_80145568 = 0;
+static u8 D_80145569 = 0;
+static u8 D_8014556A = 0;
+static u8 D_8014556B = 0;
+static u8 D_8014556C = 0;
+static u8 D_8014556D = 0;
+static u8 D_8014556E = 0;
+static u8 D_8014556F = 0;
+static u8 D_80145570 = 0;
+static u8 D_80145571 = 0;
+static u8 D_80145572 = 0;
+/* the original .data ends in stray linker padding bytes ("...lisio") */
+static u8 D_80145573 = 'l', D_80145574 = 'i', D_80145575 = 's', D_80145576 = 'i', D_80145577 = 'o';
+
+static u8 D_80145578_s[0xC0]; /* 0x80145578..0x80145637, see above */
+static u8 D_80145638_s[0xE8]; /* 0x80145638..0x8014571F */
+static s32 D_80145720; /* gun mode */
+static s32 D_80145724; /* previous gun mode */
+static s32 D_80145728;
+static s32 D_8014572C; /* altitude table */
+static s32 D_80145730;
+static s32 D_80145734;
+static s32 D_80145738;
+static s32 D_8014573C;
+static s32 D_80145740;
+static s32 D_80145744;
+static s32 D_80145748;
+static s32 D_8014574C; /* path info */
+static s32 D_80145750;
+static s32 D_80145754;
+static s32 D_80145758;
+static s32 D_8014575C;
+static s32 D_80145760;
+static s32 D_80145764; /* full health */
+static s32 D_80145768[4]; /* health thresholds per damage level */
+static s32 D_80145778;
+static s32 D_8014577C; /* radar slot */
+static s32 D_80145780; /* spotlight count */
+static s32 D_80145784; /* chopper object id, -1 if none */
+static s32 D_80145788;
+static s32 D_8014578C; /* current song, -1 if none */
+static s32 D_80145790;
+static u8 D_80145794; BSS_PAD3(D_80145794_pad)
+static u8 D_80145798; BSS_PAD3(D_80145798_pad) /* position set by message 0x2A */
+static s32 D_8014579C; /* padding */
+
 extern ChopperGobj *D_8014561C; /* the chopper */
 extern u8 D_80145620[];         /* chopper searchlight */
 extern Vec4 D_80145660;         /* chopper start position */
 extern Vec4 D_80145670;         /* player position */
 extern Vec4 D_80145680;         /* chopper facing direction */
-extern s32 D_8014578C;          /* current song, -1 if none */
-extern s32 D_80145790;
-extern u8 D_80145565;
-extern u8 D_8014556B;
-extern u8 D_80145572;
-extern Vec4 chopperPos;
+Vec4 chopperPos; /* common: psylink lays it out after the .bss */
 
 void func_801463A4(s32 id, s32 arg1);
 void LevelGetPathInfo(s32 id, void *info, s32 *arg2);
@@ -170,18 +268,11 @@ void EGSAnimSetBox(ChopperAnim *anim, s32 arg1, Vec4 *box);
 
 extern u8 D_80106215;
 extern s32 D_80106218;
-extern s32 D_80145550;
-extern s32 D_80145554;
-extern s32 D_80145558;
-extern s32 D_8014555C;
-extern s32 D_80145560;
 extern NPCInfo D_80145578; /* the chopper's NPC block */
 extern s16 D_801455A8;
 extern s16 D_801455AE;
 extern Vec4 D_801456E0; /* gun turret rotation */
 extern Vec4 D_80145710; /* searchlight rotation */
-extern s32 D_8014574C; /* path info */
-extern s32 D_8014577C; /* radar slot */
 
 /* Object types used by this level */
 #define CHOPPER_TYPE_CHOPPER 3
@@ -200,22 +291,6 @@ void ParticleSmoke(s32 id, Vec4 *pos, Vec4 *dir, s32 scale, s32 arg4);
 void ParticleExplosion(s32 id, Vec4 *pos, Vec4 *dir, s32 scale, s32 arg4);
 void DamageGOBJ(s16 from, s16 by, s16 id, s16 amount, s16 type);
 
-extern s32 D_80145778;
-extern u8 D_80145564;
-extern u8 D_80145566;
-extern u8 D_80145567;
-extern u8 D_80145568;
-extern u8 D_80145569;
-extern u8 D_8014556A;
-extern u8 D_8014556C;
-extern u8 D_8014556D;
-extern u8 D_8014556E;
-extern u8 D_8014556F;
-extern u8 D_80145570;
-extern u8 D_80145571;
-extern s32 D_80145788;
-extern u8 D_801454F4[]; /* briefings once the generator is down */
-extern void *D_80145510; /* use string */
 
 void InterfaceSetRadarWorldRadius(s32 arg0, s32 inner, s32 outer);
 void EGSGeometryINT_GetDistancePointToPoint(Vec4 *a, Vec4 *b, s32 *dist);
@@ -228,20 +303,6 @@ void EGSDisplayFlashlightInit(void *light);
 void EGSDisplayFlashlightParams(void *light, s32 arg1, s32 arg2, s32 arg3);
 void EGSDisplayFlashlightFrame(void *light, s32 arg1, s32 arg2);
 
-extern u8 D_80145798;     /* position set by message 0x2A */
-extern s32 D_80145764;    /* full health */
-extern s32 D_80145768[4]; /* health thresholds per damage level */
-extern s32 D_8014572C;    /* altitude table */
-extern s32 D_80145730;
-extern s32 D_80145734;
-extern s32 D_80145738;
-extern s32 D_8014573C;
-extern s32 D_80145740;
-extern s32 D_80145744;
-extern s32 D_80145748;
-extern s32 D_80145750;
-extern s32 D_80145754;
-extern s32 D_80145758;
 extern Vec4 D_80145690;
 extern Vec4 D_801456A0;
 extern Vec4 D_801456B0;
@@ -251,23 +312,11 @@ extern s32 D_80145638; /* searchlight field */
 void EGSDisplayInitTextureAnimation(void *anim, void *frames, s32 arg2, s32 arg3, s32 arg4);
 void ParticleInitBreath(void);
 
-extern u32 D_80145514;     /* texture animation */
-extern u32 D_80145518[4];  /* texture animation frames */
-extern u8 D_80145528[];    /* saved objective/timer state */
-extern u8 chopperPreSwitchBriefings[];
 extern Vec4 D_801455CC;    /* patrol waypoints */
 extern Vec4 D_801455DC;
 extern Vec4 D_801455EC;
 extern Vec4 D_801455FC;
 extern s32 D_8014560C[4];  /* spotlights */
-extern s32 D_80145720;     /* gun mode */
-extern s32 D_80145724;     /* previous gun mode */
-extern s32 D_80145728;
-extern s32 D_8014575C;
-extern s32 D_80145760;
-extern s32 D_80145780;     /* spotlight count */
-extern s32 D_80145784;     /* chopper object id, -1 if none */
-extern u8 D_80145794;
 
 typedef struct SVec3 {
     s16 vx, vy, vz;
@@ -553,7 +602,63 @@ static void func_80141C64(void) {
 INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_80141C64);
 #endif
 
-INCLUDE_RODATA("asm/chopper/nonmatchings/chopper", D_80140FE4);
+static const s32 D_80141480 = 0xB;
+
+#ifndef _PSYQ
+/* labels inside the bss storage blocks (see the top of the file) */
+__asm__(".set D_80145578, D_80145578_s+0x0\n"
+        ".set D_801455A8, D_80145578_s+0x30\n"
+        ".set D_801455AE, D_80145578_s+0x36\n"
+        ".set D_801455C0, D_80145578_s+0x48\n"
+        ".set D_801455CC, D_80145578_s+0x54\n"
+        ".set D_801455D0, D_80145578_s+0x58\n"
+        ".set D_801455D4, D_80145578_s+0x5C\n"
+        ".set D_801455DC, D_80145578_s+0x64\n"
+        ".set D_801455E0, D_80145578_s+0x68\n"
+        ".set D_801455E4, D_80145578_s+0x6C\n"
+        ".set D_801455EC, D_80145578_s+0x74\n"
+        ".set D_801455F0, D_80145578_s+0x78\n"
+        ".set D_801455F4, D_80145578_s+0x7C\n"
+        ".set D_801455FC, D_80145578_s+0x84\n"
+        ".set D_80145600, D_80145578_s+0x88\n"
+        ".set D_80145604, D_80145578_s+0x8C\n"
+        ".set D_8014560C, D_80145578_s+0x94\n"
+        ".set D_8014561C, D_80145578_s+0xA4\n"
+        ".set D_80145620, D_80145578_s+0xA8\n"
+        ".set D_80145638, D_80145638_s+0x0\n"
+        ".set D_80145660, D_80145638_s+0x28\n"
+        ".set D_80145670, D_80145638_s+0x38\n"
+        ".set D_80145674, D_80145638_s+0x3C\n"
+        ".set D_80145678, D_80145638_s+0x40\n"
+        ".set D_80145680, D_80145638_s+0x48\n"
+        ".set D_80145684, D_80145638_s+0x4C\n"
+        ".set D_80145688, D_80145638_s+0x50\n"
+        ".set D_80145690, D_80145638_s+0x58\n"
+        ".set D_80145694, D_80145638_s+0x5C\n"
+        ".set D_80145698, D_80145638_s+0x60\n"
+        ".set D_801456A0, D_80145638_s+0x68\n"
+        ".set D_801456A4, D_80145638_s+0x6C\n"
+        ".set D_801456A8, D_80145638_s+0x70\n"
+        ".set D_801456B0, D_80145638_s+0x78\n"
+        ".set D_801456B4, D_80145638_s+0x7C\n"
+        ".set D_801456B8, D_80145638_s+0x80\n"
+        ".set D_801456C0, D_80145638_s+0x88\n"
+        ".set D_801456C4, D_80145638_s+0x8C\n"
+        ".set D_801456C8, D_80145638_s+0x90\n"
+        ".set D_801456D0, D_80145638_s+0x98\n"
+        ".set D_801456E0, D_80145638_s+0xA8\n"
+        ".set D_801456E4, D_80145638_s+0xAC\n"
+        ".set D_801456E8, D_80145638_s+0xB0\n"
+        ".set D_801456F0, D_80145638_s+0xB8\n"
+        ".set D_801456F4, D_80145638_s+0xBC\n"
+        ".set D_801456F8, D_80145638_s+0xC0\n"
+        ".set D_80145700, D_80145638_s+0xC8\n"
+        ".set D_80145704, D_80145638_s+0xCC\n"
+        ".set D_80145708, D_80145638_s+0xD0\n"
+        ".set D_80145710, D_80145638_s+0xD8\n"
+        ".set D_80145714, D_80145638_s+0xDC\n"
+        ".set D_80145718, D_80145638_s+0xE0\n");
+#endif
 
 #ifdef NON_MATCHING
 /*
@@ -1346,7 +1451,7 @@ static void func_80144A00(s16 id) {
                 }
                 gObjectives->completed |= 1;
             }
-            gBriefings = D_801454F4;
+            gBriefings = &D_801454F4;
             LevelObjectiveAdd(1, -1);
             LevelObjectiveComplete(0);
         }
@@ -1423,13 +1528,13 @@ void iChopperLevelInit(void) {
     D_80145572 = 0;
     generator = -1;
     ParticleInitBreath();
-    gBriefings = chopperPreSwitchBriefings;
-    SaveObjectivesNTimersReinit(D_80145528, 0);
+    gBriefings = &chopperPreSwitchBriefings;
+    SaveObjectivesNTimersReinit(&D_80145528, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(0, -1);
     }
     if (gObjectives != NULL && (gObjectives->completed & 1)) {
-        gBriefings = D_801454F4;
+        gBriefings = &D_801454F4;
     }
     DamageSetDestroyedCallback((void (*)(s16, s16))func_80144A00);
     UseSetComputerCallback(func_80144B4C);

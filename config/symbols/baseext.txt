@@ -11,4 +11,3 @@ SPOTLIGHTObjDispatch = 0x801443E8; // type:func
 baseextBriefings = 0x80144A0C;
 bunkerBriefings = 0x80144A28;
 baseext2Briefings = 0x80144A44;
-mFileBuffer = 0x80145098;

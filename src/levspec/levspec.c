@@ -10,24 +10,75 @@
 #define CHURCH_TYPE_SCIENTIST 0x65
 #define CHURCH_TYPE_SUBJECT 0x5C
 
-/* levspec.ovl statics, still defined in the overlay's asm .data/.bss */
-extern u8 D_80142A30[];   /* catacombs saved objective state */
-extern u8 D_80142A58[];   /* church saved objective state */
-extern void **D_80142A5C; /* the two objective lines shown for this level */
-extern u8 D_80142A80[];   /* objective line buffers */
-extern u8 D_80142AC0[];
-extern void *D_80142A14;  /* "Eliminate ... scientist" format */
-extern void *D_80142A18;  /* "Administer antigen ..." format */
-extern void *D_80142A1C;
-extern void *D_80142A20;
-extern void *D_80142A24;
-extern void *D_80142A28;
-extern void *D_80142A2C;
-extern u8 D_80140FE4[];
-extern s32 D_80142B00;    /* scientists total */
-extern s32 D_80142B04;    /* scientists killed */
-extern s32 D_80142B08;    /* subjects total */
-extern s32 D_80142B0C;    /* subjects inoculated */
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0}; /* also the empty objective format */
+
+static char *D_80142998[2] = {
+    "AGENCY DIRECTIVE:\n\nYour primary objective is to find Phagan for debriefing.  He is likely held "
+    "in the catacombs located below the church. In addition to that, Rhoemer's scientists working on "
+    "the virus are all onsite.  The knowledge they carry is too dangerous to allow them to live.\n",
+    "Also, this is a humanitarian mission.  The vaccine we've synthesized should counteract the effects "
+    "of Syphon Filter, so inoculate any test subjects you come into contact with.  Remember, these men "
+    "are innocents, kidnapped by Kabanov for experimentation.  Do not allow any harm to come to them.",
+};
+Briefing churchBriefings = {
+    {"Uzhhorod, Ukraine", "Rhoemer's Prison", "09:07 19:00\n"}, 2, D_80142998,
+};
+static char *D_801429B4[1] = {
+    "INCOMING FROM MARKINSON:\n\nYour progress is excellent.  You've made it to the lower levels of the "
+    "church.  Intel indicates you'll find the entrance to the catacombs in the rose chapel, which is in "
+    "the west wing.  Your orders stand:  continue elimination and vaccination procedures and find Phagan.",
+};
+Briefing church2Briefings = {
+    {"Uzhhorod, Ukraine", "Rhoemer's Prison", "09:07 19:30\n"}, 1, D_801429B4,
+};
+static char *D_801429CC[2] = {
+    "INCOMING FROM MARKINSON:\n\nLogan, you're close to Phagan now, but you have a new obstacle.  We've "
+    "learned all the cells in these catacombs are palm print activated.  Also, Phagan is scheduled for "
+    "execution - method:  infection with Syphon Filter.\n",
+    "You'll have to follow the scientist unnoticed and allow him to open Phagan's cell.  Once you've "
+    "retrieved Phagan, immediately evac to the rendezvous point for retrieval and debriefing.",
+};
+Briefing catacombsBriefings = {
+    {"Uzhhorod, Ukraine", "Rhoemer's Prison", "09:07 20:00\n"}, 2, D_801429CC,
+};
+static char *D_801429E8[7] = {
+    ".", /* church: replaced by the scientist count text (D_80142A80) */
+    ".", /* church: replaced by the test subject count text (D_80142AC0) */
+    "Collect security keycards",
+    "Find entrance to catacombs",
+    "Find Phagan",
+    "Follow Phagan to Mei-Xing's cell",
+    "Get Mei-Xing out of the catacombs",
+};
+static char *D_80142A04[1] = {"Do not kill any human test subjects"};
+static char *D_80142A08[3] = {
+    "Do not allow the scientist to die until after Phagan is freed",
+    "Do not allow Phagan to die",
+    "Do not allow Mei-Xing to die",
+};
+static char *D_80142A14 = "Eliminate Rhoemer's %d%s scientist%s";
+static char *D_80142A18 = "Administer antigen to %d%s test subject%s";
+static char *D_80142A1C = "%d scientist%s left to kill";
+static char *D_80142A20 = "Antigen administered.\n%d subject%s remaining";
+static char *D_80142A24 = "Test Subject";
+static char *D_80142A28 = "Door lock";
+static char *D_80142A2C = "Door unlocked";
+static LevelObjectives D_80142A30 = {7, D_801429E8, 3, D_80142A08}; /* catacombs saved objective state */
+static LevelObjectives D_80142A58 = {7, D_801429E8, 1, D_80142A04}; /* church saved objective state */
+
+static char D_80142A80[0x40]; /* objective line buffers */
+static char D_80142AC0[0x40];
+static s32 D_80142B00;        /* scientists total */
+static s32 D_80142B04;        /* scientists killed */
+static s32 D_80142B08;        /* subjects total */
+static s32 D_80142B0C;        /* subjects inoculated */
 
 static void func_801418E0();
 static void func_80141D5C(s16 id);
@@ -142,8 +193,6 @@ static s32 func_80141BA4(s16 id) {
     return 1;
 }
 
-INCLUDE_RODATA("asm/levspec/nonmatchings/levspec", D_80140FE4);
-
 static void func_80141BF0(s16 id) {
     char *msg;
 
@@ -205,7 +254,7 @@ void iCatacombsInit(s32 mode) {
     GameObjectRuntime *mei;
     u32 completed;
 
-    SaveObjectivesNTimersReinit(D_80142A30, 0);
+    SaveObjectivesNTimersReinit(&D_80142A30, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(4, -1);
         if (gObjectives != NULL) {
@@ -255,11 +304,11 @@ void iCatacombsInit(s32 mode) {
 }
 
 static void func_801421F8(void) {
-    StringObjectiveObjectsRemaining2(D_80142A80, D_80142A14, gRemainingMsg, D_80140FE4, D_80142B04, D_80142B00);
+    StringObjectiveObjectsRemaining2(D_80142A80, D_80142A14, gRemainingMsg, (char *)D_80140FE4, D_80142B04, D_80142B00);
 }
 
 static void func_8014224C(void) {
-    StringObjectiveObjectsRemaining2(D_80142AC0, D_80142A18, gRemainingMsg, D_80140FE4, D_80142B0C, D_80142B08);
+    StringObjectiveObjectsRemaining2(D_80142AC0, D_80142A18, gRemainingMsg, (char *)D_80140FE4, D_80142B0C, D_80142B08);
 }
 
 static void func_801422A0(s16 id, s16 by) {
@@ -362,9 +411,9 @@ void iChurchInit(void) {
     D_80142B04 = 0;
     D_80142B08 = 0;
     D_80142B0C = 0;
-    D_80142A5C[0] = D_80142A80;
-    D_80142A5C[1] = D_80142AC0;
-    SaveObjectivesNTimersReinit(D_80142A58, 0);
+    D_80142A58.primaryTexts[0] = D_80142A80;
+    D_80142A58.primaryTexts[1] = D_80142AC0;
+    SaveObjectivesNTimersReinit(&D_80142A58, 0);
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(0, -1);
         LevelObjectiveAdd(1, -1);

@@ -12,7 +12,9 @@ tools/psyq_link.sh                            # psylink + cpe2exe + compare -> 1
 tools/psyq_mapdiff.py                         # optional: our map vs orig/siphon.map
 ```
 
-With `--obj TU=file.obj`, a ccpsx-compiled object replaces `build/src/main/<TU>.c.o`.
+With `--obj TU=file.obj`, a ccpsx-compiled object replaces `build/src/main/<TU>.c.o`
+(for an overlay TU, `build/src/<TU>/<TU>.c.o`; its sections are renamed to `<ovl>.text`
+etc. and its clashing symbols to `<ovl>_<name>`, as for a converted object).
 For example, the five pilot TUs from `tools/psyq_check_tu.py --keep DIR egsdebug egstex
 egsmisc egsanim stream` still give 16x OK. Without `--libs`, the `lib_*.s` asm objects
 are used instead of the real library modules, and the result is also 16x OK.
@@ -105,9 +107,20 @@ Status as of 2026-10-31:
   * Both are data-migration work. A variable the original reached through $gp from
     several TUs is a common (`.comm`, a tentative definition in C), which aspsx
     does reach through gp.
-* **Overlays.** With `-G0`, the `.text` of chopper, levspec, init, park and movie, all
-  of which contain INCLUDE_ASM, is identical to the GNU objects.
-  `psyq_check_tu.py` does not handle overlays yet (yaml layout, section renames).
+* **Overlays.** All 14 overlay TUs define their own `.rdata/.data/.bss` and match in
+  every section under ccpsx `-O2 -G0` + aspsx 2.77: `tools/psyq_check_tu.py chopper ...`
+  (a TU named after an overlay is laid out from `config/ovl/<ovl>.yaml`, compiled with
+  `-G0` and compared against `orig/bin/<ovl>.ovl`). Linked with `--obj` for all 14 (plus
+  the main TUs that pass), every overlay is byte-identical; see the overlay notes in
+  docs/data_migration.md. Left as splat blobs: movie's library rdata/data/bss and the
+  commons psylink places after an overlay's own `.bss` (`DATA_PIECES` in
+  `tools/gen_ovl_yaml.py`).
+* **Main exe link (2026-10-31).** Since data batch 1b, target's `.sbss` (0x8010FFDC) and
+  cas's `.bss` (0x80115634) start at addresses ending in 4. psylink moves them to 8, so
+  the exe and every overlay that references main symbols after them comes out DIFF. With
+  those nine batch-1b files (yaml, main.syms.ld, cas/joystick/object/player/sniper/target/
+  weapon.c) taken from eb4c5d2, the link with all 14 overlay objects gives 16x OK. The
+  TU boundary there needs fixing.
 
 ## SN OBJ facts used by the converter
 

@@ -47,6 +47,7 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, title]
       - [0x7F0, c, title]
-      - [0x3608, data, data]
-      - { start: 0x3940, type: bss, vram: 0x80144920, name: bss }
+      - [0x3608, .data, title]
+      - { start: 0x3940, type: .bss, vram: 0x80144920, name: title }
+      - { type: bss, vram: 0x80145080, name: bss_80145080 }
   - [0x3940]

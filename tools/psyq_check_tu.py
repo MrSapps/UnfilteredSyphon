@@ -3,6 +3,7 @@
 compare every section of the resulting SN OBJ against orig/scus_942.40.
 
 usage: tools/psyq_check_tu.py [--keep DIR] [--flags "-O2 -G8"] egshog egstex ...
+       tools/psyq_check_tu.py chopper menu ...          (overlay TUs, see below)
 
 Where each section of a TU lives is taken from config/scus_942.40.yaml: the `c`
 subsegment gives .text, and dotted subsegments named after the TU (`.rodata`,
@@ -15,6 +16,13 @@ place is reported as "unplaced" (its bytes are still in a splat data segment).
 The source is staged as s/<tu>.c so __FILE__ matches the original ("s/<tu>.c").
 ccpsx defines _PSYQ, which include/common.h uses to turn INCLUDE_ASM into markers;
 tools/psyq_cc.py runs ccpsx -S, expands them with tools/psyq_asm.py, then aspsx.
+
+Overlays: a TU named after an overlay (config/ovl/<tu>.yaml, src/<tu>/<tu>.c) is
+compiled with -O2 -G0 (the overlays have no gp data) unless --flags is given, and
+compared against orig/bin/<tu>.ovl using that yaml's subsegments.  In the link the
+sections are renamed (.text -> <ovl>.text, ...; tools/gen_psylink.py); the check
+works on the object's own names.  The overlay's bss range in the yaml is the
+segment's `bss_size` past the first bss subsegment.
 """
 import argparse
 import os
@@ -56,9 +64,40 @@ def main_subsegments():
     return out
 
 
+def ovl_yaml(tu):
+    p = os.path.join(ROOT, "config/ovl/%s.yaml" % tu)
+    return p if os.path.exists(p) else None
+
+
+def ovl_subsegments(tu):
+    """[(type, name, vram)] of overlay <tu>'s code segment, plus an end marker, and
+    the segment's (vram - file offset) delta."""
+    cfg = yaml.safe_load(open(ovl_yaml(tu)))
+    seg = next(s for s in cfg["segments"] if isinstance(s, dict) and s.get("type") == "code")
+    delta = seg["vram"] - seg.get("start", 0)
+    out = []
+    end = None
+    for s in seg["subsegments"]:
+        if isinstance(s, list):
+            start, typ = s[0], s[1]
+            name = s[2] if len(s) > 2 else None
+            vram = start + delta
+        else:
+            typ, name = s["type"], s.get("name")
+            vram = s["vram"] if "vram" in s else s["start"] + delta
+        if typ in ("bss", ".bss") and end is None:
+            end = vram + seg.get("bss_size", 0)
+        out.append((typ, name, vram))
+    if end is None:                       # no bss: the file end
+        nxt = cfg["segments"][cfg["segments"].index(seg) + 1]
+        end = (nxt[0] if isinstance(nxt, list) else nxt["start"]) + delta
+    out.append(("end", None, end))
+    return out, delta
+
+
 def tu_layout(tu):
     """{SN section name: (vram start, vram end)} for the parts of <tu> its C object provides."""
-    subs = main_subsegments()
+    subs = ovl_subsegments(tu)[0] if ovl_yaml(tu) else main_subsegments()
     lay = {}
     for i, (typ, name, vram) in enumerate(subs[:-1]):
         if name == tu and typ in YAML_TO_SN:
@@ -66,10 +105,14 @@ def tu_layout(tu):
     return lay
 
 
-def known_addresses():
-    """{name: vram} from orig/siphon.map (globals) and config/symbols."""
+def known_addresses(ovl=None):
+    """{name: vram} from orig/siphon.map (globals) and config/symbols (main's files,
+    or only overlay <ovl>'s: overlays share addresses)."""
     out = {}
+    ovls = {f[:-5] for f in os.listdir(os.path.join(ROOT, "config/ovl")) if f.endswith(".yaml")}
     for f in sorted(os.listdir(os.path.join(ROOT, "config/symbols"))):
+        if f.split(".")[0] in ovls and f.split(".")[0] != ovl:
+            continue
         for l in open(os.path.join(ROOT, "config/symbols", f)):
             m = re.match(r"\s*(\w+)\s*=\s*(0x[0-9A-Fa-f]+);", l)
             if m:
@@ -96,7 +139,7 @@ def check_symbols(o, lay, known):
     return bad
 
 
-def compare(sec, orig, lo, hi):
+def compare(sec, orig, lo, hi, delta=EXE_DELTA):
     """(status, detail) for one OBJ section against orig bytes [lo, hi)."""
     size = len(sec.data) or sec.bss
     want = hi - lo
@@ -106,12 +149,15 @@ def compare(sec, orig, lo, hi):
     if not sec.data:
         return "OK", "size 0x%x" % size
     n = len(sec.data) // 4
-    off = lo - EXE_DELTA
+    off = lo - delta
     w = struct.unpack("<%dI" % n, sec.data[:n * 4])
     e = struct.unpack("<%dI" % n, orig[off:off + n * 4])
     m = masks_for(sec)
     diffs = [i for i in range(n) if (w[i] & m[i]) != (e[i] & m[i])]
     tail = sec.data[n * 4:] != orig[off + n * 4:off + len(sec.data)]
+    # psylink pads the section to 4 with zeros; nonzero bytes there in the original
+    # (stray linker padding) have to come from the object
+    tail = tail or any(orig[off + len(sec.data):off + want])
     if diffs or tail:
         first = 4 * diffs[0] if diffs else n * 4
         return "DIFF", "%d differing words (first @0x%x = %08x)" % (
@@ -122,21 +168,31 @@ def compare(sec, orig, lo, hi):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tus", nargs="+")
-    ap.add_argument("--flags", default="-O2 -G8")
+    ap.add_argument("--flags", help='ccpsx flags (default "-O2 -G8", "-O2 -G0" for overlays)')
     ap.add_argument("--keep", help="directory for the .obj files (default: a temp dir)")
     args = ap.parse_args()
     work = os.path.abspath(args.keep or tempfile.mkdtemp(prefix="psyqtu"))
     os.makedirs(work, exist_ok=True)
-    if not os.path.exists(os.path.join(work, "s")):
-        os.symlink(os.path.join(ROOT, "src/main"), os.path.join(work, "s"))
-    orig = open(os.path.join(ROOT, "orig/scus_942.40"), "rb").read()
-    known = known_addresses()
+    exe = open(os.path.join(ROOT, "orig/scus_942.40"), "rb").read()
+    known_main = known_addresses()
     bad_total = 0
     for tu in args.tus:
+        ovl = ovl_yaml(tu) is not None
+        # stage the source as <sdir>/<tu>.c: s/ for the main exe (__FILE__ = "s/<tu>.c")
+        sdir = "s" if not ovl else "s_" + tu
+        if not os.path.exists(os.path.join(work, sdir)):
+            os.symlink(os.path.join(ROOT, "src", tu if ovl else "main"), os.path.join(work, sdir))
+        if ovl:
+            orig = open(os.path.join(ROOT, "orig/bin/%s.ovl" % tu), "rb").read()
+            delta = ovl_subsegments(tu)[1]
+        else:
+            orig, delta = exe, EXE_DELTA
+        known = known_addresses(tu) if ovl else known_main
+        flags = (args.flags or ("-O2 -G0" if ovl else "-O2 -G8")).split()
         obj = os.path.join(work, tu + ".obj")
-        cmd = [sys.executable, os.path.join(TOOLS, "psyq_cc.py")] + args.flags.split() + [
+        cmd = [sys.executable, os.path.join(TOOLS, "psyq_cc.py")] + flags + [
             "-I" + os.path.join(ROOT, "include"), "-I" + os.path.join(ROOT, "src"),
-            "-c", "s/%s.c" % tu, "-o" + obj]
+            "-c", "%s/%s.c" % (sdir, tu), "-o" + obj]
         if os.path.exists(obj):
             os.unlink(obj)
         r = subprocess.run(cmd, cwd=work, capture_output=True, text=True)
@@ -160,7 +216,7 @@ def main():
                 ok = ok and hi == lo
                 lines.append("%-6s %s missing (orig 0x%x)" % (name, "OK" if hi == lo else "DIFF", hi - lo))
                 continue
-            st, detail = compare(sec, orig, lo, hi)
+            st, detail = compare(sec, orig, lo, hi, delta)
             ok = ok and st == "OK"
             lines.append("%-6s %-4s %s" % (name, st, detail))
         for b in check_symbols(o, lay, known):

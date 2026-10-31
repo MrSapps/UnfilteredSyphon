@@ -137,35 +137,110 @@ typedef struct SubwayObjectives {
     void *msg;
 } SubwayObjectives;
 
-/* subway.ovl statics, still defined in the overlay's asm .data/.bss */
-extern u8 D_80140FE4[];            /* (.rodata) comm array use string */
-extern void *D_801455D8;           /* level-specific NPC name */
-extern u8 D_801455DC[];            /* texture animations */
-extern u8 D_801455E0[];
-extern u8 D_801455F0[];
-extern u8 D_801455F4[];
-extern u8 D_80145604[];            /* SUBWAY objectives/timers save info */
-extern SubwayObjectives *D_80145608;
-extern u8 D_8014562C[];            /* SUBWAY3 objectives/timers save info */
-extern u8 D_80145654[];            /* SUBWAY3 chase area box */
-extern VECTOR32 D_80145674[5];     /* SUBWAY3 platform line points */
-extern u8 D_801456C4[];            /* train camera shake vector */
-extern s32 D_801456D4[];           /* SUBWAY3 Aramov taunts (XA) */
-extern SubwayTexAnim *D_801456E0;
-extern SubwayTexAnim *D_801456E4;
-extern u8 D_801456E8;              /* texture animation 0 running */
-extern u8 D_801456EC;              /* texture animation 1 running */
+/*
+ * subway.ovl's own data.  The bss items 4 bytes apart are laid out as aspsx 2.56's
+ * .lcomm rule does (docs/data_migration.md); aspsx 2.77 and maspsx pack them by size
+ * instead, so both builds get explicit padding.  Arrays the original has at 4- or
+ * 8-aligned offsets cannot be separate statics (a > 8-byte .lcomm is 16-aligned):
+ * they are storage structs, and the code keeps addressing their parts through the
+ * original labels (extern + .set below; under _PSYQ psylink's equates give them).
+ */
+#define BSS_PAD3(n) static u8 n; static s16 n##_2;
+
+/* Mission briefing shown while the level loads (init.ovl reads it through gBriefings). */
+typedef struct Briefing {
+    /* 0x00 */ char *lines[3];
+    /* 0x0C */ s32 count;
+    /* 0x10 */ char **objectives;
+} Briefing;
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0}; /* its first word doubles as the comm array use string "" */
+
+static char *D_8014557C[2] = {
+    "AGENCY DIRECTIVE:\n\nOur FBI informant has pinpointed the terrorist viral attack in the DC "
+    "subway system.  Our contacts within US Defense and Interpol confirm the identities of the "
+    "terrorists.  We will drop you in after CBDC (US Army Chemical and Biological Defense Command) "
+    "operations begin.\n",
+    "Your targets are Rhoemer, Kravitch, Aramov and Girdeux.  SATCOM has intercepted coded "
+    "microwave traffic.  Rhoemer must have an uplink station in the area.  Assist CBDC if needed.  "
+    "Avoid collateral casualties if possible.  Check your objectives onsite for more information.",
+};
+Briefing subwayBriefings = {
+    {"Washington DC", "Georgia Street Subway", "08:23 22:45\n"}, 2, D_8014557C,
+};
+static char *D_80145598[2] = {
+    "INCOMING FROM LIAN:\n\nGabe, Rhoemer's long gone.  D.C.P.D. reports he's taken out a dozen "
+    "officers fifteen blocks east of you and fled the scene.  The entire Garfield Street attack was "
+    "just a diversionary tactic.  Washington Park is the key to his plans.\n",
+    "You still have a chance to eliminate Aramov.  Don't let her get away.  But remember you can't "
+    "use grenades in that tunnel.  Any explosion could damage the tracks and cause a derailment.  "
+    "Enough innocent people have already died tonight.  ",
+};
+Briefing subway3Briefings = {
+    {"Washington DC", "Georgia Street Subway", "08:24 00:30\n"}, 2, D_80145598,
+};
+static char *D_801455B4[5] = {
+    "Eliminate Kravitch and destroy comm. array",
+    "Protect CBDC bomb squad",
+    "Turn off power to terminal security doors",
+    "Tag bomb in terminal",
+    ".", /* replaced by gEliminateRhoemerMsg (through D_80145608) */
+};
+static char *D_801455C8[2] = {
+    "Do not eliminate any CBDC agent",
+    "Avoid damaging viral delivery systems or explosive bombs",
+};
+static char *D_801455D0[1] = {"Eliminate Aramov"};
+static char *D_801455D4[1] = {"Do not use grenades or train lines may be damaged"};
+static char *D_801455D8 = "Kravitch"; /* level-specific NPC name */
+/* texture animations: source and frames (VRAM x, y) */
+static s16 D_801455DC[2] = {0x280, 0x00};
+static s16 D_801455E0[8] = {0x290, 0x00, 0x2A0, 0x00, 0x2B0, 0x00, 0x280, 0x20};
+static s16 D_801455F0[2] = {0x280, 0x60};
+static s16 D_801455F4[8] = {0x2A0, 0x20, 0x290, 0x60, 0x280, 0x40, 0x290, 0x40};
+static LevelObjectives D_80145604 = {5, D_801455B4, 2, D_801455C8}; /* SUBWAY objectives/timers save info */
+static LevelObjectives D_8014562C = {1, D_801455D0, 1, D_801455D4}; /* SUBWAY3 objectives/timers save info */
+static VECTOR32 D_80145654[2] = { /* SUBWAY3 chase area box */
+    {-0x4E76, 0x75, -0x461F}, {-0x4D8D, 0x75, -0x455C},
+};
+static VECTOR32 D_80145674[5] = { /* SUBWAY3 platform line points */
+    {-0x2C40, 0x70, -0x1183}, {-0x2D55, 0x70, -0x1385}, {-0x2B63, 0x70, -0x14B4},
+    {-0x2D9D, 0x70, -0x12EB}, {-0x2FCA, 0x70, -0x1240},
+};
+static s32 D_801456C4[4] = {0, 2, 0, 0}; /* train camera shake vector */
+static s32 D_801456D4[3] = {0x121, 0x127, 0x12A}; /* SUBWAY3 Aramov taunts (XA) */
+extern SubwayObjectives *D_80145608; /* = D_80145604.primaryTexts */
+
+static SubwayTexAnim *D_801456E0;
+static SubwayTexAnim *D_801456E4;
+static u8 D_801456E8; BSS_PAD3(D_801456E8_pad) /* texture animation 0 running */
+static u8 D_801456EC; BSS_PAD3(D_801456EC_pad) /* texture animation 1 running */
 typedef struct SubwayLight {
-    u8 unk00[0x18];
+    /* 0x00 */ u8 unk00[0x18];
+    /* 0x18 */ s32 unk18; /* D_80145708 */
+    /* 0x1C */ u8 unk1C[0x24];
 } SubwayLight;
-extern SubwayLight D_801456F0;     /* train headlight */
-extern s32 D_80145708;
-extern VECTOR32 D_80145730;        /* SUBWAY3 platform line normal */
+static SubwayLight D_801456F0;     /* train headlight */
+extern s32 D_80145708;             /* = D_801456F0.unk18 */
+static VECTOR32 D_80145730;        /* SUBWAY3 platform line normal */
+static struct {
+    u8 shake[0x44];                       /* D_80145740: train camera shake state */
+    VECTOR32 carPos[TRAIN_MAX][TRAIN_MAX_CARS]; /* D_80145784 */
+} D_80145740_s;
 extern u8 D_80145740[];            /* train camera shake state */
 extern VECTOR32 D_80145784[TRAIN_MAX][TRAIN_MAX_CARS]; /* car start positions */
-extern SubwayFrame *D_80145824;       /* headlight frame */
-extern SubwayRuntime *D_80145828;  /* Aramov */
-extern s32 D_8014582C;             /* taunts left */
+static SubwayFrame *D_80145824;    /* headlight frame */
+static SubwayRuntime *D_80145828;  /* Aramov */
+static s32 D_8014582C;             /* taunts left */
+static struct {
+    u32 stopTick;                         /* D_80145830 */
+    s32 nearDist;                         /* D_80145834 */
+    s32 farDist;                          /* D_80145838 */
+    u16 carIds[TRAIN_MAX][TRAIN_MAX_CARS]; /* D_8014583C */
+    u16 headIds[TRAIN_MAX];               /* D_80145850 */
+    u8 carCounts[TRAIN_MAX];              /* D_80145854 */
+    VECTOR32 commPos;                     /* D_80145858 */
+} D_80145830_s;
 extern u32 D_80145830;             /* tick Aramov stops waiting */
 extern s32 D_80145834;             /* train near distance */
 extern s32 D_80145838;             /* train far distance */
@@ -173,11 +248,12 @@ extern u16 D_8014583C[TRAIN_MAX][TRAIN_MAX_CARS]; /* car object ids */
 extern u16 D_80145850[TRAIN_MAX];  /* head car object id */
 extern u8 D_80145854[TRAIN_MAX];   /* car count */
 extern VECTOR32 D_80145858;        /* comm array position */
-extern SubwayRuntime *D_80145868;  /* comm array object */
-extern SubwayFlags D_8014586C;
-extern ChaseFlags D_80145870;
-extern TrainFlags D_80145874;
-extern u8 D_80145875; /* 1: train sound playing */
+static SubwayRuntime *D_80145868;  /* comm array object */
+static SubwayFlags D_8014586C; BSS_PAD3(D_8014586C_pad)
+static ChaseFlags D_80145870; BSS_PAD3(D_80145870_pad)
+static TrainFlags D_80145874;
+static u8 D_80145875; /* 1: train sound playing */
+static s16 D_80145876; /* unused: the map's subway.bss is 0x198 bytes (word padding) */
 typedef struct TrainSound {
     u8 playing : 1;
 } TrainSound;
@@ -810,7 +886,21 @@ static void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos) {
 INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80142C7C);
 #endif
 
-INCLUDE_RODATA("asm/subway/nonmatchings/subway", D_80140FE4);
+#ifndef _PSYQ
+/* labels inside the storage structs above (see the top of the file) */
+__asm__(".set D_80145608, D_80145604+0x4\n"
+        ".set D_80145708, D_801456F0+0x18\n"
+        ".set D_80145740, D_80145740_s\n"
+        ".set D_80145784, D_80145740_s+0x44\n"
+        ".set D_80145830, D_80145830_s\n"
+        ".set D_80145834, D_80145830_s+0x4\n"
+        ".set D_80145838, D_80145830_s+0x8\n"
+        ".set D_8014583C, D_80145830_s+0xC\n"
+        ".set D_80145850, D_80145830_s+0x20\n"
+        ".set D_80145854, D_80145830_s+0x24\n"
+        ".set D_80145858, D_80145830_s+0x28\n"
+        ".set D_80145860, D_80145830_s+0x30\n");
+#endif
 
 static void *func_80142D74(s16 id, s16 kind) {
     VECTOR32 pos;
@@ -826,7 +916,7 @@ static void *func_80142D74(s16 id, s16 kind) {
     if (kind == 1) {
         pos = ((SubwayRuntime *)gObjPlayer)->move->pos;
         func_80142C7C(D_80145868, &pos);
-        return D_80140FE4;
+        return (void *)D_80140FE4;
     }
     return NULL;
 }
@@ -865,7 +955,7 @@ void func_80142E90(void) {
     fogOut = -1;
     InterfaceViralRadarInit();
     func_80141720(0x1680, 0x1680, 0x78, 0xD, 6);
-    SaveObjectivesNTimersReinit(D_80145604, 0);
+    SaveObjectivesNTimersReinit(&D_80145604, 0);
     i = 0;
     if (gObjectives->unk18 == 0) {
         LevelObjectiveAdd(0, -1);
@@ -1295,7 +1385,7 @@ void iSubway3Init(s32 mode) {
     D_80145730.vy = 0;
     D_80145730.vz = 0x7C8C;
     GTEMath_VectorNormal(&D_80145730, &D_80145730);
-    SaveObjectivesNTimersReinit(D_8014562C, 0);
+    SaveObjectivesNTimersReinit(&D_8014562C, 0);
     LevelObjectiveAdd(0, -1);
     if (gObjectives != NULL) {
         gObjectives->unk24 |= 1;

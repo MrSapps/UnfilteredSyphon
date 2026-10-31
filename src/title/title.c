@@ -165,63 +165,165 @@ TitleRect *TextStringRect(u16 id, s32 arg1);
 s32 TextStringLength(u16 id, s32 arg1);
 void TextUpdate(void);
 
-/* title.ovl rodata, still in asm */
-extern char D_80140FE4[];      /* "" */
-extern char D_801411D8[];      /* "\n\nSave complete" */
-extern char D_80141680[];      /* "bin/title.c" */
-extern char D_8014168C[];      /* "BASCUS-94240SYPHON" */
-extern u8 mFileHeader[];       /* memory card file header (icon) */
-extern void (*D_801415B0[])(void);   /* per mode: confirm pressed */
-extern void (*D_801415C8[])(s32);    /* per mode: select item */
-extern void (*D_801415E0[])(void);   /* per mode: menu built */
-extern void (*D_801415F8[])(void);   /* per mode: every frame */
+/* title.ovl bss: one object (aspsx would 16-align separate arrays this big) */
+static struct {
+    /* 0x000 */ s32 cardOps[10];             /* card op queue */
+    /* 0x028 */ TitlePolyF4 outline[13];     /* memory card outline */
+    /* 0x1FC */ TitleLineF2 edges[13][2];    /* memory card outline edges */
+    /* 0x46C */ TitleLineF2 grid[30];        /* memory card grid */
+    /* 0x73C */ TitlePolyF4 highlight;       /* selection highlight */
+} titleBss;
+#define D_80144920 (titleBss.cardOps)
+#define D_80144948 (titleBss.outline)
+#define D_80144B1C (titleBss.edges)
+#define D_80144D8C (titleBss.grid)
+#define D_8014505C (titleBss.highlight)
 
-/* title.ovl data, still in asm */
-extern char *D_801445E8[];     /* message per MemCardSync error */
-extern char *D_80144608[];     /* message per card operation */
-extern char *D_80144630[];     /* "No", "Yes" */
-extern char *D_80144638[];     /* "Press X to continue" */
-extern char *D_80144654;       /* "This memory card is full..." */
-extern char *D_80144658;       /* "Do you wish to overwrite this slot?" */
-extern char *D_80144648;       /* "Cancel" */
-extern char *D_80144650;       /* "--- Empty Slot ---" */
-extern MovieInfo D_8014465C[3]; /* attract movies */
-extern s32 D_80144830;         /* selected save slot */
-extern u32 mMovieInterruptTime;
-extern u8 mTitleWindow;
-extern s16 D_8014483A;         /* card op queue: last taken */
-extern s16 D_8014483C;         /* card op queue: last added */
-extern s32 D_80144840;         /* memory card state */
-extern char *D_80144844;       /* message box text */
-extern TitleMenuEntry D_80144848[2]; /* message box menu */
-extern s32 D_80144860;         /* message box type */
-extern void (*D_80144864)(s32); /* message box callback */
-extern s32 D_80144868;         /* card messages are suppressed */
-extern TitleMenuEntry D_8014486C[2]; /* save prompt menu */
-extern TitleMenuEntry D_80144884[7]; /* slot menu */
-extern u32 mTitleMode;
-extern s32 D_801448DC[6];      /* menu lines per mode */
-extern TitleMenuEntry *mTitleMenuTable[6];
-extern s32 mTitleModeStackDepth;
-extern s32 mCurItem;
-extern void (*mCardSuccessCallback)(void);
-extern void (*mCardFailedCallback)(void);
-extern s32 D_8014491C;         /* pad buttons last frame */
+/* commons: psylink lays them out after the .bss */
+TitleRect mTitleSelection[3]; /* highlight: current, target, step (10.6 fixed point) */
+u8 mFileBuffer[0x200];
+u16 mTitleString[8];
+s32 mNewMenu;
+SyphonHeader mSyphonHeader;
+EGSSprite mTitleScreenSprite[2];
+EGSSprite *mTitleSprites;
+u8 bkgd[0x28];
+s16 mTitleModeStack[10][2];
 
-/* title.ovl bss */
-extern s32 D_80144920[10];     /* card op queue */
-extern TitlePolyF4 D_80144948[13];      /* memory card outline */
-extern TitleLineF2 D_80144B1C[13][2];   /* memory card outline edges */
-extern TitleLineF2 D_80144D8C[30];      /* memory card grid */
-extern TitlePolyF4 D_8014505C;          /* selection highlight */
-extern TitleRect mTitleSelection[3];    /* highlight: current, target, step (10.6 fixed point) */
-extern u16 mTitleString[8];
-extern s32 mNewMenu;
-extern SyphonHeader mSyphonHeader;
-extern EGSSprite mTitleScreenSprite[2];
-extern EGSSprite *mTitleSprites;
-extern u8 bkgd[];
-extern s16 mTitleModeStack[10][2];
+static void func_80142D8C(void);
+static void func_80142F84(void);
+static void func_80142FEC(void);
+static void func_80143084(void);
+static void func_80143168(void);
+static void func_801431E8(s32 item);
+static void func_80143220(s32 item);
+static void func_8014335C(s32 item);
+static void func_801434B0(void);
+static void func_801435A8(void);
+static void func_801436B4(void);
+static void func_80143718(void);
+static void func_80143764(void);
+
+static const s32 D_80140FE4[5] = {0, 1, 1, 1, 0};
+#define EMPTY_STR ((char *)D_80140FE4) /* the tables' "" is the header's first word */
+
+/* message per MemCardSync error */
+static char *D_801445E8[8] = {
+    EMPTY_STR,
+    "\n\nMemory card not found",
+    "\n\nMemory card seems to be bad.\nPlease replace and retry",
+    "\n\nMemory card has been unexpectedly changed...\n\nPlease try again",
+    "\n\nMemory card isn't formatted.\nFormat now?",
+    "\n\nMemory card doesn't have a \nSyphon Filter slot on it yet.\nWould you like to create one?",
+    "\n\nOverwrite existing save game?",
+    "There is no room on memory card to save a game.\nPlease insert a different memory card and try again",
+};
+/* message per card operation */
+static char *D_80144608[10] = {
+    EMPTY_STR, "Searching memory card", EMPTY_STR, EMPTY_STR, "Reading save data",
+    EMPTY_STR, EMPTY_STR, EMPTY_STR, EMPTY_STR, EMPTY_STR,
+};
+static const char D_801411C4[] = "\n\nFormat complete";
+static const char D_801411D8[] = "\n\nSave complete";
+static char *D_80144630[2] = {"\nNo\t", "Yes"};
+static char *D_80144638[1] = {"\nPress %x to continue"};
+static char *D_8014463C = "\n\nDo you wish to save your game?";
+static char *D_80144640[2] = {"\nNo\t", "Yes"};
+static char *D_80144648 = "\nCancel";
+static char *D_8014464C = "Choose save slot to use\n";
+static char *D_80144650 = "--- Empty Slot ---";
+static char *D_80144654 = "This memory card is full.  Syphon Filter requires one block on the memory card.  "
+                          "You will not be able to save your game to this memory card.  Continue anyway?";
+static char *D_80144658 = "\n\nDo you wish to overwrite this slot?";
+/* attract movies */
+static MovieInfo D_8014465C[3] = {
+    {"\\SOL\\989LOGO", 0x140, 0xF0},
+    {"\\SOL\\EIDETIC", 0x140, 0xF0},
+    {"\\SOL\\INTRO", 0x140, 0xF0, 0, 0x28, 1},
+};
+static s32 D_80144830 = 0; /* selected save slot */
+u32 mMovieInterruptTime = 0;
+u8 mTitleWindow = 0xFF;
+static s16 D_8014483A = 0; /* card op queue: last taken */
+static s16 D_8014483C = 0; /* card op queue: last added */
+static s32 D_80144840 = CARD_UNKNOWN; /* memory card state */
+static char *D_80144844 = NULL;       /* message box text */
+/* message box menu */
+static TitleMenuEntry D_80144848[2] = {{1, &D_80144844, &mTitleString[0]}, {0, NULL, &mTitleString[1]}};
+static s32 D_80144860 = 0;            /* message box type */
+static void (*D_80144864)(s32) = NULL; /* message box callback */
+static s32 D_80144868 = 0;            /* card messages are suppressed */
+/* save prompt menu */
+static TitleMenuEntry D_8014486C[2] = {{1, &D_8014463C, &mTitleString[0]}, {2, D_80144640, &mTitleString[1]}};
+/* slot menu */
+static TitleMenuEntry D_80144884[7] = {{1, &D_8014464C, &mTitleString[0]}};
+u32 mTitleMode = TITLE_MODE_INIT;
+static s32 D_801448DC[6] = {2, 2, 2, 0, 0, 0}; /* menu lines per mode */
+TitleMenuEntry *mTitleMenuTable[6] = {NULL, D_80144848, D_8014486C, NULL, D_80144884, NULL};
+s32 mTitleModeStackDepth = 0;
+s32 mCurItem = 0;
+void (*mCardSuccessCallback)(void) = NULL;
+void (*mCardFailedCallback)(void) = NULL;
+static s32 D_8014491C = -1; /* pad buttons last frame */
+
+/* memory card file header: "SC", icon frames, title, CLUT, icon */
+const u8 mFileHeader[0x280] = {
+    0x53, 0x43, 0x13, 0x01, 0x82, 0x72, 0x82, 0x99, 0x82, 0x90, 0x82, 0x88, 0x82, 0x8F, 0x82, 0x8E,
+    0x81, 0x40, 0x82, 0x65, 0x82, 0x89, 0x82, 0x8C, 0x82, 0x94, 0x82, 0x85, 0x82, 0x92, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x18, 0x63, 0xB5, 0x56, 0x73, 0x4E, 0x31, 0x46, 0xEF, 0x3D, 0xAD, 0x35, 0x6B, 0x2D, 0x29, 0x25,
+    0x08, 0x21, 0xE7, 0x1C, 0xC6, 0x18, 0xA5, 0x14, 0x84, 0x10, 0x63, 0x0C, 0x21, 0x04, 0x00, 0x80,
+    0xEC, 0xCC, 0x9A, 0xCA, 0xAB, 0xA9, 0xDC, 0xCE, 0xEE, 0x9C, 0x88, 0xA7, 0x8A, 0x69, 0xD9, 0xEE,
+    0xDD, 0x79, 0x3B, 0x75, 0x57, 0x87, 0xA5, 0xDD, 0xBC, 0xA6, 0x16, 0x33, 0x33, 0xE3, 0x74, 0xDC,
+    0x8B, 0xE5, 0x45, 0xED, 0x5D, 0xF2, 0x54, 0xBA, 0x69, 0xF4, 0x8D, 0x35, 0x95, 0xF9, 0x34, 0xA7,
+    0x67, 0xFE, 0x7F, 0x00, 0x50, 0xFF, 0x4E, 0x95, 0xE7, 0x6A, 0xE7, 0x2E, 0xFB, 0x7B, 0xFA, 0x75,
+    0x5B, 0xA0, 0x13, 0x05, 0x35, 0xA2, 0x40, 0x79, 0x29, 0xD2, 0x07, 0x91, 0x03, 0xE5, 0x21, 0x77,
+    0x67, 0x74, 0x1F, 0xF1, 0x02, 0x6F, 0x62, 0x87, 0x9A, 0x37, 0xCB, 0xF4, 0xD4, 0x1A, 0x85, 0xBA,
+    0xCC, 0x58, 0x41, 0xFB, 0x4B, 0x30, 0xA7, 0xDD, 0xCD, 0x59, 0x74, 0xFF, 0x6F, 0x42, 0xB8, 0xDE,
+    0xCE, 0xAA, 0xCD, 0x15, 0xD7, 0x8B, 0xC7, 0xEE, 0xCC, 0x48, 0x12, 0x11, 0x11, 0x41, 0xB7, 0xCD,
+    0xED, 0xDE, 0xBC, 0xEC, 0xCE, 0xCB, 0xED, 0xDE, 0xFE, 0xCE, 0x9A, 0xEB, 0xCE, 0x8B, 0xEC, 0xEF,
+    0xEE, 0x9D, 0x5C, 0xC9, 0x9C, 0x99, 0xD8, 0xEF, 0xEE, 0xCA, 0x37, 0x66, 0x66, 0xE4, 0xB5, 0xEE,
+    0xDD, 0xE8, 0x56, 0xED, 0x7E, 0xF3, 0x95, 0xEE, 0xAD, 0xF6, 0x8C, 0x46, 0x96, 0xF9, 0x55, 0xDD,
+    0x8B, 0xFE, 0x7F, 0x11, 0x52, 0xFF, 0x6E, 0xC8, 0xE9, 0x7A, 0xE7, 0x4E, 0xFC, 0x7B, 0xFA, 0xA7,
+    0x6C, 0xB1, 0x24, 0x17, 0x47, 0xB3, 0x51, 0x8A, 0x4A, 0xD5, 0x18, 0xA4, 0x14, 0xE7, 0x53, 0x89,
+    0x99, 0x88, 0x2F, 0xF4, 0x33, 0x7E, 0xA5, 0xB9, 0xDC, 0x6C, 0xDC, 0xF5, 0xD5, 0x3B, 0xD9, 0xDE,
+    0xEE, 0x9D, 0x54, 0xFB, 0x4B, 0x62, 0xEC, 0xEE, 0xEE, 0x9D, 0x95, 0xFF, 0x7F, 0x74, 0xEC, 0xEF,
+    0xEE, 0xBC, 0xCD, 0x26, 0xD7, 0xAC, 0xEA, 0xEF, 0xDC, 0x6A, 0x24, 0x43, 0x23, 0x53, 0xD9, 0xDE,
+    0xED, 0xEE, 0xCE, 0xEE, 0xEE, 0xEC, 0xEE, 0xDE, 0xFE, 0xEF, 0xCC, 0xFE, 0xEF, 0xBD, 0xFE, 0xEF,
+    0xFE, 0xDF, 0x8D, 0xFE, 0xEF, 0xBC, 0xFC, 0xEF, 0xFE, 0xDE, 0x89, 0xBC, 0xDB, 0xE8, 0xE9, 0xEF,
+    0xFE, 0xEE, 0x88, 0xEE, 0xAE, 0xF7, 0xE8, 0xEF, 0xFE, 0xFB, 0xAD, 0x78, 0xB8, 0xFB, 0xC7, 0xEF,
+    0xCE, 0xFE, 0x9F, 0x74, 0x87, 0xFF, 0x9E, 0xEE, 0xFC, 0x8B, 0xE9, 0x9E, 0xFD, 0x8C, 0xFB, 0xEA,
+    0x8D, 0xC5, 0x56, 0x5A, 0x7A, 0xC5, 0x84, 0xBC, 0x7C, 0xEB, 0x7A, 0xD9, 0x78, 0xEA, 0xA8, 0xBB,
+    0xDB, 0xBE, 0x6F, 0xF9, 0x86, 0x9F, 0xEB, 0xCD, 0xFE, 0xBF, 0xED, 0xF7, 0xE7, 0x7C, 0xFE, 0xEF,
+    0xFE, 0xEF, 0x79, 0xFC, 0x7C, 0xC5, 0xFF, 0xEF, 0xFE, 0xEE, 0xBB, 0xFF, 0x8F, 0xD9, 0xFE, 0xEF,
+    0xFE, 0xDE, 0xDE, 0x47, 0xE8, 0xCD, 0xED, 0xEF, 0xED, 0x8C, 0x56, 0x86, 0x57, 0x85, 0xEB, 0xDE,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+/* per mode: confirm pressed */
+static void (*const D_801415B0[6])(void) = {
+    func_80142D8C, func_80142F84, func_80142FEC, func_80143084, func_80143168, NULL,
+};
+/* per mode: select item */
+static void (*const D_801415C8[6])(s32) = {
+    func_801431E8, func_80143220, func_80143220, NULL, func_8014335C, NULL,
+};
+/* per mode: menu built */
+static void (*const D_801415E0[6])(void) = {
+    func_801434B0, func_801435A8, func_801435A8, func_801436B4, func_80143718, NULL,
+};
+/* per mode: every frame */
+static void (*const D_801415F8[6])(void) = {func_80143764, NULL, NULL, NULL, NULL, NULL};
 
 /* Bit test tolerant of an unaligned base. */
 static inline u32 BitTest(void *base, s32 bit) {
@@ -262,20 +364,6 @@ static void func_80144544(void);
     } else {                                                                         \
         mTitleSelection[0].f += mTitleSelection[2].f;                                \
     }
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_80140FE4);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_801411D8);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", mFileHeader);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_801415B0);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_801415C8);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_801415E0);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_801415F8);
 
 #ifdef NON_MATCHING
 /* Memory card outline: 14 pairs of outer/inner points (x | y << 16). */
@@ -399,6 +487,9 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
 #else
 INCLUDE_ASM("asm/title/nonmatchings/title", AnimateMemCardScreen);
 #endif
+
+static const char D_80141680[] = "bin/title.c";
+static const char D_8014168C[] = "BASCUS-94240SYPHON";
 
 /* Starts sliding the selection highlight to a new rect. */
 static void func_80141CE0(s32 x, s32 y, s32 w, s32 h) {
@@ -603,10 +694,6 @@ static void func_801427B0(s32 yes) {
         }
     }
 }
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_80141680);
-
-INCLUDE_RODATA("asm/title/nonmatchings/title", D_8014168C);
 
 /* Handles a MemCardSync result; returns nonzero on success. */
 static s32 func_80142888(s32 result) {

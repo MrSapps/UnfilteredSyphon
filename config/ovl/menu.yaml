@@ -47,6 +47,7 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, menu]
       - [0xA34, c, menu]
-      - [0x7DE8, data, data]
-      - { start: 0x8640, type: bss, vram: 0x8013FE20, name: bss }
+      - [0x7DE8, .data, menu]
+      - { start: 0x8640, type: .bss, vram: 0x8013FE20, name: menu }
+      - { type: bss, vram: 0x8013FEE8, name: bss_8013FEE8 }
   - [0x8640]

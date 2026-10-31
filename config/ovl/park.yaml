@@ -47,6 +47,6 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, park]
       - [0x3D8, c, park]
-      - [0x1860, data, data]
-      - { start: 0x20C4, type: bss, vram: 0x801430A4, name: bss }
+      - [0x1860, .data, park]
+      - { start: 0x20C4, type: .bss, vram: 0x801430A4, name: park }
   - [0x20C4]

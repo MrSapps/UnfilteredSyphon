@@ -47,6 +47,6 @@ segments:
       - [0x0, rodatabin, header]
       - [0x4, .rodata, levspec]
       - [0x7CC, c, levspec]
-      - [0x19B8, data, data]
-      - { start: 0x1AA0, type: bss, vram: 0x80142A80, name: bss }
+      - [0x19B8, .data, levspec]
+      - { start: 0x1AA0, type: .bss, vram: 0x80142A80, name: levspec }
   - [0x1AA0]
