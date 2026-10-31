@@ -198,6 +198,13 @@ void iDeleteTargetCursor(void);
 void func_8003E13C(void);
 u16 WeaponMakeRoundsString(u16 str, s32 weapon);
 void TextRemoveString();
+void EGSDisplayInfraredOn(void *camera, s32 mode);
+void EGSDisplayInfraredOff(void *camera, s32 mode);
+u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
+void TextSetWindowMini(u8 window, s32 on);
+void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
+void TextSetWindowJustification(u8 window, s32 just);
+void TextRemoveWindow(u8 window);
 u16 TextAddString(u8 window, char *str, s32 arg2, s32 arg3);
 u16 TextAddPersistentString(char *fmt, char *buf, s32 x, s32 y);
 void TextSetStringJustification(u16 str, s32 just);
@@ -287,6 +294,18 @@ typedef struct IfaceIconDef {
 } IfaceIconDef;
 
 extern IfacePoly30 D_80117B38[6];       /* radar blips */
+/* Flat triangle (EGS display link + POLY_F3). */
+typedef struct IfacePolyF3 {
+    /* 0x00 */ s32 link;
+    /* 0x04 */ s32 unk04;
+    /* 0x08 */ u32 tag;
+    /* 0x0C */ s32 color;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ s32 xy1;
+    /* 0x18 */ s32 xy2;
+} IfacePolyF3;
+
+extern IfacePolyF3 D_8011896C[2];       /* sniper range arrows */
 /* Gouraud triangle (EGS display link + POLY_G3). */
 typedef struct IfacePolyG3 {
     /* 0x00 */ s32 link;
@@ -335,7 +354,7 @@ void SpriteCreateMulti(IfaceMulti *multi, s32 count, IfaceSprite *sprites);
 extern s16 mTargetCursorPosition;
 extern s16 D_8011031A;
 extern s16 D_8011031C;
-extern s32 D_801185C4;
+extern IfacePoly4 D_801185C4[16]; /* sniper/infrared view frame; [8..15] are the zoom bars */
 extern IfacePoly4 D_80117A30[6];  /* radar NPC boxes */
 extern IfacePoly4 D_80117B08;     /* radar target box */
 extern const s32 D_80011C18[];          /* menu background vertices, (y << 16) | x */
@@ -596,7 +615,6 @@ extern u8 D_8010F8C8[];
 extern IfaceSprite D_801174E8;          /* radar background sprite */
 extern char D_80117FFC[];               /* rounds text sprites */
 extern char D_8011765C[], D_80117764[], D_8011786C[]; /* meter caption buffers */
-extern IfacePoly24 D_8011896C[2];       /* POLY_F3 */
 extern const IfacePoint D_80011BE0[];   /* meter origins */
 extern const s32 D_80011BD0[];          /* meter colours */
 void EGSDeviceGraphicsGetResolution(u16 *w, u16 *h);
@@ -735,7 +753,7 @@ void InterfaceSetup(void) {
         SET_SEMI_TRANS(&D_80118264[i].tag);
     }
     for (i = 0; i < 26; i++) {
-        EGSDisplayBuildPoly4F(&((IfacePoly4 *)&D_801185C4)[i], 0x40FF40, 0, 0, 0, 0);
+        EGSDisplayBuildPoly4F(&D_801185C4[i], 0x40FF40, 0, 0, 0, 0);
     }
     for (i = 0; i < 2; i++) {
         EGSDisplayBuildPoly3F(&((u8 *)D_8011896C)[i * 0x1C], 0x106010, 0, 0, 0);
@@ -1700,7 +1718,7 @@ s32 func_8003ECA0(big)
     s32 i;
     IfaceLine *line;
 
-    if (D_801185C4) {
+    if (D_801185C4[0].link) {
         return 0;
     }
     if (big) {
@@ -2439,7 +2457,7 @@ u8 func_80040F08(u8 up, s32 *level) {
 
 #ifdef NON_MATCHING
 /* regalloc in the sprite block copies (the original keeps a copy of the sprite base in t2) */
-void iSetupDirectionSprites(s32 mode) {
+inline void iSetupDirectionSprites(s32 mode) {
     IfaceSprite *spr;
     IfaceSprite *src;
     s32 i;
@@ -2484,7 +2502,7 @@ void iSetupDirectionSprites(s32 mode) {
 INCLUDE_ASM("asm/main/nonmatchings/interface", iSetupDirectionSprites);
 #endif
 
-void iDestroyDirectionSprites(void) {
+inline void iDestroyDirectionSprites(void) {
     s32 i;
 
     for (i = 0; i < 5; i++) {
@@ -2497,7 +2515,7 @@ void iDestroyDirectionSprites(void) {
     D_8010F8B8 = NULL;
 }
 
-void iAnimateDirectionSprites(s32 step) {
+inline void iAnimateDirectionSprites(s32 step) {
     s32 i;
     s32 d = 180 - step * 15;
     IfaceSprite *sp;
@@ -2647,22 +2665,889 @@ u8 func_8004146C(u8 active) {
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8004146C);
 #endif
 
+extern s32 D_8010F8B4;
+extern s16 gSniperView, D_8010F7FE, D_8010F800, D_8010F802; /* sniper view rectangle x, y, w, h */
+extern char *gStringSniperSpareText;
+extern char *D_80107818, *D_8010781C, *D_80107820;
+
+/* Sniper view frame: POLY_F4s (D_801185C4) and POLY_F3s (D_8011896C). */
+#define mSniperPolys D_801185C4
+#define mSniperArrows D_8011896C
+#define XY32(x, y) (((x) & 0xFFFF) | ((y) << 16))
+
+#ifdef NON_MATCHING
+/* regalloc in the corner-bracket loop and scheduling around the rangefinder/arrow blocks; the inlined iSetupDirectionSprites copies differ as in that function */
+/* Sniper view (mode 2): one zoom step of the scope frame, rangefinder and sprites. */
+u8 func_80041BCC(u8 active) {
+    s32 *level;
+    s32 lvl;
+    s32 i;
+    s32 d;
+    s32 cx;
+    s32 cy;
+    s32 w;
+    s32 h;
+    IfaceSprite *spr;
+    IfaceLine *line;
+
+    if (D_80105F30[1] < 0 && (D_8010F8B4 != 0 || D_80118264[0].link != 0)) {
+        return D_8010F8AC == 2;
+    }
+    level = &D_80105F30[1];
+    if (!func_80040F08(active, level)) {
+        return 0;
+    }
+    lvl = *level;
+    if (!active) {
+        if (gSpareTextWindow != 0xFF) {
+            TextRemoveWindow(gSpareTextWindow);
+            gSpareTextWindow = 0xFF;
+        }
+        if (lvl < 0) {
+            iDestroyDirectionSprites();
+            for (i = 0; i < 2; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &mSniperArrows[i]);
+            }
+            EGSDisplayDeleteSprite(gInterfaceWindow, SpriteGet(0x2D));
+            for (i = 0; i < 26; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[i]);
+            }
+            for (i = 0; i < 14; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &mSniperPolys[i]);
+            }
+            return 0;
+        }
+    } else {
+        if (gSpareTextWindow == 0xFF) {
+            gSpareTextWindow = TextAddWindow((s16)(mSniperViewMax + D_8010F8A0 + 11), -2, 100, 100);
+            TextSetWindowMini(gSpareTextWindow, 1);
+            TextSetWindowColor(gSpareTextWindow, 0x10, 0x60, 0x10);
+            TextAddString(gSpareTextWindow, gStringSniperSpareText, 30, 0);
+            TextAddString(gSpareTextWindow, D_80107818, 20, 0);
+            TextAddString(gSpareTextWindow, D_8010781C, 20, 0);
+            TextAddString(gSpareTextWindow, D_80107820, 25, 0);
+        }
+        if (lvl == 0) {
+            spr = SpriteGet(0x2D);
+            spr->y = 0;
+            spr->x = 0;
+            spr->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), spr);
+            func_80041378(D_80118264, 26, 0x40FF40, 1);
+            for (i = 0; i < 14; i++) {
+                mSniperPolys[i].color.word = 0x2840FF40;
+                if (i >= 8) {
+                    SET_SEMI_TRANS(&mSniperPolys[i].tag);
+                } else {
+                    ((IfacePrimTag *)&mSniperPolys[i].tag)->code &= ~2;
+                }
+                EGSDisplayAddPoly(gInterfaceWindow, &mSniperPolys[i]);
+            }
+            for (i = 0; i < 2; i++) {
+                EGSDisplayAddPoly(gInterfaceWindow, &mSniperArrows[i]);
+            }
+            iSetupDirectionSprites(D_8010F8AC);
+        }
+    }
+
+    SpriteGet(0x2D)->scalex = (lvl << 12) / 12;
+    cx = mSniperViewMax * lvl / 12;
+    gSniperView = POSITION + cx;
+    cy = D_8010F89E * lvl / 12;
+    D_8010F7FE = D_8012C7FA + cy;
+    w = (s16)D_8010F8A0 * lvl / 12;
+    h = D_8010F8A2 * lvl / 12;
+    if (w != 0 || h != 0) {
+        D_8010F800 = w + 1;
+        D_8010F802 = h + 1;
+    } else {
+        D_8010F800 = 0;
+        D_8010F802 = 0;
+    }
+
+    /* corner brackets: two quads per corner */
+    for (i = 0; i < 4; i++) {
+        s32 x;
+        s32 y;
+        s32 x2;
+        s32 y2;
+        s32 x3;
+        s32 y3;
+        IfacePoly4 *p;
+
+        x = (i & 1) ? cx : cx + w + 1;
+        y = (i & 2) ? cy : cy + h + 1;
+        x2 = (i & 1) ? x + 20 : x - 20;
+        y2 = (i & 2) ? y + 15 : y - 15;
+        x3 = (i & 1) ? x + 3 : x - 3;
+        y3 = (i & 2) ? y + 2 : y - 2;
+        if (i & 1) {
+            x2 = x2 > 0 ? 0 : x2;
+            x3 = x3 > 0 ? 0 : x3;
+        } else {
+            if (x2 < 0) {
+                x2 = 0;
+            }
+            if (x3 < 0) {
+                x3 = 0;
+            }
+        }
+        if (i & 2) {
+            y2 = y2 > 0 ? 0 : y2;
+            y3 = y3 > 0 ? 0 : y3;
+        } else {
+            if (y2 < 0) {
+                y2 = 0;
+            }
+            if (y3 < 0) {
+                y3 = 0;
+            }
+        }
+        p = &mSniperPolys[i * 2];
+        p[0].xy[0] = p[1].xy[0] = XY32(x, y);
+        p[0].xy[1] = p[1].xy[2] = XY32(x3, y3);
+        p[1].xy[3] = XY32(x2, y3);
+        p[0].xy[2] = XY32(x, y2);
+        p[0].xy[3] = XY32(x3, y2);
+        p[1].xy[1] = XY32(x2, y);
+    }
+
+    {
+        s32 top = D_8010F89E + D_8010F8A2;
+        s32 m = mSniperViewMax;
+
+        mSniperPolys[8].xy[0] = XY32(cx, top + 15);
+        mSniperPolys[8].xy[1] = XY32(cx + w + 1, top + 15);
+        mSniperPolys[8].xy[2] = XY32(cx, top + 16);
+        mSniperPolys[8].xy[3] = XY32(cx + w + 1, top + 16);
+        mSniperPolys[9].xy[0] = XY32(cx, top + 9);
+        mSniperPolys[9].xy[1] = XY32(cx + 2, top + 9);
+        mSniperPolys[9].xy[2] = XY32(cx, top + 15);
+        mSniperPolys[9].xy[3] = XY32(cx + 2, top + 15);
+        mSniperPolys[10].xy[0] = XY32(cx + w - 1, top + 9);
+        mSniperPolys[10].xy[1] = XY32(cx + w + 1, top + 9);
+        mSniperPolys[10].xy[2] = XY32(cx + w - 1, top + 15);
+        mSniperPolys[10].xy[3] = XY32(cx + w + 1, top + 15);
+        mSniperPolys[11].xy[0] = XY32(m - 19, cy);
+        mSniperPolys[11].xy[1] = XY32(m - 17, cy);
+        mSniperPolys[11].xy[2] = XY32(m - 19, cy + h + 1);
+        mSniperPolys[11].xy[3] = XY32(m - 17, cy + h + 1);
+        mSniperPolys[12].xy[0] = XY32(m - 17, cy);
+        mSniperPolys[12].xy[1] = XY32(m - 10, cy);
+        mSniperPolys[12].xy[2] = XY32(m - 17, cy + 1);
+        mSniperPolys[12].xy[3] = XY32(m - 10, cy + 1);
+        mSniperPolys[13].xy[0] = XY32(m - 17, cy + h);
+        mSniperPolys[13].xy[1] = XY32(m - 10, cy + h);
+        mSniperPolys[13].xy[2] = XY32(m - 17, cy + h + 1);
+        mSniperPolys[13].xy[3] = XY32(m - 10, cy + h + 1);
+    }
+
+    /* cross hairs: long arms when the view is big enough, jittering otherwise */
+    if (w > 100) {
+        D_80118264[0].xy0 = XY32(cx + 40, cy);
+        D_80118264[0].xy1 = XY32(cx + w - 40, cy);
+        D_80118264[1].xy0 = XY32(cx + 40, cy + h);
+        D_80118264[1].xy1 = XY32(cx + w - 40, cy + h);
+    } else {
+        s32 r;
+
+        r = rand() % (h + 1) - h / 2;
+        D_80118264[0].xy0 = XY32(cx, r);
+        D_80118264[0].xy1 = XY32(cx + w, r);
+        r = rand() % (h + 1) - h / 2;
+        D_80118264[1].xy0 = XY32(cx, r);
+        D_80118264[1].xy1 = XY32(cx + w, r);
+    }
+    if (h > 70) {
+        D_80118264[2].xy0 = XY32(cx, cy + 30);
+        D_80118264[2].xy1 = XY32(cx, cy + h - 30);
+        D_80118264[3].xy0 = XY32(cx + w, cy + 30);
+        D_80118264[3].xy1 = XY32(cx + w, cy + h - 30);
+    } else {
+        s32 r;
+
+        r = rand() % (h + 1) - h / 2;
+        D_80118264[2].xy0 = XY32(cx, r);
+        D_80118264[2].xy1 = XY32(cx + w, r);
+        r = rand() % (h + 1) - h / 2;
+        D_80118264[3].xy0 = XY32(cx, r);
+        D_80118264[3].xy1 = XY32(cx + w, r);
+    }
+
+    /* rangefinder ticks */
+    for (i = 0; i < 9; i++) {
+        line = &D_80118264[4 + i];
+        line->xy0 = XY32(mSniperViewMax - 18 + lvl * ((i & 1) ? 5 : 7) / 12, (i - 4) * h / 10);
+        d = lvl / 3 + 18;
+        line->xy1 = XY32(mSniperViewMax - d, (i - 4) * h / 10);
+    }
+    for (i = 0, line = &D_80118264[13]; i < 9; i++, line++) {
+        s32 x = (i - 4) * w / 10;
+        s32 top = D_8010F89E + D_8010F8A2;
+
+        d = lvl / 4 + 15;
+        line->xy0 = XY32(x, top + d);
+        line->xy1 = XY32(x, top + 15 - ((i & 1) ? lvl / 3 : lvl / 2));
+    }
+
+    {
+        s32 top = D_8010F89E + D_8010F8A2;
+        s32 ax;
+        s32 ay;
+
+        mSniperArrows[0].xy0 = XY32(mSniperViewMax - 17, 0);
+        mSniperArrows[1].xy0 = (top + 15) << 16;
+        ax = lvl * 9 / 12 - 17;
+        ax += mSniperViewMax;
+        mSniperArrows[0].xy1 = XY32(ax, 3);
+        mSniperArrows[0].xy2 = XY32(ax, -3);
+        ay = lvl * 7 / 12 - 15;
+        ay = top - ay;
+        mSniperArrows[1].xy1 = XY32(4, ay);
+        mSniperArrows[1].xy2 = XY32(-4, ay);
+    }
+
+    iAnimateDirectionSprites(lvl);
+
+    switch (lvl) {
+    case 0:
+        D_80118264[22].xy0 = 0;
+        break;
+    case 3:
+        D_80118264[23].xy0 = D_80118264[23].xy1 = 0x04000400;
+        /* fallthrough */
+    case 1:
+    case 2:
+        D_80118264[22].xy1 = ((D_8010F89E - 20) * lvl / 4) << 16;
+        break;
+    case 4:
+        D_80118264[22].xy1 = (D_8010F89E - 20) << 16;
+        D_80118264[23].xy0 = D_80118264[23].xy1 = D_80118264[22].xy1 | 1;
+        break;
+    case 6:
+        D_80118264[24].xy0 = D_80118264[24].xy1 = 0x04000400;
+        /* fallthrough */
+    case 5:
+        D_80118264[23].xy1 = XY32((lvl - 4) * 25, D_8010F89E - 20);
+        break;
+    case 7:
+        D_80118264[23].xy1 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 16, D_8010F89E - 20);
+        D_80118264[24].xy0 = D_80118264[24].xy1 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 16, D_8010F89E - 19);
+        break;
+    case 8:
+        D_80118264[25].xy0 = D_80118264[25].xy1 = 0x04000400;
+        D_80118264[24].xy1 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 16, (D_8010F89E - 20) / 2);
+        break;
+    case 9:
+        D_80118264[24].xy1 = D_80118264[25].xy0 = D_80118264[25].xy1 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 16, -6);
+        break;
+    case 10:
+        D_80118264[25].xy0 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 11, -5);
+        D_80118264[25].xy1 = XY32(mSniperViewMax + (s16)D_8010F8A0 + 41, -5);
+        break;
+    }
+    D_80118264[22].xy0 = XY32(0, cy - 1);
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80041BCC);
+#endif
 
+#ifdef NON_MATCHING
+/* regalloc of the hoisted goggle-frame invariants (the original also uses fp and spills one sign word); the busy return is placed inside the inlined iSetupDirectionSprites */
+/* Infrared view (mode 3): one zoom step of the goggle frame, rangefinder and sprites. */
+u8 func_80042DA4(u8 active) {
+    IfaceSprite *spr = SpriteGet(0x2E); /* goggle frame, 5 sprites */
+    s32 *level;
+    s32 lvl;
+    s32 i;
+    s32 y;
+    s32 h;
+    s32 scale;
+    IfaceLine *line;
+    IfacePoly4 *p;
+
+    if (D_80105F30[2] < 0) {
+        if (D_8010F8B4 != 0) {
+            goto busy;
+        }
+        {
+            IfacePolyF3 *f3;
+
+            for (i = 0, f3 = mSniperArrows; i < 2; i++, f3++) {
+                if (f3->link != 0) {
+                    goto busy;
+                }
+            }
+        }
+        {
+            IfaceLine *l;
+
+            for (i = 0, l = D_80118264; i < 18; i++, l++) {
+                if (l->link != 0) {
+                    goto busy;
+                }
+            }
+        }
+        {
+            IfacePoly4 *q;
+
+            for (i = 0, q = mSniperPolys; i < 16; i++, q++) {
+                if (q->link != 0) {
+                    goto busy;
+                }
+            }
+        }
+    }
+    level = &D_80105F30[2];
+    if (!func_80040F08(active, level)) {
+        return 0;
+    }
+    lvl = *level;
+    if (lvl < 0 && !active) {
+        {
+            iDestroyDirectionSprites();
+            for (i = 0; i < 2; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &mSniperArrows[i]);
+            }
+            for (i = 0; i < 18; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[i]);
+            }
+            for (i = 0; i < 16; i++) {
+                EGSDisplayDeletePoly(gInterfaceWindow, &mSniperPolys[i]);
+            }
+            for (i = 0; i < 5; i++) {
+                EGSDisplayDeleteSprite(gInterfaceWindow, &spr[i]);
+            }
+            EGSDisplayInfraredOff(*gCamera, 0);
+            SysStatePush(6);
+            func_8003D0E8(0x503028, 0xE77E6B, 0xD0D0D0);
+            D_8010F894 = 5;
+            for (i = 0x19; i < 0x1C; i++) {
+                IfaceSprite *s = SpriteGet(i);
+
+                s->b = 0x80;
+                s->g = 0x80;
+                s->r = 0x80;
+            }
+            for (i = 0; i < 4; i++) {
+                D_801179A0[i].color.word = 0x40E77E6B;
+                SET_SEMI_TRANS(&D_801179A0[i].tag);
+            }
+            return 0;
+        }
+    }
+    if (active && lvl == 0) {
+        iSetupDirectionSprites(D_8010F8AC);
+        spr[1].mx = -1;
+        spr[0].mx = spr[0].w;
+        spr[2].mx = spr[2].w + (u16)((spr[3].w >> 1) - 1);
+        spr[3].mx = (spr[3].w >> 1) - 1;
+        spr[4].mx = 1 - (spr[3].w >> 1);
+        for (i = 0; i < 5; i++) {
+            spr[i].b = 0x20;
+            spr[i].g = 0x20;
+            spr[i].r = 0x20;
+            spr[i].y = 0;
+            spr[i].x = 0;
+            spr[i].unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gInterfaceWindow + 0x90), &spr[i]);
+        }
+        for (i = 0; i < 16; i++) {
+            mSniperPolys[i].color.word = 0x28106010;
+            SET_SEMI_TRANS(&mSniperPolys[i].tag);
+            EGSDisplayAddPoly(gInterfaceWindow, &mSniperPolys[i]);
+        }
+        func_80041378(D_80118264, 18, 0x106010, 1);
+        for (i = 0; i < 2; i++) {
+            SET_SEMI_TRANS(&mSniperArrows[i].tag);
+            EGSDisplayAddPoly(gInterfaceWindow, &mSniperArrows[i]);
+        }
+        EGSDisplayInfraredOn(*gCamera, 0);
+        SysStatePush(6);
+        func_8003D0E8(0x285030, 0x40FF40, 0x20D020);
+        D_8010F894 = 5;
+        for (i = 0x19; i < 0x1C; i++) {
+            IfaceSprite *s = SpriteGet(i);
+
+            s->b = 0x20;
+            s->r = 0x20;
+            s->g = 0xA0;
+        }
+    }
+
+    scale = (lvl << 12) / 12;
+    spr[1].scalex = scale;
+    spr[0].scalex = scale;
+    spr[4].scaley = scale;
+    spr[3].scaley = scale;
+    spr[2].scaley = scale;
+
+    /* goggle frame: four quads per side */
+    for (i = 0; i < 2; i++) {
+        s32 x0;
+        s32 x1;
+        s32 x2;
+        s32 dx;
+        s32 tx;
+        s32 y2;
+        s32 ty;
+        s32 ty2;
+
+        y = i ? lvl * 50 / 12 : -(lvl * 50) / 12;
+        y2 = i ? y + 2 : y - 2;
+        x0 = i ? 140 : -140;
+        x1 = i ? 137 : -137;
+        x2 = i ? 155 : -155;
+        dx = i ? -1 : 1;
+        tx = i ? 2 : -2;
+        ty = i ? lvl * 31 / 12 : -(lvl * 31) / 12;
+        ty2 = i ? lvl * 50 / 12 : -(lvl * 50) / 12;
+        p = &mSniperPolys[i * 4];
+        p[0].xy[0] = XY32(i ? -1 : 1, y);
+        p[0].xy[1] = p[1].xy[3] = XY32(x0, y);
+        p[0].xy[2] = XY32(i ? -1 : 1, y2);
+        p[0].xy[3] = XY32(x0, y2);
+        p[1].xy[2] = XY32(x1, y);
+        p[1].xy[1] = XY32(x0, -y);
+        p[2].xy[0] = XY32(x1, -y2);
+        p[2].xy[3] = XY32(x2, -y);
+        p[2].xy[1] = XY32(x2, -y2);
+        p[3].xy[0] = XY32(tx, ty);
+        p[3].xy[1] = XY32(dx, ty);
+        p[3].xy[3] = XY32(dx, ty2);
+        p[1].xy[0] = p[2].xy[2] = XY32(x1, -y);
+        p[3].xy[2] = XY32(tx, ty2);
+    }
+
+    /* rangefinder ticks */
+    for (i = 0; i < 9; i++) {
+        line = &D_80118264[i];
+        line->xy0 = XY32(139 - lvl * ((i & 1) ? 5 : 8) / 12, (i - 4) * (lvl * 10) / 12);
+        line->xy1 = XY32(lvl / 3 + 139, (i - 4) * (lvl * 10) / 12);
+    }
+    for (i = 0; i < 9; i++) {
+        line = &D_80118264[9 + i];
+        line->xy0 = XY32((i + 1) * -140 / 10, lvl * -55 / 12);
+        line->xy1 = XY32((i + 1) * -140 / 10, (i & 1) ? -(lvl * 48) / 12 : -(lvl * 46) / 12);
+    }
+
+    /* zoom bars */
+    y = 52;
+    for (i = 0, p = &mSniperPolys[8]; i < 8; i++, p++) {
+        h = i * 2 + 4;
+        y -= h + 2;
+        p->xy[0] = XY32(-149, y);
+        p->xy[1] = XY32(-144, y);
+        p->xy[2] = XY32(-149, y + h * lvl / 12);
+        p->xy[3] = XY32(-144, y + h * lvl / 12);
+    }
+
+    mSniperArrows[0].xy0 = XY32(140 - lvl / 4, 0);
+    mSniperArrows[0].xy1 = XY32(140 - lvl, 3);
+    mSniperArrows[0].xy2 = XY32(140 - lvl, -3);
+    mSniperArrows[1].xy0 = XY32(-70, -(lvl * 50) / 12);
+    mSniperArrows[1].xy1 = XY32(-66, lvl * -43 / 12);
+    mSniperArrows[1].xy2 = XY32(-74, lvl * -43 / 12);
+
+    iAnimateDirectionSprites(lvl);
+    return 1;
+
+busy:
+    return D_8010F8AC == 3;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80042DA4);
+#endif
 
+extern IfacePoly4 *gMenuPolys; /* menu background quads, [30] is the backdrop */
+extern IfaceLine *gMenuLines;  /* menu outline lines */
+
+#ifdef NON_MATCHING
+/* regalloc throughout (pointer/index registers in the sweep and tick loops); structure and stores follow the original */
+/* Menu view (mode 4): one step of the menu background sweep and its tick lines.
+ * D_80118264[0..5] are the menu's highlight and pointer lines. */
+u8 func_80043B04(u8 active) {
+    s32 *level;
+    s32 prev;
+    s32 lvl;
+    s32 i;
+    s32 from;   /* quads shown before this step */
+    s32 to;     /* quads shown after it */
+    s32 tick0;  /* left ticks, before/after */
+    s32 tick1;
+    s32 rule0;  /* bottom ticks, before/after */
+    s32 rule1;
+    s32 mark0;  /* menu markers, before/after */
+    s32 mark1;
+    const s32 *v;
+    IfacePoly4 *poly;
+    IfaceLine *line;
+
+    if (D_80105F30[3] < 0) {
+        IfaceLine *l;
+
+        for (i = 0, l = D_80118264; i < 6; i++, l++) {
+            if (l->link != 0) {
+                return D_8010F8AC == 4;
+            }
+        }
+    }
+    if (gMenuPolys == NULL) {
+        if (D_80105F30[3] != -1) {
+            IfaceLine *l;
+
+            D_80105F30[3] = -1;
+            for (i = 0, l = D_80118264; i < 36; i++, l++) {
+                if (l->link != 0) {
+                    EGSDisplayDeletePoly(gInterfaceWindow, l);
+                }
+            }
+        }
+        return active;
+    }
+    level = &D_80105F30[3];
+    prev = *level;
+    if (!func_80040F08(active, level)) {
+        return 0;
+    }
+    from = prev * 30 / 12;
+    tick0 = prev * 26 / 12;
+    rule0 = tick0;
+    mark0 = prev * 20 / 12;
+    lvl = *level;
+    to = lvl * 30 / 12;
+    tick1 = lvl * 26 / 12;
+    rule1 = tick1;
+    mark1 = lvl * 20 / 12;
+    if (lvl <= 0) {
+        if (active) {
+            EGSDisplayBuildLineF(&D_80118264[0], 0xF060F0, 0x04000400, 0x04000400);
+            for (i = 1, line = &D_80118264[1]; i < 36; i++, line++) {
+                EGSDisplayBuildLineF(line, 0xB4645A, 0x04000400, 0x04000400);
+            }
+            if (D_80118264[0].link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[0]);
+            }
+            return active;
+        }
+        if (lvl < 0) {
+            return 0;
+        }
+    } else if (lvl >= 12 && (!active || lvl >= 13)) {
+        return !active;
+    }
+    if (D_80117C70[0].link != 0) {
+        func_8003D76C();
+    }
+
+    if (active) {
+        v = &D_80011C18[from * 2];
+        poly = &gMenuPolys[from];
+        line = &gMenuLines[from * 2];
+        if (gMenuPolys[30].link == 0) {
+            EGSDisplayAddPoly(gInterfaceWindow, &gMenuPolys[30]);
+            gMenuPolys[30].color.word = 0x28B46450;
+            SET_SEMI_TRANS(&gMenuPolys[30].tag);
+        }
+        for (i = from; i < to; i++, v += 2, poly++, line += 2) {
+            EGSDisplayBuildPoly4F(poly, 0xA0463C, v[0], v[1], v[2], v[3]);
+            poly->unk04 = 6;
+            SET_SEMI_TRANS(&poly->tag);
+            if (poly->link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, poly);
+            }
+            if (i != 14) {
+                EGSDisplayBuildLineF(&line[0], 0xB4645A, v[0], v[2]);
+                line[0].unk04 = 5;
+                if (line[0].link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, &line[0]);
+                }
+            }
+            if (i != 16) {
+                EGSDisplayBuildLineF(&line[1], 0xB4645A, v[1], v[3]);
+                line[1].unk04 = 5;
+                if (line[1].link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, &line[1]);
+                }
+            }
+        }
+        if (to < 30) {
+            EGSDisplayBuildPoly4F(poly, 0xFFB478, v[0], v[1], v[2], v[3]);
+            poly->unk04 = 6;
+            EGSDisplayAddPoly(gInterfaceWindow, poly);
+            EGSDisplayBuildLineF(&line[0], 0xFFB478, v[1], v[3]);
+            line[0].unk04 = 5;
+            EGSDisplayAddPoly(gInterfaceWindow, &line[0]);
+            EGSDisplayBuildLineF(&line[1], 0xFFB478, v[1], v[3]);
+            line[1].unk04 = 5;
+            EGSDisplayAddPoly(gInterfaceWindow, &line[1]);
+        }
+        switch (to) {
+        case 26:
+        case 27:
+        case 28:
+        case 29:
+        case 30:
+            if (D_80118264[1].link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[1]);
+            }
+            D_80118264[1].xy0 = XY32(115, 4);
+            D_80118264[1].xy1 = XY32(-((to - 26) * 56) / 4 + 115, 4);
+            /* fallthrough */
+        case 10:
+        case 11:
+        case 12:
+        case 13:
+        case 14:
+        case 15:
+        case 16:
+        case 17:
+        case 18:
+        case 19:
+        case 20:
+        case 21:
+        case 22:
+        case 23:
+        case 24:
+        case 25:
+            if (D_80118264[3].link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[3]);
+            }
+            D_80118264[3].xy0 = XY32(-54, 98);
+            D_80118264[3].xy1 = XY32((to - 10) * -115 / 20 - 54, 98);
+            /* fallthrough */
+        case 8:
+        case 9:
+            if (D_80118264[4].link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[4]);
+            }
+            D_80118264[4].xy0 = XY32(-169, 90);
+            D_80118264[4].xy1 = XY32(-169, (to - 8) * 8 / 22 + 90);
+            /* fallthrough */
+        case 6:
+        case 7:
+            if (D_80118264[5].link == 0) {
+                EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[5]);
+            }
+            D_80118264[5].xy0 = XY32(-169, 51);
+            D_80118264[5].xy1 = XY32(-169, -((to - 6) * 81) / 24 + 51);
+            break;
+        }
+        if (D_80118264[2].link == 0) {
+            EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[2]);
+        }
+        D_80118264[2].xy0 = XY32(35, -94);
+        D_80118264[2].xy1 = XY32(to * 78 / 30 + 35, -94);
+
+        for (i = tick0, line = &gMenuLines[60 + tick0]; i <= tick1; i++, line++) {
+            s32 y = i >= 18 ? -10 - (i * 10 - 180) : i * 10 - 89;
+            s32 xr;
+            s32 xl;
+
+            if (i == 0) {
+                xr = 31;
+            } else if (i < 18) {
+                xr = 34;
+            } else {
+                xr = i == 18 ? 154 : 156;
+            }
+            xl = -156;
+            if (i >= 7) {
+                if (i == 7) {
+                    xl = -151;
+                } else {
+                    xl = -147;
+                    if (i >= 18) {
+                        if (i == 18) {
+                            xl = 43;
+                        } else {
+                            xl = 43;
+                            if (i < 25) {
+                                xl = 42;
+                            }
+                        }
+                    }
+                }
+            }
+            if (i == tick1) {
+                if (tick1 < 26) {
+                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(xl, y), XY32(xr, y));
+                    line->unk04 = 5;
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
+                }
+            } else {
+                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(xl, y), XY32(xr, y));
+                line->unk04 = 5;
+                SET_SEMI_TRANS(&line->tag);
+                if (line->link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
+                }
+            }
+        }
+        for (i = rule0, line = &gMenuLines[86 + rule0]; i <= rule1; i++, line++) {
+            s32 x = i >= 16 ? i * 12 - 192 + 44 : i * 12 - 151;
+            s32 ya;
+            s32 yb;
+
+            if (i == 0) {
+                ya = -20;
+            } else {
+                ya = 88;
+                if (i >= 15) {
+                    ya = 86;
+                    if (i != 15) {
+                        if (i == 16) {
+                            ya = -10;
+                        } else {
+                            ya = -9;
+                            if (i < 25) {
+                                ya = -5;
+                            }
+                        }
+                    }
+                }
+            }
+            if (i == 0) {
+                yb = -94;
+            } else {
+                yb = -95;
+                if (i >= 15) {
+                    yb = -91;
+                    if (i != 15) {
+                        if (i == 16) {
+                            yb = -82;
+                        } else {
+                            yb = -84;
+                            if (i < 25) {
+                                yb = -85;
+                            }
+                        }
+                    }
+                }
+            }
+            if (i == rule1) {
+                if (rule1 < 26) {
+                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(x, ya), XY32(x, yb));
+                    line->unk04 = 5;
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
+                }
+            } else {
+                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(x, ya), XY32(x, yb));
+                line->unk04 = 5;
+                SET_SEMI_TRANS(&line->tag);
+                if (line->link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
+                }
+            }
+        }
+        for (i = mark0; i < mark1; i++) {
+            EGSDisplayAddPoly(gInterfaceWindow, &gMenuLines[112 + i]);
+        }
+        if (i < 12) {
+            D_80118264[0].xy0 = gMenuLines[112 + i].xy0;
+            D_80118264[0].xy1 = gMenuLines[112 + i].xy1;
+            return 1;
+        }
+        goto hide;
+    }
+
+    poly = &gMenuPolys[to];
+    line = &gMenuLines[to * 2];
+    if (gMenuPolys[30].link != 0) {
+        EGSDisplayDeletePoly(gInterfaceWindow, &gMenuPolys[30]);
+    }
+    for (i = to; i < from; i++, poly++, line += 2) {
+        if (poly->link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, poly);
+        }
+        if (line[0].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &line[0]);
+        }
+        if (line[1].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &line[1]);
+        }
+    }
+    switch (to) {
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+        D_80118264[1].xy0 = XY32(115, 4);
+        D_80118264[1].xy1 = XY32(-((to - 26) * 56) / 4 + 115, 4);
+    show3:
+        D_80118264[3].xy0 = XY32(-54, 98);
+        D_80118264[3].xy1 = XY32((to - 10) * -115 / 20 - 54, 98);
+        /* fallthrough */
+    case 8:
+    case 9:
+        D_80118264[4].xy0 = XY32(-169, 90);
+        D_80118264[4].xy1 = XY32(-169, (to - 8) * 8 / 22 + 90);
+        D_80118264[5].xy0 = XY32(-169, 51);
+        D_80118264[5].xy1 = XY32(-169, -((to - 6) * 81) / 24 + 51);
+        break;
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+    case 23:
+    case 24:
+    case 25:
+        if (D_80118264[1].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[1]);
+        }
+        goto show3;
+    default:
+        if (D_80118264[3].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[3]);
+        }
+        if (D_80118264[4].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[4]);
+        }
+        if (D_80118264[5].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[5]);
+        }
+        break;
+    }
+    i = to * 78 / 30;
+    if (i <= 0) {
+        if (D_80118264[2].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[2]);
+        }
+    } else {
+        D_80118264[2].xy0 = XY32(35, -94);
+        D_80118264[2].xy1 = XY32(i + 35, -94);
+    }
+    for (i = tick1, line = &gMenuLines[60 + tick1]; i < tick0; i++, line++) {
+        EGSDisplayDeletePoly(gInterfaceWindow, line);
+    }
+    for (i = rule1, line = &gMenuLines[86 + rule1]; i < rule0; i++, line++) {
+        EGSDisplayDeletePoly(gInterfaceWindow, line);
+    }
+    for (i = mark1; i < mark0; i++) {
+        EGSDisplayDeletePoly(gInterfaceWindow, &gMenuLines[112 + i]);
+    }
+    if (D_80118264[0].link != 0) {
+    hide:
+        EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[0]);
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80043B04);
+#endif
 
 extern char *gStringSnifferSpareText;
 extern char *D_80107828;
 extern char *D_8010782C;
-u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
-void TextSetWindowMini(u8 window, s32 on);
-void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
-void TextSetWindowJustification(u8 window, s32 just);
-void TextRemoveWindow(u8 window);
-void EGSDisplayInfraredOn(void *camera, s32 mode);
-void EGSDisplayInfraredOff(void *camera, s32 mode);
 
 
 static inline s32 iMax(s32 a, s32 b) {

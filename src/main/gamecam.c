@@ -40,14 +40,14 @@ typedef struct GameCamShake {
 /* Per-mode settings (D_80113BA0), 0x3C bytes. */
 typedef struct GameCamModeInfo {
     /* 0x00 */ s32 view; /* index into D_80113B9C */
-    /* 0x04 */ s32 unk04;
-    /* 0x08 */ s32 unk08;
-    /* 0x0C */ s32 unk0C;
-    /* 0x10 */ s32 unk10;
-    /* 0x14 */ s32 unk14;
+    /* 0x04 */ EGSFrame *leadFrame;
+    /* 0x08 */ EGSFrame *watchFrame;
+    /* 0x0C */ u32 scriptType; /* scripted mode: 1, 2, 3 or 9 */
+    /* 0x10 */ Gobj *primary;  /* scripted mode */
+    /* 0x14 */ Gobj *target;   /* scripted mode */
     /* 0x18 */ VECTOR32 lead;
     /* 0x28 */ VECTOR32 watch;
-    /* 0x38 */ u8 unk38;
+    /* 0x38 */ u8 cut;
 } GameCamModeInfo;
 
 /* Camera view parameters (D_80113B9C), 0x9C bytes. */
@@ -58,7 +58,10 @@ typedef struct GameCamView {
     /* 0x30 */ VECTOR32 angle;
     /* 0x40 */ s32 distance;
     /* 0x44 */ s32 pitch;
-    /* 0x48 */ u8 unk48[0x54];
+    /* 0x48 */ s32 roll;
+    /* 0x4C */ VECTOR32 range[3]; /* move-info slots 4, 5, 6 */
+    /* 0x7C */ VECTOR32 unk7C;
+    /* 0x8C */ VECTOR32 unk8C;
 } GameCamView;
 
 /* Game camera state, 0x80113B2C. */
@@ -103,7 +106,7 @@ extern s32 D_8010FF78;
 extern s32 gInterfaceCurrentMode;
 
 void GameSysJoystickSetMode(s32 mode);
-void func_8001B000(s32 data, u8 on, u8 flag);
+s32 func_8001B000(s32 mode, u8 on, u8 flag);
 u8 func_8001C2F4(s32 mode, u8 on, u8 *flag, s32 *data);
 s32 func_8001C3AC(s32 mode, u8 on);
 void CameraDisplay(void *camera, u8 on);
@@ -352,7 +355,368 @@ INCLUDE_RODATA("asm/main/nonmatchings/gamecam", D_800101E4);
 
 INCLUDE_RODATA("asm/main/nonmatchings/gamecam", D_800101F4);
 
+void CameraSetLeadFrame(void *camera, EGSFrame *frame, VECTOR32 *offset);
+void CameraSetWatchFrame(void *camera, EGSFrame *frame, VECTOR32 *offset);
+void EGSGeometryFIX_VectorGetAngleFromXZPlane(VECTOR32 *v, s32 *out);
+void GameCameraRequestCut(void);
+
+#ifdef NON_MATCHING
+/* regalloc: the original spills the three range radii to the stack and keeps 1 in s2; prologue scheduling */
+/* Loads a camera mode's view: lead/watch frames, offsets, limits and ranges. */
+s32 func_8001B000(s32 mode, u8 on, u8 flag) {
+    static const VECTOR32 up = { 0, 1, 0 };
+    static const VECTOR32 rangeScale = { 0xC00, 0x1000, 0xC00 };
+    GameCamModeInfo *info;
+    GameCamView *view;
+    VECTOR32 roll;
+    VECTOR32 scale;
+    VECTOR32 limit;
+    VECTOR32 angle;
+    VECTOR32 scale2;
+    VECTOR32 cur;
+    VECTOR32 dir;
+    VECTOR32 vec;
+    VECTOR32 *factor;
+    s32 distance;
+    s32 prevMode;
+    s32 r6;
+    s32 r5;
+    s32 r4;
+
+    prevMode = D_80113B2C.mode;
+    info = &D_80113B2C.modes[mode];
+    view = &D_80113B2C.views[info->view];
+    roll = D_800101F4;
+    scale = D_800101F4;
+    distance = view->distance;
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 1;
+    D_80113B2C.unk05C = 0;
+    CAM->unkD1C = view->unk8C;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 6, 3);
+    CAM->unkD1C = view->unk7C;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 6, 2);
+    if (D_80113B2C.slotList != NULL) {
+        D_80113B2C.modes[mode].lead = ((GameCamSlot *)D_80113B2C.slotList->data)->pos;
+        if (D_80113B2C.frame34.pos.pad == 0) { /* frame not linked */
+            D_80113B2C.frame34.pos.vx = D_80113B2C.modes[mode].lead.vx;
+            D_80113B2C.frame34.pos.vy = -D_80113B2C.modes[mode].lead.vy;
+            D_80113B2C.frame34.pos.vz = D_80113B2C.modes[mode].lead.vz;
+        } else {
+            EGSFrameSetPosition(&D_80113B2C.frame34, 0, &D_80113B2C.modes[mode].lead);
+        }
+    }
+    limit.vx = -1;
+    limit.vy = -1;
+    limit.vz = -1;
+    switch (mode) {
+    case 13:
+    case 18:
+        info->leadFrame = D_80113B2C.fixedFrame;
+        if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+            info->watchFrame = D_80113B2C.primary->anim->frame;
+        }
+        if (mode == 13) {
+            limit.vx = 0xB60B;
+            limit.vy = 0xB60B;
+            limit.vz = -1;
+        }
+        break;
+    case 9:
+    case 19:
+        if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+            info->leadFrame = D_80113B2C.primary->anim->frame;
+        }
+        if (D_80113B2C.target != NULL && D_80113B2C.target->anim != NULL) {
+            info->watchFrame = D_80113B2C.target->anim->frame;
+        }
+        limit.vx = 0xB60B;
+        limit.vy = 0xB60B;
+        limit.vz = -1;
+        break;
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+        if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+            info->leadFrame = D_80113B2C.primary->anim->frame;
+        }
+        info->watchFrame = NULL;
+        scale.vx = 1;
+        scale.vy = 0;
+        scale.vz = 0;
+        if (mode == 17) {
+            angle.vx = view->angle.vx;
+        } else {
+            s32 d;
+
+            scale.vx = 1;
+            scale.vy = 0;
+            scale.vz = 0;
+            if (CAM->angle.mode == 0) {
+                cur.vx = CAM->angle.value.vx;
+            } else {
+                cur = CAM->angle.value;
+            }
+            d = view->angle.vx - cur.vx;
+            if (d >= 0 ? d <= 0x140 : cur.vx - view->angle.vx <= 0x140) {
+                angle.vx = view->angle.vx;
+            } else {
+                angle.vx = cur.vx;
+            }
+            dir.vx = info->leadFrame->m[0][2];
+            dir.vy = info->leadFrame->m[1][2];
+            dir.vz = info->leadFrame->m[2][2];
+            dir.vy = -dir.vy;
+            vec.vy = ratan2(dir.vx, dir.vz);
+            EGSGeometryFIX_VectorGetAngleFromXZPlane(&dir, &vec.vx);
+            vec.vz = 0;
+            angle.vy = vec.vy;
+        }
+        CAM->unkD1C = angle;
+        CAM->unkD30 = scale;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 6, 1);
+        break;
+    case 20:
+        D_80113B2C.unk05C = D_80113B2C.modes[mode].scriptType;
+        D_80113B2C.primary = D_80113B2C.modes[mode].primary;
+        D_80113B2C.target = D_80113B2C.modes[mode].target;
+        vec = D_80113B2C.modes[mode].lead;
+        angle = D_80113B2C.modes[mode].watch;
+        D_80113B2C.cut = D_80113B2C.modes[mode].cut;
+        switch (D_80113B2C.modes[mode].scriptType) {
+        case 1:
+            D_80113B2C.target = NULL;
+            if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+                info->leadFrame = D_80113B2C.primary->anim->frame;
+            }
+            info->watchFrame = NULL;
+            scale2.vx = 1;
+            scale2.vy = 1;
+            scale2.vz = 0;
+            CAM->unkD1C = angle;
+            CAM->unkD30 = scale2;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 2, 6, 1);
+            break;
+        case 2:
+            D_80113B2C.target = NULL;
+            info->leadFrame = &D_80113B2C.frame34;
+            if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+                info->watchFrame = D_80113B2C.primary->anim->frame;
+            }
+            EGSFrameSetPosition(&D_80113B2C.frame34, 0, &vec);
+            view->distance = 0;
+            break;
+        case 3:
+            D_80113B2C.primary = NULL;
+            D_80113B2C.target = NULL;
+            info->leadFrame = &D_80113B2C.frame34;
+            info->watchFrame = NULL;
+            EGSFrameSetPosition(&D_80113B2C.frame34, 0, &vec);
+            scale2.vx = 1;
+            scale2.vy = 1;
+            scale2.vz = 0;
+            CAM->unkD1C = angle;
+            CAM->unkD30 = scale2;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 2, 6, 1);
+            view->distance = 0;
+            break;
+        case 9:
+            D_80113B2C.target = NULL;
+            if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+                info->leadFrame = D_80113B2C.primary->anim->frame;
+            }
+            info->watchFrame = NULL;
+            break;
+        }
+        break;
+    case 4:
+        break;
+    case 1:
+        scale2 = up;
+        CameraAccessFrameInfo(gCamera, 0, 0, 4);
+        angle = CAM->unkD1C;
+        CAM->unkD1C = angle;
+        CAM->unkD30 = scale2;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 6, 1);
+        /* fallthrough */
+    default:
+        if (D_80113B2C.primary != NULL && D_80113B2C.primary->anim != NULL) {
+            info->leadFrame = D_80113B2C.primary->anim->frame;
+        }
+        info->watchFrame = info->leadFrame;
+        if (mode == 5 || mode == 12) {
+            scale.vx = 1;
+            scale.vy = 0;
+            scale.vz = 0;
+            CAM->unkD1C = view->angle;
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 6, 1);
+            if (mode == 5) {
+                limit.vx = -1;
+                limit.vy = 0x38E38;
+                limit.vz = -1;
+            }
+        } else {
+            limit.vx = 0xB60B;
+            limit.vy = -1;
+            limit.vz = -1;
+        }
+        break;
+    }
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 0;
+    CAM->unkD1C = limit;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 6, 5);
+    D_80113B2C.mode = mode;
+    CameraSetLeadFrame(gCamera, info->leadFrame, &view->lead);
+    CameraSetWatchFrame(gCamera, info->watchFrame, &view->watch);
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 1;
+    CAM->unkD1C = view->offset;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 1, 1);
+    if (prevMode == 19) {
+        CAM->unkD1C = view->offset;
+        CAM->unkD30 = scale;
+        CameraAccessMoveInfo(gCamera, 1, 1, 0);
+    }
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 1;
+    CAM->unkD1C = view->angle;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 7, 1);
+    if (prevMode == 19) {
+        CAM->unkD1C = view->angle;
+        CAM->unkD30 = scale;
+        CameraAccessMoveInfo(gCamera, 1, 7, 0);
+    }
+    CAM->unkD1C.vx = view->distance;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 5, 1);
+    if (prevMode == 19) {
+        CAM->unkD1C.vx = view->distance;
+        CameraAccessMoveInfo(gCamera, 1, 5, 0);
+    }
+    if (view->pitch >= 0) {
+        CAM->unkD1C.vx = view->pitch;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 8, 1);
+    }
+    roll.vy = view->roll;
+    scale.vx = 0;
+    scale.vy = 1;
+    scale.vz = 0;
+    CAM->unkD1C = roll;
+    CAM->unkD30 = scale;
+    CAM->unkD40 = 1;
+    CameraAccessMoveInfo(gCamera, 1, 6, 4);
+    scale.vx = 1;
+    scale.vy = 1;
+    scale.vz = 1;
+    angle = rangeScale;
+    if (mode == 15 || mode == 16 || mode == 14) {
+        factor = NULL;
+    } else {
+        factor = &angle;
+    }
+    {
+        r6 = view->range[2].vx;
+        r5 = view->range[1].vx;
+        r4 = view->range[0].vx;
+        if (&view->range[2] != NULL) {
+            CAM->unkD1C = view->range[2];
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 0, 6);
+            scale2 = view->range[2];
+            if (factor != NULL) {
+                if (scale2.vx > 0) {
+                    scale2.vx = FIX12(scale2.vx * factor->vx);
+                }
+                if (scale2.vy > 0) {
+                    scale2.vy = FIX12(scale2.vy * factor->vy);
+                }
+                if (scale2.vz > 0) {
+                    scale2.vz = FIX12(scale2.vz * factor->vz);
+                }
+            }
+            CAM->unkD1C = scale2;
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 3, 6);
+        }
+        cur = D_800101E4;
+        scale2.vx = r6;
+        scale2.vy = r6;
+        scale2.vz = r6;
+        CAM->unkD1C = scale2;
+        CAM->unkD30 = cur;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 2, 6);
+        if (&view->range[1] != NULL) {
+            CAM->unkD1C = view->range[1];
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 0, 5);
+            CAM->unkD1C = view->range[1];
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 3, 5);
+        }
+        cur = D_800101E4;
+        scale2.vx = r5;
+        scale2.vy = r5;
+        scale2.vz = r5;
+        CAM->unkD1C = scale2;
+        CAM->unkD30 = cur;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 2, 5);
+        if (&view->range[0] != NULL) {
+            CAM->unkD1C = view->range[0];
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 0, 4);
+            CAM->unkD1C = view->range[0];
+            CAM->unkD30 = scale;
+            CAM->unkD40 = 1;
+            CameraAccessMoveInfo(gCamera, 1, 3, 4);
+        }
+        cur = D_800101E4;
+        scale2.vx = r4;
+        scale2.vy = r4;
+        scale2.vz = r4;
+        CAM->unkD1C = scale2;
+        CAM->unkD30 = cur;
+        CAM->unkD40 = 1;
+        CameraAccessMoveInfo(gCamera, 1, 2, 4);
+    }
+    if (flag == 1) {
+        GameCameraRequestCut();
+    }
+    view->distance = distance;
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001B000);
+#endif
 
 u8 func_8001C2F4(s32 mode, u8 on, u8 *flag, s32 *data) {
     s32 i;
@@ -760,12 +1124,12 @@ void GameCameraSetModeScripted(u8 on, Gobj *primary, Gobj *target, u8 arg3) {
 }
 
 void func_8001D26C(s32 idx, s32 arg1, s32 arg2, s32 arg3, VECTOR32 *lead, VECTOR32 *watch, u8 arg6) {
-    D_80113B2C.modes[idx].unk0C = arg1;
+    D_80113B2C.modes[idx].scriptType = arg1;
     if (arg2) {
-        D_80113B2C.modes[idx].unk10 = arg2;
+        D_80113B2C.modes[idx].primary = (Gobj *)arg2;
     }
     if (arg3) {
-        D_80113B2C.modes[idx].unk14 = arg3;
+        D_80113B2C.modes[idx].target = (Gobj *)arg3;
     }
     if (lead != NULL) {
         D_80113B2C.modes[idx].lead = *lead;
@@ -773,7 +1137,7 @@ void func_8001D26C(s32 idx, s32 arg1, s32 arg2, s32 arg3, VECTOR32 *lead, VECTOR
     if (watch != NULL) {
         D_80113B2C.modes[idx].watch = *watch;
     }
-    D_80113B2C.modes[idx].unk38 = arg6;
+    D_80113B2C.modes[idx].cut = arg6;
 }
 
 void GameCameraSetMode(s32 mode, s32 arg1, s32 arg2, s32 arg3, VECTOR32 *lead, VECTOR32 *watch, GameCamSlot *slot, u8 on, u8 flag) {
@@ -1623,18 +1987,18 @@ void GameCameraInit(void) {
     D_80113B2C.unk085 = 0;
     D_80113B2C.cut = 1;
     for (i = 0; i < 21; i++) {
-        D_80113B2C.modes[i].unk04 = 0;
-        D_80113B2C.modes[i].unk08 = 0;
-        D_80113B2C.modes[i].unk0C = 0;
-        D_80113B2C.modes[i].unk10 = 0;
-        D_80113B2C.modes[i].unk14 = 0;
+        D_80113B2C.modes[i].leadFrame = 0;
+        D_80113B2C.modes[i].watchFrame = 0;
+        D_80113B2C.modes[i].scriptType = 0;
+        D_80113B2C.modes[i].primary = 0;
+        D_80113B2C.modes[i].target = 0;
         D_80113B2C.modes[i].lead.vx = 0;
         D_80113B2C.modes[i].lead.vy = 0;
         D_80113B2C.modes[i].lead.vz = 0;
         D_80113B2C.modes[i].watch.vx = 0;
         D_80113B2C.modes[i].watch.vy = 0;
         D_80113B2C.modes[i].watch.vz = 0;
-        D_80113B2C.modes[i].unk38 = 0;
+        D_80113B2C.modes[i].cut = 0;
     }
     D_80113B2C.scrimAnim = NULL;
     for (j = 4 * sizeof(GameCamShake); j >= 0; j -= sizeof(GameCamShake)) {
@@ -3059,4 +3423,7 @@ void func_80023D70(void) {
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80023D70);
 #endif
 
-INCLUDE_RODATA("asm/main/nonmatchings/gamecam", jtbl_80010274);
+
+#ifndef NON_MATCHING
+INCLUDE_RODATA("asm/main/nonmatchings/gamecam", jtbl_80010274); /* func_8001B000 */
+#endif
