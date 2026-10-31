@@ -1071,9 +1071,128 @@ static void func_80088EC4(void *arg0, u8 *arg1) {
     func_80088270(arg0, arg1, arg1 + 0x190);
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
-
 #define FIX_TO_INT(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
+
+#ifdef NON_MATCHING
+/* the original keeps &f->face in a register and never folds D_80106AEC.foundCount into c (cf. func_80089544); regalloc follows */
+/*
+ * Fill D_80106AEC for gobj: position, probes, direction and velocity, then
+ * collect the flagged edges of its face list as found faces (deduplicated)
+ * and sort them into the first group.
+ */
+static void func_80088EE4(Gobj *gobj) {
+    FaceCollect *c;
+    CollisionFace *cf;
+    FakeFace *f;
+    FoundFace *found;
+    FakeVertex **verts;
+    VECTOR32 normal;
+    VECTOR32 v;
+    u8 *edgeFlags;
+    u8 flags;
+    s32 n;
+    s32 i;
+    s32 j;
+
+    D_80106AEC.foundCount = 0;
+    D_80106AEC.pos = *(VECTOR32 *)gobj->move;
+    D_80106AEC.unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+    D_80106AEC.unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+    D_80106AEC.unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+    D_80106AEC.unk234.vy = -D_80106AEC.unk234.vy;
+    D_80106AEC.unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
+    D_80106AEC.unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
+    D_80106AEC.unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
+    D_80106AEC.unk244.vy = -D_80106AEC.unk244.vy;
+    D_80106AEC.ref = D_80106AEC.pos;
+    D_80106AEC.ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
+    D_80106AEC.dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
+    D_80106AEC.dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
+    D_80106AEC.dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
+    D_80106AEC.dir[1] = -D_80106AEC.dir[1];
+    D_80106AEC.vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
+    D_80106AEC.vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
+    D_80106AEC.vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
+    c = &D_80106AEC;
+    c->vel[0] = FIX_TO_INT(c->vel[0]);
+    c->vel[1] = FIX_TO_INT(c->vel[1]);
+    c->vel[2] = FIX_TO_INT(c->vel[2]);
+    for (f = ((FriendlyAnim *)gobj->anim)->faceList; f != NULL; f = f->next) {
+        flags = *f->face.flags;
+        cf = &f->face;
+        if (flags == 0) {
+            continue;
+        }
+        edgeFlags = f->face.flags - 12;
+        if (f->face.count == 4) {
+            edgeFlags = f->face.flags - 1;
+        }
+        if (*edgeFlags & 8) {
+            continue;
+        }
+        n = cf->count;
+        normal.vx = cf->normalPtr[0];
+        normal.vy = cf->normalPtr[1];
+        normal.vz = cf->normalPtr[2];
+        verts = cf->verts;
+        for (i = 0; i < n; i++) {
+            if (!((flags >> (i * 2)) & 3)) {
+                continue;
+            }
+            if (c->foundCount >= 32) {
+                return;
+            }
+            found = &c->found[c->foundCount];
+            j = i + 1;
+            if (j == n) {
+                j = 0;
+            }
+            if (normal.vy > 0x800) {
+                found->p0.vx = verts[i]->x;
+                found->p0.vy = verts[i]->y;
+                found->p0.vz = verts[i]->z;
+                found->p1.vx = verts[j]->x;
+                found->p1.vy = verts[j]->y;
+                found->p1.vz = verts[j]->z;
+            } else {
+                found->p0.vx = verts[j]->x;
+                found->p0.vy = verts[j]->y;
+                found->p0.vz = verts[j]->z;
+                found->p1.vx = verts[i]->x;
+                found->p1.vy = verts[i]->y;
+                found->p1.vz = verts[i]->z;
+            }
+            found->unk20.vx = found->p1.vx - found->p0.vx;
+            found->unk20.vy = found->p1.vy - found->p0.vy;
+            found->unk20.vz = found->p1.vz - found->p0.vz;
+            for (j = 0; j < c->foundCount; j++) {
+                if (c->found[j].p0.vx == found->p0.vx && c->found[j].p0.vy == found->p0.vy &&
+                    c->found[j].p0.vz == found->p0.vz && c->found[j].p1.vx == found->p1.vx &&
+                    c->found[j].p1.vy == found->p1.vy && c->found[j].p1.vz == found->p1.vz) {
+                    break;
+                }
+            }
+            if (j < c->foundCount) {
+                continue;
+            }
+            v.vx = -found->unk20.vz;
+            v.vy = 0;
+            v.vz = found->unk20.vx;
+            GTEMath_VectorNormal(&v, &found->normal);
+            found->kind = (flags >> (i * 2)) & 3;
+            c->foundCount++;
+        }
+    }
+    c->groups[0].count = 0;
+    for (i = 0; i < c->foundCount; i++) {
+        func_80087B8C(gobj, c, &c->found[i]);
+    }
+    func_80088BAC(gobj, c);
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
+#endif
 
 #ifdef NON_MATCHING
 /*

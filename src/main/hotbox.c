@@ -38,19 +38,61 @@ typedef struct TextChar {
     /* 0x04 */ s16 x;
     /* 0x06 */ s16 y;
     /* 0x08 */ u16 w;
-    /* 0x0A */ u8 unk0A[0x22];
+    /* 0x0A */ u8 unk0A[0xA];
+    /* 0x14 */ u8 r;
+    /* 0x15 */ u8 g;
+    /* 0x16 */ u8 b;
+    /* 0x17 */ u8 unk17[0x15];
 } TextChar;
 
 typedef struct TextString {
     /* 0x00 */ TextChar *chars;
-    /* 0x04 */ u8 unk04[8];
+    /* 0x04 */ u32 startTick;
+    /* 0x08 */ u32 endTick;
     /* 0x0C */ u16 count;
     /* 0x0E */ s16 x;
     /* 0x10 */ u8 unk10[4];
     /* 0x14 */ u8 flags; /* 0x40 right-justify, 0x08 centre */
-    /* 0x15 */ u8 unk15[3];
+    /* 0x15 */ u8 unk15;
+    /* 0x16 */ u16 marker; /* markers: gameObjectsInfo index of the labelled object */
     /* 0x18 */ struct TextString *next;
 } TextString;
+
+/* Flat line primitive (text.c's TextLine, 0x18 bytes); markers use two each. */
+typedef struct TextLine {
+    /* 0x00 */ s32 tag;
+    /* 0x04 */ u8 unk04[8];
+    /* 0x0C */ u32 color;
+    /* 0x10 */ s32 xy0;
+    /* 0x14 */ s32 xy1;
+} TextLine;
+extern TextLine D_801211E4[];
+
+#define HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+
+/* Bounding box at the start of a model. */
+typedef struct HotboxModel {
+    /* 0x00 */ HotboxVector min;
+    /* 0x0C */ s32 pad0C;
+    /* 0x10 */ HotboxVector max;
+} HotboxModel;
+
+typedef struct HotboxNPC {
+    /* 0x00 */ u8 unk00[0x20];
+    /* 0x20 */ s32 flags; /* 0x200: show marker */
+} HotboxNPC;
+
+extern void **gCamera;
+extern void *gTextCamera;
+u8 LevelGameObjectHasModel(s32 id);
+void EGSFrameTransformVector(HotboxVector *in, void *frame, s32 arg2, HotboxVector *out);
+void CameraGetDisplay(void *camera, void **display);
+void EGSDisplaySetupTransformWorldToScreen(void *display);
+void EGSDisplayTransformWorldToScreen(HotboxVector *in, HotboxVector *out);
+void EGSDisplayAddPoly(void *camera, void *poly);
+void EGSDisplayDeletePoly(void *camera, void *poly);
+void func_80085024(TextString *s);
+void func_80082E70(TextString *text, s32 x, s32 y);
 
 extern struct {
     s16 level;
@@ -253,4 +295,155 @@ void func_80082E70(TextString *text, s32 x, s32 y) {
     }
 }
 
+#ifdef NON_MATCHING
+/* regalloc of width/room/arrow (a1/a0/a2 vs a2/a1/a3), (x - 6) + arrow reassociated, &line[1] not kept in s0 */
+/*
+ * Place marker string s (index-th marker) over the object it labels: project
+ * the object (or the top of its model) to the screen, move the string there
+ * clamped to the screen edges, and draw the two-line pointer from it to the
+ * object while the string is shown. Off-screen markers are parked below.
+ */
+void func_80082F20(TextString *s, s32 index) {
+    HotboxVector pos;
+    HotboxVector at;
+    HotboxVector head;
+    void *display;
+    TextChar *chars;
+    GameObjectRuntime *gobj;
+    GameObjectInfo *info;
+    HotboxModel *model;
+    TextLine *line;
+    s32 width;
+    s32 room;
+    s32 arrow;
+    s32 x;
+    s32 t;
+    u32 color;
+
+    model = NULL;
+    chars = s->chars;
+    gobj = gameObjectsInfo[s->marker].runtime;
+    line = &D_801211E4[index * 2];
+    if (LevelGameObjectHasModel(gobj->id)) {
+        model = (HotboxModel *)gobj->anim->model;
+        pos.vx = ((HotboxFrame *)gobj->anim->frame)->x;
+        pos.vy = ((HotboxFrame *)gobj->anim->frame)->y;
+        pos.vz = ((HotboxFrame *)gobj->anim->frame)->z;
+        pos.vy = -pos.vy;
+        if (gobj->npcState == 2) {
+            if (!(((HotboxNPC *)gobj->npc)->flags & 0x200)) {
+                func_80085024(s);
+                return;
+            }
+            head.vz = 0;
+            head.vy = 0;
+            head.vx = 0;
+        } else {
+            head.vx = model->min.vx + model->max.vx;
+            head.vy = model->min.vy + model->max.vy;
+            head.vz = model->min.vz + model->max.vz;
+            head.vx = HALF(head.vx);
+            head.vy = HALF(head.vy);
+            head.vz = HALF(head.vz);
+            if (head.vx != 0 || head.vy != 0 || head.vz != 0) {
+                head.vy = -head.vy;
+                EGSFrameTransformVector(&head, gobj->anim->frame, 0, &head);
+                CameraGetDisplay(gCamera, &display);
+                EGSDisplaySetupTransformWorldToScreen(display);
+            }
+            gobj = NULL;
+            pos.vx += head.vx;
+            pos.vy += head.vy;
+            pos.vz += head.vz;
+        }
+    } else {
+        info = &gameObjectsInfo[gobj->id];
+        pos.vx = info->matrix.t[0];
+        pos.vy = info->matrix.t[1];
+        gobj = NULL;
+        pos.vz = info->matrix.t[2];
+    }
+    EGSDisplayTransformWorldToScreen(&pos, &pos);
+    if (pos.vz > 0) {
+        if (gobj != NULL) {
+            head.vx = ((HotboxFrame *)gobj->anim->frame)->x;
+            head.vy = ((HotboxFrame *)gobj->anim->frame)->y;
+            head.vz = ((HotboxFrame *)gobj->anim->frame)->z;
+            head.vy = -head.vy;
+            head.vy -= model->min.vy;
+            EGSDisplayTransformWorldToScreen(&head, &head);
+        } else {
+            head.vz = pos.vz;
+            head.vx = pos.vx;
+            head.vy = pos.vy;
+        }
+        width = chars[s->count - 1].x + chars[s->count - 1].w - chars[0].x;
+        if (head.vz < 0) {
+            head.vz = 0;
+        }
+        if (head.vx + (t = width + 8) > 0x98) {
+            /* off the right edge: right-justify and shorten the pointer */
+            room = 0xA0 - pos.vx;
+            arrow = room * 6 / (width + 16);
+            at.vx = 0x98;
+            if (arrow < 0) {
+                arrow = 0;
+            }
+            x = width * room / (width + 16);
+            if (x < 0) {
+                x = 0;
+            }
+            x = 0x98 - x;
+            s->flags |= 0x40;
+        } else {
+            s->flags &= ~0x40;
+            if (head.vx + 8 < -0x98) {
+                at.vx = -0x98;
+            } else {
+                at.vx = head.vx + 8;
+            }
+            x = at.vx;
+            arrow = 6;
+        }
+        if (head.vy + 8 > 0x5A) {
+            at.vy = 0x5A;
+        } else if (head.vy + 8 < -0x5A) {
+            at.vy = -0x5A;
+        } else {
+            at.vy = head.vy + 8;
+        }
+        if (head.vy > 0x52) {
+            head.vy = (pos.vy < 0x52) ? 0x52 : pos.vy;
+        }
+        if (s->endTick > gSystemTick) {
+            line[0].xy0 = (u16)head.vx | (-head.vy << 16);
+            line[0].xy1 = (x & 0xFFFF) | (-at.vy << 16);
+            line[1].xy0 = ((x + arrow) & 0xFFFF) | (-at.vy << 16);
+            line[1].xy1 = ((x - 6 + arrow) & 0xFFFF) | (-at.vy << 16);
+            color = ((chars[0].b << 16) + (chars[0].g << 8) + chars[0].r) | 0x40000000;
+            line[1].color = color;
+            line[0].color = color;
+            if (line[0].tag == 0) {
+                EGSDisplayAddPoly(gTextCamera, &line[0]);
+                EGSDisplayAddPoly(gTextCamera, &line[1]);
+            }
+        } else if (line[0].tag != 0) {
+            EGSDisplayDeletePoly(gTextCamera, &line[0]);
+            EGSDisplayDeletePoly(gTextCamera, &line[1]);
+        }
+        at.vy += 8;
+    } else {
+        if (gSystemTick - s->startTick < 600 && s->endTick < (u32)-1) {
+            s->endTick++;
+        }
+        at.vy = 300;
+        if (line[0].tag != 0) {
+            EGSDisplayDeletePoly(gTextCamera, &line[0]);
+            EGSDisplayDeletePoly(gTextCamera, &line[1]);
+        }
+    }
+    func_80082E70(s, at.vx, -at.vy);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/hotbox", func_80082F20);
+#endif

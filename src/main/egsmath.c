@@ -549,7 +549,87 @@ int EGSMathINT_ValueGetScaleForMultiplication(s32 value, s32 *shift)
     return 0;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/egsmath", EGSMathINT_Solve3LinearEquationsIn3Unknowns);
+static inline void EGSMathINT_Swap(s32 *a, s32 *b)
+{
+    s32 t;
+
+    t = *a;
+    *a = *b;
+    *b = t;
+}
+
+/*
+ * Solve the 3x3 system m (row i: m[i][0]*x + m[i][1]*y + m[i][2]*z = m[i][3])
+ * by elimination, rescaling the intermediates to avoid overflow. The result
+ * is left as fractions in out[0..5]; returns 1 if the system is degenerate.
+ */
+int EGSMathINT_Solve3LinearEquationsIn3Unknowns(s32 m[3][4], s32 *out)
+{
+    s32 i0, i1, i2;
+    s32 shift;
+    s32 e1, e2, e3;
+    s32 f1, f2, f3;
+    s32 g1, g2;
+    s32 z, y, w;
+
+    /* rows: i0 has a nonzero x coefficient, i1 a nonzero y one if possible */
+    i0 = 0;
+    i1 = 1;
+    i2 = 2;
+    if (m[0][0] == 0) {
+        if (m[1][0] != 0) {
+            EGSMathINT_Swap(&i0, &i1);
+        } else {
+            EGSMathINT_Swap(&i0, &i2);
+        }
+    }
+    if (m[i1][1] == 0) {
+        EGSMathINT_Swap(&i1, &i2);
+    }
+    e1 = m[i0][1] * m[i1][0] - m[i0][0] * m[i1][1];
+    e2 = m[i0][2] * m[i1][0] - m[i0][0] * m[i1][2];
+    e3 = m[i0][3] * m[i1][0] - m[i0][0] * m[i1][3];
+    f1 = m[i0][1] * m[i2][0] - m[i0][0] * m[i2][1];
+    f2 = m[i0][2] * m[i2][0] - m[i0][0] * m[i2][2];
+    f3 = m[i0][3] * m[i2][0] - m[i0][0] * m[i2][3];
+    EGSMathINT_ValueGetScaleForMultiplication(
+        MAX(ABS(e1), MAX(ABS(e2), MAX(ABS(e3), MAX(ABS(f1), MAX(ABS(f2), ABS(f3)))))),
+        &shift);
+    if (shift != 0) {
+        e1 >>= shift;
+        e2 >>= shift;
+        e3 >>= shift;
+        f1 >>= shift;
+        f2 >>= shift;
+        f3 >>= shift;
+    }
+    g1 = e2 * f1 - e1 * f2;
+    g2 = e3 * f1 - e1 * f3;
+    EGSMathINT_ValueGetScaleForMultiplication(MAX(ABS(g1), ABS(g2)), &shift);
+    if (shift != 0) {
+        g1 >>= shift;
+        g2 >>= shift;
+    }
+    z = e1 * g1;
+    y = e3 * g1 - e2 * g2;
+    w = e1 * g2;
+    EGSMathINT_ValueGetScaleForMultiplication(MAX(ABS(z), MAX(ABS(y), ABS(w))), &shift);
+    if (shift != 0) {
+        z >>= shift;
+        y >>= shift;
+        w >>= shift;
+    }
+    out[0] = m[i0][0] * z;
+    out[1] = m[i0][3] * z - m[i0][2] * w - m[i0][1] * y;
+    out[2] = z;
+    out[3] = y;
+    out[4] = g1;
+    out[5] = g2;
+    if (out[0] == 0 || out[2] == 0 || out[4] == 0) {
+        return 1;
+    }
+    return 0;
+}
 
 /* v[0] = a * v[1] + b * v[2]: solve using the two best conditioned axes */
 int EGSMathINT_SolveLinear2VectorEquationForParameters(VECTOR *v, s32 *out)
