@@ -13,8 +13,8 @@ aligns each object's section).  A section the OBJ has but the yaml does not
 place is reported as "unplaced" (its bytes are still in a splat data segment).
 
 The source is staged as s/<tu>.c so __FILE__ matches the original ("s/<tu>.c").
-ccpsx defines _PSYQ, which include/common.h uses to drop the GAS-only macros;
-TUs that still contain INCLUDE_ASM functions will therefore come out short.
+ccpsx defines _PSYQ, which include/common.h uses to turn INCLUDE_ASM into markers;
+tools/psyq_cc.py runs ccpsx -S, expands them with tools/psyq_asm.py, then aspsx.
 """
 import argparse
 import os
@@ -125,7 +125,7 @@ def main():
     ap.add_argument("--flags", default="-O2 -G8")
     ap.add_argument("--keep", help="directory for the .obj files (default: a temp dir)")
     args = ap.parse_args()
-    work = args.keep or tempfile.mkdtemp(prefix="psyqtu")
+    work = os.path.abspath(args.keep or tempfile.mkdtemp(prefix="psyqtu"))
     os.makedirs(work, exist_ok=True)
     if not os.path.exists(os.path.join(work, "s")):
         os.symlink(os.path.join(ROOT, "src/main"), os.path.join(work, "s"))
@@ -134,7 +134,7 @@ def main():
     bad_total = 0
     for tu in args.tus:
         obj = os.path.join(work, tu + ".obj")
-        cmd = [os.path.join(TOOLS, "psyq_wine.sh"), "ccpsx"] + args.flags.split() + [
+        cmd = [sys.executable, os.path.join(TOOLS, "psyq_cc.py")] + args.flags.split() + [
             "-I" + os.path.join(ROOT, "include"), "-I" + os.path.join(ROOT, "src"),
             "-c", "s/%s.c" % tu, "-o" + obj]
         if os.path.exists(obj):

@@ -4,14 +4,24 @@
 /*
  * _PSYQ is predefined by the original ccpsx driver (Psy-Q 4.3, cc1psx + aspsx).
  * aspsx understands none of the GAS-only constructs below (.include, .pushsection,
- * .macro, maspsx markers), so under ccpsx they compile away: INCLUDE_ASM functions
- * are expected to come from separately assembled objects, and SDATA_LOCAL is not
- * needed once a TU defines its small data itself (docs/data_migration.md).
+ * .macro, maspsx markers). Instead INCLUDE_ASM leaves `.psyq_include PART "file"`
+ * markers in the same two places (file scope for part 1, a dummy function for
+ * part 2), and tools/psyq_asm.py, run between cc1psx and aspsx, replaces them with
+ * the splat .s rewritten for aspsx and removes the dummy function (tools/psyq_cc.py
+ * runs the whole pipeline; docs/psyq_build.md). SDATA_LOCAL is not needed once a TU
+ * defines its small data itself (docs/data_migration.md).
  */
 #ifdef _PSYQ
-#define INCLUDE_ASM(FOLDER, NAME)
-#define INCLUDE_RODATA(FOLDER, NAME)
-#define INCLUDE_PART1(FOLDER, NAME)
+#define INCLUDE_PART1(FOLDER, NAME) \
+    __asm__(".psyq_include 1 \"" FOLDER "/" #NAME ".s\"");
+#define INCLUDE_PART2(FOLDER, NAME, HACK) \
+    void HACK() { __asm__(".psyq_include 2 \"" FOLDER "/" #NAME ".s\""); }
+#define INCLUDE_ASM(FOLDER, NAME)  \
+    INCLUDE_PART1(FOLDER, NAME)    \
+    INCLUDE_PART2(FOLDER, NAME, __psyq_include_asm_##NAME)
+#define INCLUDE_RODATA(FOLDER, NAME) \
+    INCLUDE_PART1(FOLDER, NAME)      \
+    INCLUDE_PART2(FOLDER, NAME, __psyq_include_asm_rodata_##NAME)
 #define SDATA_LOCAL(sym)
 #else /* !_PSYQ */
 

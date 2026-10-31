@@ -23,12 +23,88 @@ The tools run under wine through `tools/psyq_wine.sh`. Set `PSYQ_WINEPREFIX` to 
 
 | tool | what it does |
 |---|---|
+| `tools/psyq_cc.py` | `ccpsx -c` replacement: ccpsx -S, then `psyq_asm.py` (expands INCLUDE_ASM for aspsx), then aspsx. |
 | `tools/elf2psyq.py` | Converts an ELF `.o` to an SN `.OBJ`. It handles sections (`.rodata`→`.rdata`, `--rename`), XDEF/XREF/XBSS and relocations, and also offers `--truncate SEC=SIZE` and `--symrename`. |
 | `tools/gen_psylink.py` | Writes the psylink command file and converts every object into `build/psyq/obj/`. |
 | `tools/psyq_liborder.py` | Writes `config/psyq_libs.txt`: the library modules in the order psylink placed them. |
 | `tools/psyq_link.sh` | Runs psylink and `cpe2exe -CJ`, then compares the results. |
 | `tools/psyq_mapdiff.py` | Lists the sections and symbols whose addresses differ between two psylink maps. |
 | `tools/cpe.py` | Lists the records of a CPE file, or flattens an address range from one. |
+
+## Compiling TUs that still contain asm functions
+
+`INCLUDE_ASM` works under ccpsx too, so a TU does not need to be fully C to be built with
+the original compiler and assembler:
+
+```
+tools/psyq_cc.py -O2 -G8 -Iinclude -Isrc -c s/foo.c -ofoo.obj    # like ccpsx -c
+tools/psyq_check_tu.py --keep build/psyqtu egsmem save ...      # uses psyq_cc.py
+```
+
+`psyq_cc.py` runs the same steps as `ccpsx -c` (`ccpsx -v` shows them), with one filter
+added:
+
+1. `ccpsx -S` runs cpppsx and cc1psx.
+2. `tools/psyq_asm.py` expands the INCLUDE_ASM markers.
+3. `aspsx -q -G<n>` assembles the result.
+
+If a file has no markers, the filter changes nothing, and the object is the same as
+plain `ccpsx -c` gives.
+
+How it works:
+
+* **Markers in source order.** Under `_PSYQ`, `include/common.h` makes
+  `INCLUDE_ASM(dir, NAME)` emit `.psyq_include 1 "dir/NAME.s"` at file scope and
+  `.psyq_include 2 ...` inside a dummy function `__psyq_include_asm_NAME`. These are the
+  same two places as the GAS build's INC_PART 1/2 (`tools/split_parts.py`). cc1psx is
+  GCC 2.7.2 and buffers function bodies in the same way, so the parts land in the
+  same order.
+* **What the filter does.** `psyq_asm.py` replaces each marker with the matching
+  INC_PART block, rewritten for aspsx. It removes the dummy function: its `.globl`, the
+  `.ent`/`.frame`/`.end` lines, and cc1's `j $31`. After a part-1 block, it restores the
+  section cc1 was in.
+* **aspsx syntax** (worked out by experiment with aspsx 2.77):
+  * Input must have CRLF line endings, and aspsx needs absolute paths under wine.
+  * Only numeric registers are accepted (`$v0` is rejected).
+  * `%hi(sym+off)` and `%lo(sym+off)` work (relocations 0x52/0x54).
+  * There is no `%gp_rel`. Instead, `lw $2, sym` is gp-relative (0x64) when `sym` is
+    `.sdata`/`.sbss`/`.comm`/`.lcomm` *in this file*. For an `.extern`, it expands to
+    `lui`+`lw` through `$at`, which fails under `.set noat`. So a gp-relative access to
+    data the TU does not define cannot assemble. The TU's small data must be migrated
+    first (`SDATA_LOCAL` is a no-op under `_PSYQ`).
+  * Inside `.set noreorder`, aspsx assembles raw instructions as written.
+  * Sections are `.rdata`, `.text`, `.data` and `.sdata`. `.L` labels stay local.
+    `.word label` in `.rdata` (jump tables) gets section-relative relocations.
+* **What the filter emits.**
+  * An instruction without a relocation is written as `.word <encoding>`, taken from
+    the splat comment, so aspsx's parser and macros never see it.
+  * The rest stay symbolic: `%hi`/`%lo`, `%gp_rel` (as the macro form above), and
+    `j`/`jal` to a label.
+  * aspsx ignores `.word` when it tracks delay slots. So the instruction after a
+    symbolic `j`/`jal` is also written symbolically. Otherwise the next symbolic jump
+    is rejected with "not allowed in a delay slot".
+  * `.asciz` and `.short` become `.byte`. `glabel`/`dlabel` become `.globl`+label, as
+    in the GAS build. `jlabel` becomes a local label.
+
+Status as of 2026-10-31:
+
+* **Main exe.** `psyq_check_tu.py` reports 27 of the 51 main TUs OK in every section:
+  main system game level camera physics path playcas sprite los movement collision
+  gtegeo animate stream save shadow egshmd egsanim egsframe egsdebug egstex egsmem
+  egsmisc egsfile egshog egsgeom. 18 of these still contain INCLUDE_ASM functions.
+* **Linked.** With all 27 passed to `gen_psylink.py --libs` as `--obj` objects,
+  `psyq_link.sh` still gives 16x OK.
+* **The other 24 main TUs.** None of them fails because of the asm path:
+  * Some fail to assemble ("Assembler does not have AT register available"). Their asm
+    makes gp-relative accesses to small data the TU does not define.
+  * The rest have a longer `.text`. Their C code goes through `SDATA_LOCAL` externs,
+    which ccpsx reaches with `lui`+`lw`.
+  * Both are data-migration work. A variable the original reached through $gp from
+    several TUs is a common (`.comm`, a tentative definition in C), which aspsx
+    does reach through gp.
+* **Overlays.** With `-G0`, the `.text` of chopper, levspec, init, park and movie, all
+  of which contain INCLUDE_ASM, is identical to the GNU objects.
+  `psyq_check_tu.py` does not handle overlays yet (yaml layout, section renames).
 
 ## SN OBJ facts used by the converter
 
@@ -121,7 +197,7 @@ The tools run under wine through `tools/psyq_wine.sh`. Set `PSYQ_WINEPREFIX` to 
 * **Overlay symbols.** splat's overlay symbols repeat between overlays, so
   `gen_psylink.py` renames clashing ones to `<ovl>_<name>`. Equates (`name equ $addr`)
   cover names that no object defines.
-* **ccpsx TUs.** As each TU becomes buildable with ccpsx, pass its OBJ with `--obj`.
+* **ccpsx TUs.** As each TU becomes buildable with ccpsx (see below), pass its OBJ with `--obj`.
   The plan is to make that the default for migrated TUs, then for all of them.
   movie.ovl's libpress/libmcrd/libcard code is still the GNU asm, including DecDCTvlc2,
   which must stay asm.
