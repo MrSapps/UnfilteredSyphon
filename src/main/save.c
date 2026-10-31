@@ -3,10 +3,9 @@
 #include "gameobj.h"
 #include "gobj.h"
 
-/* save.c's small data, still assembled from asm */
-SDATA_LOCAL(gContinueLevel)
-
-extern u8 gContinueLevel; /* nonzero once a continue point has been stored */
+/* This TU's data, defined in original order (docs/data_migration.md). .sdata: */
+static u8 D_8010FD1C = 0; /* unreferenced; this file's because the next byte is (judgement) */
+u8 gContinueLevel = 0;    /* nonzero once a continue point has been stored */
 
 /* Per-weapon inventory entry; slot 0 is not written to the memory card */
 typedef struct WeaponSlot {
@@ -106,8 +105,9 @@ typedef struct SysInfo {
     /* 0x00 */ s16 level;
 } SysInfo;
 
-extern SaveData D_80121A08;     /* gSaveData */
-extern ContinueData D_80121B08; /* gContinueData */
+/* .bss */
+static SaveData D_80121A08;     /* gSaveData */
+static ContinueData D_80121B08; /* gContinueData */
 extern PlayerSave mSOLState;
 extern WeaponSlot gWeaponState[WEAPON_SLOTS];
 extern WeaponDesc D_80105F58[];
@@ -121,6 +121,8 @@ extern s32 gJoyMap[8];
 extern s32 gAmbientLight;
 extern u16 POSITION;
 extern u16 D_8012C7FA;
+
+static const s32 D_80013344[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 void InterfaceCountdownAbort(void);
 void InterfaceCountdownReset(s32 countdown);
@@ -278,7 +280,7 @@ extern s32 gNPCGeneratorCount;
 extern u16 *generatorInfo; /* 0x10-byte records, id first */
 extern s32 gSaveLevelData[1];
 extern s32 gExeTick;
-extern char D_80013354[]; /* "s/save.c" */
+static const char D_80013354[9] = "s/save.c"; /* __FILE__ of SaveRestoreContinue (asm) */
 
 s32 FriendlyGobjGetReferenceY(GameObjectRuntime *obj, s32 arg1);
 s16 InterfaceCountdownGet(void);
@@ -308,10 +310,10 @@ void func_80090724(void) {
     }
     SavePlayerPreserve();
     if (gLevelGameObjCount >= SAVE_OBJECT_MAX) {
-        EGSDebugAssert(1, 0, D_80013354, 0x136);
+        EGSDebugAssert(1, 0, (char *)D_80013354, 0x136);
     }
     if (gNPCGeneratorCount >= SAVE_GENERATOR_MAX) {
-        EGSDebugAssert(1, 0, D_80013354, 0x137);
+        EGSDebugAssert(1, 0, (char *)D_80013354, 0x137);
     }
     gLevData->sector = D_80121B08.sector = gGabeSector;
     D_80121B08.orient[0] = gObjPlayer->anim->frame->m[0][2];
@@ -321,7 +323,7 @@ void func_80090724(void) {
     *(VECTOR32 *)D_80121B08.position = gObjPlayer->move->pos;
     D_80121B08.position[1] = FriendlyGobjGetReferenceY(gObjPlayer, 1) + 0x69;
     if (gObjectives == NULL) {
-        EGSDebugAssert(1, 0, D_80013354, 0x145);
+        EGSDebugAssert(1, 0, (char *)D_80013354, 0x145);
     }
     D_80121B08.objectives[0] = gObjectives->bits[0];
     D_80121B08.objectives[1] = gObjectives->bits[1];
@@ -338,7 +340,7 @@ void func_80090724(void) {
         obj = gameObjectsInfo[i].runtime;
         entry = &D_80121B08.objects[saved];
         if (saved >= CONTINUE_OBJECTS_MAX) {
-            EGSDebugAssert(1, 0, D_80013354, 0x15E);
+            EGSDebugAssert(1, 0, (char *)D_80013354, 0x15E);
         }
         if (obj != NULL) {
             if (obj->healthInfo->health > 0) {
@@ -389,10 +391,10 @@ s32 SaveRestoreContinue(void) {
     }
     SavePlayerRestore();
     if (D_80121B08.objCount != gLevelGameObjCount) {
-        EGSDebugAssert(1, 0, D_80013354, 0x1D2);
+        EGSDebugAssert(1, 0, (char *)D_80013354, 0x1D2);
     }
     if (D_80121B08.generatorCount != gNPCGeneratorCount) {
-        EGSDebugAssert(1, 0, D_80013354, 0x1D3);
+        EGSDebugAssert(1, 0, (char *)D_80013354, 0x1D3);
     }
     gLevData->sector = D_80121B08.sector;
     gGabeSector = D_80121B08.sector;
@@ -416,7 +418,7 @@ s32 SaveRestoreContinue(void) {
         }
         if (entry->id == i) {
             if (saved >= D_80121B08.savedObjCount) {
-                EGSDebugAssert(1, 0, D_80013354, 0x1F4);
+                EGSDebugAssert(1, 0, (char *)D_80013354, 0x1F4);
             }
             SysPostMessage(0x2A, 5, 0xFFFE, entry->id, (s32)&entry->data1, (s32)&entry->data0, 0, 0);
             entry++;
@@ -434,6 +436,16 @@ s32 SaveRestoreContinue(void) {
     return 1;
 }
 #else
+#ifndef _PSYQ
+/* INCLUDE_ASM functions still address these through their splat labels */
+__asm__(
+        ".set D_80121B0A, D_80121B08+0x2\n"
+        ".set D_80121B0E, D_80121B08+0x6\n"
+        ".set D_80121BA0, D_80121B08+0x98\n"
+        ".set D_80121BC8, D_80121B08+0xC0\n"
+        ".set D_80121C90, D_80121B08+0x188\n"
+        ".set D_801221E0, D_80121B08+0x6D8\n");
+#endif
 INCLUDE_ASM("asm/main/nonmatchings/save", SaveRestoreContinue);
 #endif
 
@@ -526,6 +538,4 @@ s32 SaveIsPlayerVirginal(void) {
     return D_80121B08.weapon == 0;
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/save", D_80013344);
 
-INCLUDE_RODATA("asm/main/nonmatchings/save", D_80013354);

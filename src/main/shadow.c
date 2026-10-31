@@ -1,7 +1,7 @@
 #include "common.h"
 
-/* shadow.c's small data, still assembled from asm */
-SDATA_LOCAL(mShadowRequestList)
+/* This TU's data is defined in C (docs/data_migration.md): .rdata D_80013360 and
+ * D_80013414; mShadowRequestList (.sbss) and the pools (.bss) are commons. */
 
 typedef struct EGSListNode {
     /* 0x00 */ void *data;
@@ -63,7 +63,7 @@ typedef struct ShadowGobj {
     /* 0x08 */ ShadowAnim *anim;
 } ShadowGobj;
 
-extern EGSListNode *mShadowRequestList;
+EGSListNode *mShadowRequestList; /* common, $gp */
 extern Shadow mShadowPool[SHADOW_POOL_SIZE];
 extern u16 mShadowTexture[32][16]; /* 16x32 15-bit shadow blob, built by ShadowInit */
 extern void **gCamera;
@@ -150,7 +150,7 @@ typedef struct ShadowPlane {
 
 void EGSGeometryINT_PointProjectOnPlaneAlongY(ShadowVec *p, ShadowPlane *plane, u8 *ok, s32 *y);
 int EGSMathFIX_VectorScaleToLength(ShadowVec *v, s32 length, ShadowVec *out);
-extern const ShadowVec D_80013414; /* {0, 0x1000, 0}: up, shared with func_800918C0 */
+static const ShadowVec D_80013414; /* {0, 0x1000, 0}: up, shared with func_800918C0 */
 
 typedef struct ShadowSVec {
     s16 vx, vy, vz, pad;
@@ -260,7 +260,7 @@ static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, 
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/shadow", D_80013360);
+static const s32 D_80013360[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 #ifdef NON_MATCHING
 /* stack layout: the original overlays the bone tables with the half/centre vectors */
@@ -537,11 +537,7 @@ void ShadowProcess(void) {
     }
 }
 
-#ifdef NON_MATCHING
-const ShadowVec D_80013414 = { 0, 0x1000, 0 }; /* up; emitted after func_800918C0's templates */
-#else
-INCLUDE_RODATA("asm/main/nonmatchings/shadow", D_80013414);
-#endif
+static const ShadowVec D_80013414 = { 0, 0x1000, 0 }; /* up; emitted after func_800918C0's templates */
 
 u8 ShadowCalculateProjectionMatrix(ShadowVec *normal, ShadowMatrix *out) {
     ShadowVec ax = { 0x1000, 0, 0 };

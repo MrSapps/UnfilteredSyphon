@@ -1,29 +1,6 @@
 #include "common.h"
 #include "game.h"
 
-/* egsdev.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010FEC0)
-SDATA_LOCAL(D_8010FEC4)
-SDATA_LOCAL(D_8010FEC8)
-SDATA_LOCAL(D_8010FECC)
-SDATA_LOCAL(D_8010FED0)
-SDATA_LOCAL(D_8010FED8)
-SDATA_LOCAL(D_8010FEDC)
-SDATA_LOCAL(D_80110200)
-SDATA_LOCAL(D_80110201)
-SDATA_LOCAL(D_80110204)
-SDATA_LOCAL(D_80110208)
-SDATA_LOCAL(D_8011020C)
-SDATA_LOCAL(D_80110214)
-SDATA_LOCAL(D_80110218)
-SDATA_LOCAL(D_8011021C)
-SDATA_LOCAL(HANG)
-SDATA_LOCAL(HANGpc)
-SDATA_LOCAL(HANGra)
-SDATA_LOCAL(HANGsp)
-SDATA_LOCAL(gGlobalFrameCounter)
-SDATA_LOCAL(lastCounterTick)
-SDATA_LOCAL(lastCounterTickSort)
 
 #define CALLBACK_FREE 0xCACACACA
 
@@ -81,39 +58,63 @@ typedef struct Controller {
 #define PAD_SELECT 8
 #define PAD_START 11
 
-extern s32 D_8010FEC0;          /* colour mode */
-extern u8 D_8010FEC4;           /* system clock running */
-extern s32 D_8010FEC8;          /* tick at the last fps sample */
-extern s32 D_8010FECC;          /* frames per second */
-extern s32 D_8010FED0;          /* frames since the last sample */
-extern s32 D_8010FED8;          /* frame time count */
-extern u8 D_8010FEDC;           /* callback slots initialised */
+/*
+ * .sbss/.bss stay in the splat blobs for now: every item is 4-aligned and 4-padded
+ * (vibration u8[2] at 0x80110200, u8 at ...204, s16 at ...208/...20C; 0x1E0-byte
+ * gControllers at 0x80122684), which no .lcomm layout of aspsx 2.77 reproduces
+ * (it aligns each .lcomm to its size rounded up to a power of two, max 16).
+ */
+SDATA_LOCAL(D_80110200)
+SDATA_LOCAL(D_80110204)
+SDATA_LOCAL(D_80110208)
+SDATA_LOCAL(D_8011020C)
+SDATA_LOCAL(D_80110214)
+SDATA_LOCAL(D_80110218)
+SDATA_LOCAL(D_8011021C)
 extern u8 D_80110200[];        /* vibration motor levels */
-extern u8 D_80110201;
 extern u8 D_80110204;           /* controllers started */
 extern s16 D_80110208;          /* screen width */
 extern s16 D_8011020C;          /* screen height */
 extern volatile s32 D_80110214; /* system tick, counted in the VSync IRQ */
-extern u8 D_8011021C;
-extern u8 HANG;
-extern s32 HANGpc;
-extern s32 HANGra;
-extern s32 HANGsp;
-extern s32 gGlobalFrameCounter;
-extern s32 lastCounterTick;
-extern s32 lastCounterTickSort;
-extern u8 gIsStreamingFlag;
-extern s32 D_801228A8[100];     /* frame times */
-extern u8 D_80122864[2][0x22];  /* raw PadInitDirect buffers, one per port */
-extern Controller gControllers[8];
-extern Callback gCallbackArray[5];
 extern Callback *D_80110218;    /* active callbacks */
+extern u8 D_8011021C;
+extern u8 D_80122678[];         /* crash screen DR_MODE */
+extern Controller gControllers[8];
+extern u8 D_80122864[2][0x22];  /* raw PadInitDirect buffers, one per port */
+extern s32 D_801228A8[100];     /* frame times */
+/*
+ * This TU's data, defined in original order (docs/data_migration.md).
+ * .sdata (continued after EmergencyPrintNum: "%8lX", D_8010FF00):
+ */
+static u8 D_8010FEB8[8] = { 0, 1, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0 }; /* actuator alignment table */
+static s32 D_8010FEC0 = 0;      /* colour mode */
+static u8 D_8010FEC4 = 1;       /* system clock running */
+static s32 D_8010FEC8 = 0;      /* tick at the last fps sample */
+static s32 D_8010FECC = 0;      /* frames per second */
+static s32 D_8010FED0 = 0;      /* frames since the last sample */
+s32 gGlobalFrameCounter = 0;
+static s32 D_8010FED8 = 0;      /* frame time count */
+static u8 D_8010FEDC = 0;       /* callback slots initialised */
+s32 lastCounterTickSort = 0;
+s32 lastCounterTick = 0;
+s32 HANGpc = 0;
+s32 HANGra = 0;
+s32 HANGsp = 0;
+u8 HANG = 0;
+u8 HANGwarn = 0;                /* unreferenced */
+/* .data */
+static u8 D_80107B30[10][2] = { /* font uv of 0-9 */
+    { 0x00, 0x00 }, { 0x08, 0x00 }, { 0x10, 0x00 }, { 0x18, 0x00 }, { 0x00, 0x08 },
+    { 0x08, 0x08 }, { 0x10, 0x08 }, { 0x18, 0x08 }, { 0x00, 0x10 }, { 0x08, 0x10 },
+};
+static u8 D_80107B44[6][2] = { /* font uv of A-F */
+    { 0x38, 0x10 }, { 0x20, 0x18 }, { 0x28, 0x18 }, { 0x30, 0x18 }, { 0x38, 0x18 }, { 0x20, 0x20 },
+};
+/* commons and other TUs' data */
+extern u8 gIsStreamingFlag;
+extern Callback gCallbackArray[5];
 extern EGSPoint POSITION;       /* screen centre */
-extern char D_8010FEF8[];       /* "%08X" */
-extern u8 D_80107B30[10][2];    /* font uv of 0-9 */
-extern u8 D_80107B44[6][2];     /* font uv of A-F */
 extern s32 GsDRAWENV;
-extern char D_8001375C[];       /* "s/egsdev.c" */
 
 void ServiceCallbacks(void);
 void func_800D133C(Controller *c, u8 *buf, s32 port);
@@ -335,7 +336,6 @@ s32 PadGetState(s32 port);
 s32 PadInfoMode(s32 port, s32 term, s32 offs);
 s32 PadSetActAlign(s32 port, u8 *table);
 void PadSetAct(s32 port, u8 *table, s32 len);
-extern u8 D_8010FEB8[]; /* actuator alignment table */
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 #define BUTTON_BITS(c) ((u8 *)&(c)->buttons)
@@ -463,7 +463,7 @@ s32 EGSDeviceControllerRead(Controller **out, u32 port) {
         *out = &gControllers[port];
         return 0;
     }
-    EGSDebugAssert(1, 0, D_8001375C, 0x2D5);
+    EGSDebugAssert(1, 0, __FILE__, 0x2D5);
     return 1;
 }
 
@@ -472,15 +472,13 @@ s32 EGSDeviceControllerGetStatus(u32 port, u8 *out) {
         *out = gControllers[port].status;
         return 0;
     }
-    EGSDebugAssert(1, 0, D_8001375C, 0x2EF);
+    EGSDebugAssert(1, 0, __FILE__, 0x2EF);
     return 1;
 }
 
 void func_800D1DF0(s32 i) {
     D_80110200[i] = 0;
 }
-
-INCLUDE_RODATA("asm/main/nonmatchings/egsdev", D_8001375C);
 
 s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks) {
     switch (cmd) {
@@ -507,7 +505,7 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks) {
         D_80110204 = 0;
     case 2:
         D_80110200[0] = 0;
-        D_80110201 = 0;
+        D_80110200[1] = 0;
         break;
     }
     return D_80110204 ? 7 : 6;
@@ -527,6 +525,7 @@ void EGSDeviceUnhang(void) {
 }
 
 #ifdef NON_MATCHING
+static char D_8010FEF8[5]; /* defined below */
 /* v0/v1 swapped for the font-table index and loaded byte */
 /* Print `digits` hex digits of n with the debug font sprite (crash screen). */
 void EmergencyPrintNum(EmergencySprite *sprite, u32 n, s32 digits) {
@@ -567,9 +566,13 @@ typedef struct EGSThreadContext {
 
 extern int gSystemState;
 extern u8 gSysHaltState;
-extern EGSRect D_8010FF00;           /* crash screen clear rect */
-extern EmergencySprite D_80107B50;   /* crash screen digit sprite */
-extern u8 D_80122678[];              /* crash screen DR_MODE */
+/* .sdata after EmergencyPrintNum's "%8lX" (a static here: the function is still asm) */
+static char D_8010FEF8[5] = "%8lX";
+static EGSRect D_8010FF00 = { 0, 0, 384, 512 }; /* crash screen clear rect */
+/* .data */
+static EmergencySprite D_80107B50 = {           /* crash screen digit sprite */
+    { 0, 0, 0, 0, 0x80, 0x80, 0x80, 0 }, -170, 80, 8, 0x20, 0, 6, 8
+};
 void MainLoop(void);
 void GsSwapDispBuff(void);
 void SetSprt(void *p);

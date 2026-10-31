@@ -5,27 +5,33 @@
 #include "egsmath.h"
 
 /* damage.c's small data, still assembled from asm */
-SDATA_LOCAL(D_8010F980)
-SDATA_LOCAL(D_8010F984)
-SDATA_LOCAL(D_8010F988)
-SDATA_LOCAL(D_80110170)
-SDATA_LOCAL(D_80110174)
-SDATA_LOCAL(D_80110178)
-SDATA_LOCAL(D_8011017C)
+/* (the rest of this TU's data is defined in C, docs/data_migration.md; the two u8 at
+ * 0x80110180/4 sit 4 bytes apart, which no aspsx .lcomm layout gives, and npc.c
+ * uses them too, so they stay in the splat .sbss blob for now) */
 SDATA_LOCAL(D_80110180)
 SDATA_LOCAL(D_80110184)
 
 typedef void (*DamageCallback)(s16 id, s16 by);
 
-extern u8 D_8010F988; /* bone angle limits not yet computed */
-extern s32 D_80110170; /* cos 40 deg: side limits */
-extern s32 D_80110174;
-extern s32 D_80110178; /* cos 65 deg: front/back limits */
-extern s32 D_8011017C;
-extern s32 D_801069F0[4]; /* body bones */
-extern s32 D_80106A00[4]; /* side bones */
-extern s32 D_80106A10[4]; /* other side bones */
-extern s32 D_80106A20[4]; /* front/back bones */
+/* .sdata D_8010F988 (bone angle limits not yet computed): defined below */
+static s32 D_80110170; /* cos 40 deg: side limits */
+static s32 D_80110174;
+static s32 D_80110178; /* cos 65 deg: front/back limits */
+static s32 D_8011017C;
+#ifndef _PSYQ
+/* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes one of its own arrays from these
+ * folded addresses, so the labels have to stay visible to it */
+__asm__(".globl D_80110170\n.globl D_80110178\n");
+#endif
+/* .data; the unreferenced list before the body bones is taken as this file's (it is
+ * a bone list like the others) */
+static s32 D_801069E0[4] = { 11, 12, 14, 13 };
+static s32 D_801069F0[4] = { 5, 6, 14, 13 };   /* body bones */
+static s32 D_80106A00[4] = { 5, 6, 3, 4 };     /* side bones */
+static s32 D_80106A10[4] = { 11, 12, 9, 10 };  /* other side bones */
+/* front/back bones; the 2-entry list is > 8 bytes in .data, so the damage
+ * template D_80106A28 that follows is taken to be part of the same object */
+static s32 D_80106A20[6] = { 14, 13, 0x1000, 0, 0, 0 };
 int rand(void);
 int rcos(int a);
 
@@ -51,15 +57,16 @@ typedef struct DamageDisplay {
 } DamageDisplay;
 
 extern VECTOR32 gExplosionPosition;
-extern VECTOR32 D_8011E8D8; /* position of the hit being applied */
+static VECTOR32 D_8011E8D8; /* .bss: position of the hit being applied */
 u8 GameCameraCheckMode(s32 mode);
 void ParticleTaser(VECTOR32 *pos);
 extern s32 particleTaserState;
 void NPCPutFireOnNPCMove(s32 id);
 void EGSGeometry_GetFuzzyDistancePoint2Point(VECTOR32 *a, VECTOR32 *b, s32 *dist);
 
-extern DamageCallback D_8010F980; /* damaged callback */
-extern DamageCallback D_8010F984; /* destroyed callback */
+static DamageCallback D_8010F980 = NULL; /* .sdata: damaged callback */
+static DamageCallback D_8010F984 = NULL; /* destroyed callback */
+static u8 D_8010F988 = 1; /* bone angle limits not yet computed */
 extern u8 D_80110180; /* first pending damage packet, DAMAGE_PACKET_NONE for none */
 extern u8 D_80110184;
 extern void *gBodyArmorHitMsg;
@@ -98,7 +105,7 @@ typedef struct Grenade {
     /* 0x18 */ u8 active;
 } Grenade;
 
-extern u8 D_80106A28[];
+#define D_80106A28 ((u8 *)&D_80106A20[2])
 extern s32 gPlayerOffset;
 extern s32 gSniperMode;
 extern u8 npcGrenadeLandedCheck;
@@ -124,8 +131,7 @@ typedef struct DamageNPC {
 } DamageNPC;
 
 extern u8 NPCEndActivationFlag;
-extern VECTOR32 D_80012164; /* gas cloud particle direction (rodata) */
-extern Grenade D_8011EAE8;  /* the gas cloud's damage ticker */
+static const VECTOR32 D_80012164; /* gas cloud particle direction (rodata) */
 
 void DamageDestroyImmediately(s32 by, s32 id);
 void NPCPutFireOnNPCShow(s16 id);
@@ -168,7 +174,8 @@ extern s32 gCurrentWeapon;
 
 #define DAMAGE_PACKET_NONE 0x10
 
-extern DamagePacket D_8011E8E8[DAMAGE_PACKET_NONE];
+static DamagePacket D_8011E8E8[DAMAGE_PACKET_NONE];
+static Grenade D_8011EAE8;  /* the gas cloud's damage ticker */
 
 void DamageGobjCAS2(s16 target, s16 from, s16 by, s32 amount, s32 kind, s32 aimed, VECTOR32 *pos, VECTOR32 *normal);
 void func_800667C4(DamagePacket *packet, s32 prev); /* frees a packet */
@@ -177,7 +184,7 @@ void ParticleTracer(Gobj *gobj, VECTOR32 *pos, s32 arg2);
 DamagePacket *func_80066714(void); /* allocates a damage packet */
 s32 ParticleDamageDelay(s32 id, VECTOR32 *pos);
 void iDamageShowParticle(s32 id, Gobj *gobj, s32 kind, VECTOR32 *pos, VECTOR32 *normal);
-extern VECTOR32 D_80012174; /* explosion camera shake vector (rodata) */
+static const VECTOR32 D_80012174; /* explosion camera shake vector (rodata) */
 extern u32 D_801061C0;      /* gWeaponInfo[0x13] word 0x14: bits 6..15 = blast damage */
 
 void WeaponDoFiredCallback(s32 id, s32 weapon);
@@ -299,7 +306,7 @@ void iDamageShowParticleGlassSpark(void *arg0, void *arg1, void *arg2) {
     ParticleHitWall(arg0, arg1, arg2, 0xC0FFFF);
 }
 
-extern VECTOR32 D_80012154; /* zero vector (rodata) */
+static const VECTOR32 D_80012154; /* zero vector (rodata) */
 extern u8 gTargetModeFlag;
 extern u8 gPlayerOnFireFlag;
 void NPCDamagedByPC(s32 id);
@@ -318,13 +325,10 @@ typedef struct DamageMoveInfo {
     /* 0x70 */ VECTOR32 impulse;
 } DamageMoveInfo;
 
-INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012144);
-
-INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012154);
-
-INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012164);
-
-INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012174);
+static const s32 D_80012144[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
+static const VECTOR32 D_80012154 = { 0, 0, 0, 0 };
+static const VECTOR32 D_80012164 = { 0, 0x1000, 0, 0 };
+static const VECTOR32 D_80012174 = { 3, 9, 3, 0 };
 
 /* A line between two points, or a box as its min/max corners. */
 typedef struct DamageSegment {
@@ -914,6 +918,12 @@ void DamageGobjCAS(s16 id, s32 action) {
     }
 }
 #else
+#ifndef _PSYQ
+/* INCLUDE_ASM functions still address these through their splat labels */
+__asm__(
+        ".set D_8011E8DC, D_8011E8D8+0x4\n"
+        ".set D_8011E8E0, D_8011E8D8+0x8\n");
+#endif
 INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS);
 #endif
 

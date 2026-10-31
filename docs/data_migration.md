@@ -58,6 +58,40 @@ so a TU's data has to come from that TU's object.
   case found so far: `gEGSMathIdentityMatrix` was in egsanim's `.rodata`, but it starts
   egsmath's. Another: sprite's texture-name strings sit inside joystick.c's
   `INCLUDE_RODATA` blob.
+* **maspsx and file-scope asm after `.sdata`.** maspsx stops with `Unable to parse
+  .sdata instruction: .pushsection` (or `.if 0`, `.set ...`) when a C `.sdata`
+  definition is directly followed by file-scope asm: `INCLUDE_ASM`, `INCLUDE_RODATA`,
+  `SDATA_LOCAL` or an `__asm__` of your own. Put remaining `SDATA_LOCAL` lines
+  *before* the definitions, and make sure a function (or a `.data`/`.rdata`
+  definition) comes between the last `.sdata` definition and the next asm, e.g. by
+  defining the variables after the first `INCLUDE_ASM` (egsmem).
+* **Splat labels inside a migrated object.** `INCLUDE_ASM` code may address array
+  elements through splat's labels (`D_8011EB50` = `D_8011EB40+0x10`). Once the blob
+  is gone, define them in the C file under `#ifndef _PSYQ` with
+  `__asm__(".set D_8011EB50, D_8011EB40+0x10\n" ...)`, placed after a function
+  (directly before the `INCLUDE_ASM` works). If *another* TU's asm uses such a label
+  (snddrv's `SoundSeqCallback` indexes from damage's `D_80110170`/`D_80110178`), the
+  symbol also needs a `.globl`.
+* **Data only an `INCLUDE_ASM` function uses.** A literal whose first use is in an
+  asm function (egsdev `"%8lX"`, egshmd `"IR ERR"`, save `"s/save.c"`) cannot come
+  from C yet: define it as a named static array at the place the literal was emitted
+  (`static char D_8010FEF8[5] = "%8lX";`). A `static const T x;` tentative
+  declaration early in the file and the initialised definition later is fine.
+* **Small arrays.** An array of <= 8 bytes is `.sdata` too, so anything in `.data`
+  is > 8 bytes (damage's 2-entry bone list is one object with what follows it).
+* **`.lcomm` layout.** aspsx 2.77 aligns each `.lcomm` to its size rounded up to a
+  power of two (at most 16) and packs them; cc1psx emits block-scope statics when
+  their function is compiled and file-scope ones at the end, in definition order.
+  Some TUs have small `.sbss`/`.bss` items 4 bytes apart that no such layout gives
+  (egsdev's `.sbss`/`.bss`, damage's two u8 at 0x80110180/4, cobj's 0xBA4-byte
+  object at 0x8011EBAC): their declarations must have been different (unknown);
+  leave them in the blob with `SDATA_LOCAL` for now.
+* **Blob pieces start where the linker puts them.** An object's section is only
+  4-aligned in the final image, so the blob piece after a dotted entry starts at the
+  C section's end (damage `.bss` ends at 0x8011EB04, the next piece is
+  `bss_8011EB04`), not at the next referenced symbol.
+* **`include/scratch.h`** still has no `_PSYQ` variant, so `psyq_check_tu.py` cannot
+  assemble TUs that include it (egshmd).
 
 ## Finding the TU's data
 
@@ -133,3 +167,12 @@ can't parse `.include`, `.pushsection` or the maspsx markers. `include/scratch.h
 | egsmisc  | .rdata .text .sdata .bss            | OK          | OK |
 | egsanim  | .rdata .text .data .sdata .sbss     | OK          | OK |
 | stream   | .rdata .text .data .sdata + commons | OK          | OK |
+| egsmem   | .sdata                              | OK          | data OK (EGSMemInit asm) |
+| egsfile  | .sdata .bss                         | OK          | data OK (EGSFileOpenFog asm) |
+| egshog   | .rdata .text .sdata                 | OK          | OK |
+| egsdev   | .rdata .data .sdata (not .sbss/.bss) | OK         | data OK (EmergencyPrintNum asm) |
+| egshmd   | .data .sdata + gInfraredColor common | OK         | blocked by scratch.h |
+| collision| .rdata .bss                         | OK          | data OK (2 asm functions) |
+| shadow   | .rdata + mShadowRequestList common  | OK          | .rdata short until its asm functions are C |
+| save     | .rdata .sdata .bss                  | OK          | data OK (SaveRestoreContinue asm) |
+| damage   | .rdata .data .sdata .sbss .bss (not 0x80110180/4) | OK | data OK (2 asm functions) |

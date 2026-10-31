@@ -2,10 +2,10 @@
 #include "game.h"
 #include "system.h"
 
-SDATA_LOCAL(gEndOfMemory)
-SDATA_LOCAL(gStaticChunk)
-SDATA_LOCAL(gStaticChunkCurrent)
-SDATA_LOCAL(gStaticChunkEnd)
+/* This TU's .sdata is defined after EGSMemInit (docs/data_migration.md: a data
+ * definition directly followed by INCLUDE_ASM trips maspsx). */
+
+
 
 extern u8 *gEndOfMemory;
 extern u8 *gStaticChunk;        /* lowest usable address of the static heap */
@@ -27,6 +27,12 @@ void EGSMemInit(u32 top) {
 #else
 INCLUDE_ASM("asm/main/nonmatchings/egsmem", EGSMemInit);
 #endif
+
+/* .sdata, in original order */
+u8 *gStaticChunk = NULL;
+u8 *gStaticChunkCurrent = NULL;
+u8 *gStaticChunkEnd = NULL;
+u8 *gEndOfMemory = NULL;
 
 void EGSMemRegisterVariableOverlayEnd(void *end) {
 #line 71

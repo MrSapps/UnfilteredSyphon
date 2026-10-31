@@ -216,8 +216,28 @@ typedef struct CollHit {
 } CollHit;
 
 /* Scratch for the 2/3-plane solve in func_8007112C (bss). */
-extern VECTOR32 D_8011EB40[4];
-extern s32 D_8011EB80[6];
+static VECTOR32 D_8011EB40[4];
+static s32 D_8011EB80[6];
+#ifndef _PSYQ
+/* func_8007112C (still INCLUDE_ASM) addresses the elements by their splat labels */
+__asm__(
+        ".set D_8011EB44, D_8011EB40+0x4\n"
+        ".set D_8011EB48, D_8011EB40+0x8\n"
+        ".set D_8011EB50, D_8011EB40+0x10\n"
+        ".set D_8011EB54, D_8011EB40+0x14\n"
+        ".set D_8011EB58, D_8011EB40+0x18\n"
+        ".set D_8011EB60, D_8011EB40+0x20\n"
+        ".set D_8011EB64, D_8011EB40+0x24\n"
+        ".set D_8011EB68, D_8011EB40+0x28\n"
+        ".set D_8011EB70, D_8011EB40+0x30\n"
+        ".set D_8011EB74, D_8011EB40+0x34\n"
+        ".set D_8011EB78, D_8011EB40+0x38\n"
+        ".set D_8011EB84, D_8011EB80+0x4\n"
+        ".set D_8011EB88, D_8011EB80+0x8\n"
+        ".set D_8011EB8C, D_8011EB80+0xC\n"
+        ".set D_8011EB90, D_8011EB80+0x10\n"
+        ".set D_8011EB94, D_8011EB80+0x14\n");
+#endif
 s32 EGSMathINT_SolveLinear3VectorEquationForParameters(VECTOR32 *v, s32 *out);
 s32 EGSMath_VectorModulus(VECTOR32 *v, s32 *out);
 
@@ -268,7 +288,7 @@ typedef struct CollCharMove {
     sum_;                                       \
 })
 
-extern VECTOR32 D_800122C4; /* {0, 0, 0}, rodata */
+static const VECTOR32 D_800122C4 = { 0, 0, 0, 0 }; /* this TU's whole .rdata */
 
 void *EGSMemMalloc(u32 size);
 void EGSFrameTransformPoint(VECTOR32 *in, EGSFrame *frame, EGSFrame *ref, VECTOR32 *out);
@@ -2548,4 +2568,3 @@ void func_80072AE0(VECTOR32 *v, CollHit **hit, s32 mode, VECTOR32 *axis, VECTOR3
 
 
 
-INCLUDE_RODATA("asm/main/nonmatchings/collision", D_800122C4);

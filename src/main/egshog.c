@@ -31,7 +31,7 @@ typedef struct CdlFILE {
 #define HOG_OFFSETS(hdr) ((s32 *)((u8 *)(hdr) + (hdr)->offsetTable))
 #define HOG_DATA(hdr) ((u8 *)(hdr) + (hdr)->dataStart)
 
-extern char D_8010FF64[]; /* "" (.sdata) */
+/* .sdata: only the literal "" (D_8010FF64), shared by the three path checks */
 
 void *EGSMemMalloc(u32 size);
 void EGSMemFree(void *ptr);
@@ -126,7 +126,7 @@ s32 EGSHogOpenWithBuffer(char *path, s32 unused, EGSHog **hog, HogHeader *buffer
     s32 file;
     s32 err;
 
-    if (path == NULL || path == D_8010FF64 || hog == NULL) {
+    if (path == NULL || path == "" || hog == NULL) {
         return 1;
     }
     err = EGSFileOpen(path, &file);
@@ -140,7 +140,7 @@ s32 EGSHogOpen(char *path, s32 unused, EGSHog **hog) {
     s32 file;
     s32 err;
 
-    if (path == NULL || path == D_8010FF64 || hog == NULL) {
+    if (path == NULL || path == "" || hog == NULL) {
         return 1;
     }
     err = EGSFileOpen(path, &file);
@@ -154,7 +154,7 @@ s32 EGSHogOpenPC(s32 arg0, char *path, s32 unused, EGSHog **hog) {
     s32 file;
     s32 err;
 
-    if (path == NULL || path == D_8010FF64 || hog == NULL) {
+    if (path == NULL || path == "" || hog == NULL) {
         return 1;
     }
     err = EGSFileOpenPC(arg0, path, &file);

@@ -7,18 +7,7 @@
 
 #define ABS(x) ((x) >= 0 ? (x) : -(x))
 
-SDATA_LOCAL(gImagePtr)
-SDATA_LOCAL(gInfraredColor)
-SDATA_LOCAL(gInfraredModel)
-SDATA_LOCAL(gSnifferAnim)
-SDATA_LOCAL(gHADoneCallback)
-SDATA_LOCAL(gHMDDLA)
-SDATA_LOCAL(gHMDSortCount)
-SDATA_LOCAL(gInfraredColorSniffer)
-SDATA_LOCAL(gGouraudLightLevel)
-SDATA_LOCAL(gImageEnd)
-SDATA_LOCAL(gGabeZ)
-SDATA_LOCAL(D_8010FEA4)
+/* This TU's .data/.sdata are defined below in original order (docs/data_migration.md). */
 
 typedef struct GsOT {
     u32 length;
@@ -123,17 +112,50 @@ typedef struct EGSImage {
 
 extern GsOT hmdOtbl[24];
 extern EGSImage gImages[EGS_IMAGE_MAX];
-extern s32 gImagePtr;
-extern s32 gInfraredColor;
-extern s32 gInfraredModes[];
-extern void *gInfraredModel;
-extern struct HMDSortAnim *gSnifferAnim;
-extern void (*gHADoneCallback)(EGSHMD *hmd);
 extern void *D_8012D8DC;
 extern DamageCache gGabeCache;
-extern void *gHMDDLA;
-extern u8 gDLA_none[];
-extern u8 gDLA_npc_gun_flash[];
+
+/* .data */
+VECTOR gNPCGouraudLight = { 0x960, 0, 0x960, 0 };
+u8 gDLA_none[0xB4] = { 0 };
+u8 gDLA_npc_gun_flash[0xB4] = {
+    0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x80, 0x0C, 0x40, 0x0B, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x60, 0x04, 0xC0, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x05, 0x00, 0x05, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x80, 0x0C, 0x40, 0x0B, 0x00, 0x00,
+    0xC0, 0x0D, 0x00, 0x00, 0x00, 0x00, 0xE0, 0x0B, 0xA0, 0x0A, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x08, 0x80, 0x07, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x08, 0x80, 0x07, 0x00, 0x00,
+    0x40, 0x06, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x05, 0x00, 0x05, 0x00, 0x00,
+};
+/* gImageColors (0x80107B18, 0x18 bytes, unreferenced; egsdisp reads it from +4) follows
+ * in the splat blob: it may be this file's or egssort's (hand-written asm). */
+
+/* .sdata */
+void *gHMDDLA = gDLA_none;
+void *gInfraredModel = NULL;
+struct HMDSortAnim *gSnifferAnim = NULL;
+s32 gGabeZ = 0;
+u8 *gImageEnd = NULL;
+s32 gGouraudLightLevel = 0;
+void (*gHADoneCallback)(EGSHMD *hmd) = NULL;
+s32 gImagePtr = 0;
+s32 gInfraredColorNormal = 0xFF00FF00;
+s32 gInfraredColorSniffer = 0x360087F9;
+s32 gInfraredModes[2] = { 0xFF00FF00, 0x360087F9 };
+s32 gHMDSortCount = 0;
+static u8 D_8010FEA4 = 1; /* reset the infrared images */
+static char D_8010FEA8[7] = "IR ERR"; /* SortHMDs (asm) still refers to it by name */
+
+/* commons */
+s32 gInfraredColor;
 extern MATRIX GsLIGHTWSMATRIX;
 
 void EGSFrameUpdateHierarchy(void *frame);
@@ -331,16 +353,9 @@ typedef struct Str7 {
 
 extern s32 gTerrainFog; /* near distance | fog shift << 16 */
 extern s32 gFogFlag;
-extern s32 gHMDSortCount;
 extern HMDSortAnim *gHMDSortArray[];
 extern HMDPointSource gPointSourceArray[];
 extern s32 gPointSourceCount;
-extern s32 gInfraredColorSniffer;
-extern s32 gGouraudLightLevel;
-extern u8 *gImageEnd;
-extern s32 gGabeZ;
-extern u8 D_8010FEA4; /* reset the infrared images */
-extern char D_8010FEA8[];
 extern char gErrorString[];
 extern EGSListNode *D_8012D8CC;
 extern u16 D_8012DB22;
@@ -348,7 +363,6 @@ extern s16 gCurrentDrawBuffer;
 extern GsOT gOtbl[];
 extern u8 *GsOUT_PACKET_P;
 extern VECTOR gPCGouraudLight;
-extern VECTOR gNPCGouraudLight;
 
 void EGSDisplaySetupGTE(void *frame);
 s32 EGSDisplayOnScreen(s32 dist, s32 arg1);

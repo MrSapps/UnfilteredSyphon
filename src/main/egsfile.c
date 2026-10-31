@@ -2,18 +2,18 @@
 
 #include "game.h"
 
-/* egsfile.c's small data, still assembled from asm/main/data/sdata.sdata.s */
-SDATA_LOCAL(D_8010FF40)
-SDATA_LOCAL(gIsStreamingFlag)
-SDATA_LOCAL(D_8010FF45)
-SDATA_LOCAL(D_8010FF46)
-SDATA_LOCAL(D_8010FF48)
-SDATA_LOCAL(D_8010FF4C)
-SDATA_LOCAL(D_8010FF50)
-SDATA_LOCAL(D_8010FF54)
-SDATA_LOCAL(gFogFilePtr)
-SDATA_LOCAL(gFogHeader)
-SDATA_LOCAL(D_8010FF60)
+/* This TU's data is defined below in original order (docs/data_migration.md):
+ * .sdata D_8010FF40..D_8010FF60; .bss D_80125210. fogHeader is a common. */
+
+
+
+
+
+
+
+
+
+
 
 /* libcd */
 typedef struct {
@@ -72,19 +72,19 @@ typedef struct FogHeader {
 
 typedef void (*EGSFileErrorCallback)(int err);
 
-extern EGSFile *D_8010FF40; /* file being streamed */
-extern u8 gIsStreamingFlag;
-extern u8 D_8010FF45;
-extern u8 D_8010FF46;
-extern void (*D_8010FF48)(void); /* called when the stream stops */
-extern s32 D_8010FF4C;
-extern s32 D_8010FF50;
-extern EGSFileErrorCallback D_8010FF54;
-extern EGSFile *gFogFilePtr;
-extern FogHeader *gFogHeader;
-extern u8 D_8010FF60; /* file table initialised */
-extern FogHeader fogHeader;
-extern EGSFile D_80125210[EGS_FILE_MAX];
+static EGSFile *D_8010FF40 = NULL; /* file being streamed */
+u8 gIsStreamingFlag = 0;
+static u8 D_8010FF45 = 0;
+static u8 D_8010FF46 = 1;
+static void (*D_8010FF48)(void) = NULL; /* called when the stream stops */
+static s32 D_8010FF4C = 0;
+static s32 D_8010FF50 = 0;
+static EGSFileErrorCallback D_8010FF54 = NULL;
+EGSFile *gFogFilePtr = NULL;
+FogHeader *gFogHeader = NULL;
+static u8 D_8010FF60 = 0; /* file table initialised */
+extern FogHeader fogHeader; /* common */
+static EGSFile D_80125210[EGS_FILE_MAX];
 
 int EGSFileClose(EGSFile **file);
 int EGSFileStreamPause(u8 stop);

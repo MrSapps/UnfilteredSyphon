@@ -190,27 +190,49 @@ segments:
       - [0xEC894, asm, lib_card]
       - [0xECC94, asm, lib_pad2]
       - [0xED0E4, data, data]
+      - [0xF71E0, .data, damage]
+      - [0xF7238, data, data_F7238]
       - [0xF72D8, .data, stream]
       - [0xF72EC, data, data_F72EC]
+      - [0xF81A0, .data, egshmd]
+      - [0xF8318, data, data_F8318]
+      - [0xF8330, .data, egsdev]
       - [0xF8364, .data, egsanim]
       - [0xF8384, data, data_F8384]
       - [0xFFE00, sdata, sdata]
+      - [0x100180, .sdata, damage]
+      - [0x10018C, sdata, sdata_10018C]
       - [0x100208, .sdata, stream]
       - [0x100248, sdata, sdata_100248]
+      - [0x10051C, .sdata, save]
+      - [0x100520, sdata, sdata_100520]
+      - [0x100670, .sdata, egshmd]
+      - [0x1006B0, sdata, sdata_1006B0]
+      - [0x1006B8, .sdata, egsdev]
       - [0x100708, .sdata, egsanim]
       - [0x10070C, sdata, sdata_10070C]
       - [0x100710, .sdata, egsdebug]
       - [0x100720, .sdata, egstex]
-      - [0x100728, sdata, sdata_100728]
+      - [0x100728, .sdata, egsmem]
       - [0x100738, .sdata, egsmisc]
-      - [0x100740, sdata, sdata_100740]
+      - [0x100740, .sdata, egsfile]
+      - [0x100764, .sdata, egshog]
       - { start: 0x100768, type: sbss, vram: 0x8010FF68, name: sbss }
+      - { type: .sbss, vram: 0x80110170, name: damage }
+      - { type: sbss, vram: 0x80110180, name: sbss_80110180 }
       - { type: .sbss, vram: 0x80110220, name: egsanim }
       - { type: sbss, vram: 0x80110228, name: sbss_80110228 }
       - { type: bss, vram: 0x801104A0, name: bss }
+      - { type: .bss, vram: 0x8011E8D8, name: damage }
+      - { type: bss, vram: 0x8011EB04, name: bss_8011EB04 }
+      - { type: .bss, vram: 0x8011EB40, name: collision }
+      - { type: bss, vram: 0x8011EB98, name: bss_8011EB98 }
+      - { type: .bss, vram: 0x80121A08, name: save }
+      - { type: bss, vram: 0x801221E4, name: bss_801221E4 }
       - { type: .bss, vram: 0x80122A38, name: egstex }
       - { type: .bss, vram: 0x80122C90, name: egsmisc }
-      - { type: bss, vram: 0x80125210, name: bss_80125210 }
+      - { type: .bss, vram: 0x80125210, name: egsfile }
+      - { type: bss, vram: 0x80125274, name: bss_80125274 }
 
   - name: bss_pad
     type: pad
