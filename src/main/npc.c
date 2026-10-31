@@ -1390,7 +1390,7 @@ s32 npcRequestKneelRelease(Gobj *obj) {
 }
 
 #ifdef NON_MATCHING
-/* first NPC scan's found block not moved out of line like the target; tail branch layout */
+/* first NPC scan's found block not moved out of line like the target (block-scoped index doesn't help here); tail branch layout */
 void npcGrenadeLanded(s32 which) {
     s32 safe;
     Gobj *obj;
@@ -3658,8 +3658,6 @@ void NPCDoDamage(Gobj *obj) {
     NPCPlayRandXA(obj, 1);
 }
 
-#ifdef NON_MATCHING
-/* case 41: save/health regs swapped (a1/a2) */
 void NPCObjDispatch(SysMsg *msg) {
     Gobj *obj = gameObjectsInfo[msg->to].runtime;
     NPC *npc;
@@ -3724,7 +3722,7 @@ void NPCObjDispatch(SysMsg *msg) {
     case 39:
         if (!(obj->flags0 & 0x20)) {
             obj->flags0 |= 0x20;
-            gObjectInteractionCallback(obj->id, msg);
+            gObjectInteractionCallback(obj->id);
             UseObject(obj->id);
         }
         break;
@@ -3759,20 +3757,19 @@ void NPCObjDispatch(SysMsg *msg) {
             obj->healthInfo->health = -1;
         }
         break;
-    case 42:
-        save = *(s32 *)msg->data[0];
-        if (save != 0) {
-            NPCRestore(obj->id, ((u8 *)msg->data[1])[0], save, ((u8 *)msg->data[1])[1]);
+    case 42: {
+        s32 saved = *(s32 *)msg->data[0];
+
+        if (saved != 0) {
+            NPCRestore(obj->id, ((u8 *)msg->data[1])[0], saved, ((u8 *)msg->data[1])[1]);
         } else if (obj->healthInfo->health <= 0) {
             obj->healthInfo->health = -1;
             obj->flags23 |= 2;
         }
         break;
     }
+    }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCObjDispatch);
-#endif
 
 void NPCPickAimer(s32 id, s32 dist) {
     Gobj *obj;
@@ -3925,7 +3922,7 @@ void NPCDropPickupStuff(s32 id) {
 }
 
 #ifdef NON_MATCHING
-/* drop flag gets v1 instead of reusing v0 (sched1 puts slti before the unk28 store) */
+/* 4 insns: drop gets v1 instead of v0 (target stores unk28 before the slti) */
 void NPCLosUpdateOtherStuff(s32 id) {
     VECTOR32 point;
     s32 start;
@@ -3999,7 +3996,8 @@ void NPCLosUpdateOtherStuff(s32 id) {
                 npc->unk28 = d;
                 drop = d < 0xA0;
             } else {
-                drop = obj->move->collFlags & 0x100000;
+                drop = 0x100000;
+                drop &= obj->move->collFlags;
             }
             if (drop) {
                 NPCDropPickupStuff(obj->id);
