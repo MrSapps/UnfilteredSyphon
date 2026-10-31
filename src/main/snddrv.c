@@ -1933,15 +1933,16 @@ s16 GetPanChange(s16 flags, s16 from, s16 to) {
     return d;
 }
 
-#ifdef NON_MATCHING
-/* target computes (s16)(pan+add) into v0 then returns 1; the dead sum is optimized away here (permuter best 5 needs an artificial use) */
+/* Clamps pan + add to 0..0x7F but returns 1: the clamped value is dropped (bug in the original). */
 s16 AddPan(s16 pan, s16 add) {
     pan += add;
+    if (pan < 0) {
+        pan = 0;
+    } else if (pan > 0x7F) {
+        pan = 0x7F;
+    }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", AddPan);
-#endif
 
 s16 GetMasterVolume(s32 which) {
     return D_801101D0[which];

@@ -516,8 +516,6 @@ typedef struct PlayerTargetInfo {
     /* 0xB8 */ s32 unkB8;
 } PlayerTargetInfo;
 
-#ifdef NON_MATCHING
-/* regalloc: msg in s2 and ticks in s0 (original: msg s0, ticks s2). The switch's jump table is the INCLUDE_RODATA jtbl_80010C1C below; drop it when this matches. */
 void PLAYERObjDispatch(SysMsg *msg) {
     Gobj *gobj = gameObjectsInfo[msg->to].runtime;
     struct EGSFrame *frame = NULL;
@@ -526,6 +524,7 @@ void PLAYERObjDispatch(SysMsg *msg) {
     s32 rumble;
     s32 ticks;
     s32 shortTicks;
+    s32 r;
 
     frame = gobj->anim->frame;
     move = gobj->move;
@@ -616,7 +615,8 @@ void PLAYERObjDispatch(SysMsg *msg) {
         break;
     case 13:
         rumble = 0xE1;
-        ticks = rand() % 5;
+        r = rand();
+        ticks = r - r / 5 * 5; /* rand() % 5, spelled out: the % form reuses ticks for the quotient */
         shortTicks = ticks + 5;
         if (((PlayerHealth *)gobj->healthInfo)->damage < 50) {
             rumble = 0x7F;
@@ -710,9 +710,6 @@ void PLAYERObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", PLAYERObjDispatch);
-#endif
 
 void LoadPlayerAnimations(u8 gabe) {
     s32 i;
@@ -1086,9 +1083,6 @@ void PlayerJumpCASAnimCB(s16 id, u32 action) {
     func_800265FC(gameObjectsInfo[id].runtime, action);
 }
 
-#ifndef NON_MATCHING
-INCLUDE_RODATA("asm/main/nonmatchings/player", jtbl_80010C1C); /* PLAYERObjDispatch */
-#endif
 
 
 void CollisionGobjSetModeEdgeGrab(Gobj *gobj, EdgeGrabProbe *probe);

@@ -796,45 +796,37 @@ s32 MapLocateSilo(s32 map, VECTOR32 *pos, u32 *out) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* stack frame is 8 bytes smaller (target keeps out at sp+0x20) */
-void func_801387B0(void) {
-    u32 a;
-    u32 b;
+/* The quad colour word as a struct member: unlike setColorCode, the store can be
+ * scheduled past the blend's stack stores. */
+typedef struct MenuQuadColour {
+    /* 0x00 */ u32 unk00[3];
+    /* 0x0C */ u32 rgbc;
+} MenuQuadColour;
+#define setQuadColour(p, c) (((MenuQuadColour *)(p))->rgbc = (c))
+
+/* Blends two colours (0x00BBGGRR) with a cosine pulse on the system tick. */
+static inline u32 MenuBlendColour(u32 a, u32 b) {
     u8 out[4];
     s32 t;
     s32 i;
 
-    if (D_8013F7C4 > 0) {
-        a = 0x5C5CFF;
-        b = 0xFFFF;
-        t = (rcos(gSystemTick << 8) + 0x1000) >> 5;
-        out[3] = 0;
-        for (i = 0; i < 3; i++) {
-            out[i] = (t * ((u8 *)&a)[i] + (0x100 - t) * ((u8 *)&b)[i]) >> 8;
-        }
-        a = 0xA4A45C;
-        b = 0xC05C00;
-        setColorCode(&D_8013FEC0[D_8013F7C4 - 1].q[0], *(u32 *)out | 0x28000000);
-        t = (rcos(gSystemTick << 8) + 0x1000) >> 5;
-        out[3] = 0;
-        for (i = 0; i < 3; i++) {
-            out[i] = (t * ((u8 *)&a)[i] + (0x100 - t) * ((u8 *)&b)[i]) >> 8;
-        }
-    } else {
-        a = 0x5CFFFF;
-        b = 0x5CFF;
-        t = (rcos(gSystemTick << 8) + 0x1000) >> 5;
-        out[3] = 0;
-        for (i = 0; i < 3; i++) {
-            out[i] = (t * ((u8 *)&a)[i] + (0x100 - t) * ((u8 *)&b)[i]) >> 8;
-        }
+    t = (rcos(gSystemTick << 8) + 0x1000) >> 5;
+    out[3] = 0;
+    for (i = 0; i < 3; i++) {
+        out[i] = (t * ((u8 *)&a)[i] + (0x100 - t) * ((u8 *)&b)[i]) >> 8;
     }
-    setColorCode(D_8013FEBC, *(u32 *)out | 0x28000000);
+    return *(u32 *)out;
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_801387B0);
-#endif
+
+/* Pulses the colour of quad D_8013F7C4 - 1 (if any) and of D_8013FEBC. */
+void func_801387B0(void) {
+    if (D_8013F7C4 > 0) {
+        setQuadColour(&D_8013FEC0[D_8013F7C4 - 1].q[0], MenuBlendColour(0x5C5CFF, 0xFFFF) | 0x28000000);
+        setQuadColour(D_8013FEBC, MenuBlendColour(0xA4A45C, 0xC05C00) | 0x28000000);
+        return;
+    }
+    setQuadColour(D_8013FEBC, MenuBlendColour(0x5CFFFF, 0x5CFF) | 0x28000000);
+}
 
 void func_801389C8(s32 help) {
     TextChar *chars;

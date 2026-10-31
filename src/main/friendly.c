@@ -769,6 +769,12 @@ static void func_80087C28(void *arg0, FaceCollect *c, FoundFace *face) {
     }
 }
 
+/* FriendlyDot for the facing test. */
+static inline void FriendlyFacing(s32 *a, s32 *b, s32 *out) {
+    VECTOR32 unused; /* never used, but gives the inline a 16-byte frame: that is what puts dist after it on the stack */
+    *out = EGSMathFIXMul(a[0], b[0]) + EGSMathFIXMul(a[1], b[1]) + EGSMathFIXMul(a[2], b[2]);
+}
+
 /* *out = a . b (4.12 fixed point). */
 static inline void FriendlyDot(s32 *a, s32 *b, s32 *out) {
     *out = EGSMathFIXMul(a[0], b[0]) + EGSMathFIXMul(a[1], b[1]) + EGSMathFIXMul(a[2], b[2]);
@@ -809,8 +815,6 @@ static inline void FriendlyInsideEdge(VECTOR32 *a, VECTOR32 *b, VECTOR32 *pos, V
         (g)->count--;                                     \
     }
 
-#ifdef NON_MATCHING
-/* stack layout only: the original puts dist at 0x88 (after the inline's rel) and inside at 0x8C */
 /*
  * Keep the faces of g that face c's direction and lie within g's distance
  * range of c->pos; g->best becomes the most facing one.
@@ -835,7 +839,7 @@ static void func_80087E0C(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
     inside = 0;
     for (i = 0; i < g->count;) {
         face = g->faces[i];
-        FriendlyDot(c->dir, &face->normal.vx, &facing);
+        FriendlyFacing(c->dir, &face->normal.vx, &facing);
         if (facing < g->facingMin || facing > g->facingMax) {
             FACE_LIST_DROP(g, i);
             continue;
@@ -877,12 +881,7 @@ static void func_80087E0C(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
         ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->flagBit);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087E0C);
-#endif
 
-#ifdef NON_MATCHING
-/* stack layout only: the original puts dist at 0x98 (after the inline's rel), len/dot/spills follow */
 /*
  * Like func_80087E0C, but also work out whether c's position is inside each
  * face's left/right edge (from the two probe points when Gabe is climbing,
@@ -916,7 +915,7 @@ static void func_80088270(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
     best = NULL;
     while (i < g->count) {
         face = g->faces[i];
-        FriendlyDot(c->dir, &face->normal.vx, &facing);
+        FriendlyFacing(c->dir, &face->normal.vx, &facing);
         if (facing < g->facingMin || facing > g->facingMax) {
             FACE_LIST_DROP(g, i);
             continue;
@@ -1008,9 +1007,6 @@ static void func_80088270(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
         ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->flagBit);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088270);
-#endif
 
 /* Turn each found edge into a 0x40-high fake wall face pushed 8 units out along its normal. */
 static void func_80088BAC(Gobj *gobj, FaceCollect *c) {

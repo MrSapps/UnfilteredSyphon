@@ -877,7 +877,7 @@ void NPCShootHostage(s32 id) {
 }
 
 #ifdef NON_MATCHING
-/* draft: right shape; stack slot order of best/dist2, prologue constants and some scheduling differ */
+/* draft: right shape; regalloc of the 0x7FFFFFF bests (original spills copBest, keeps &D_8011D1D0 in s6) and the NPC scan id copies differ */
 s32 NPCPickNPCTarget(s32 self) {
     s32 copBest = 0x7FFFFFF;
     Gobj *obj = gameObjectsInfo[self].runtime;
@@ -893,18 +893,17 @@ s32 NPCPickNPCTarget(s32 self) {
     s32 d4;
     s32 id;
     s32 i;
-    Gobj *t;
     Gobj *o;
 
     if (gSysInfo.level == 14) {
         if (obj->healthInfo->health > 0) {
-            if (target >= 0) {
-                t = gameObjectsInfo[target].runtime;
+            if (target < 0) {
+                o = NULL;
             } else {
-                t = NULL;
+                o = gameObjectsInfo[target].runtime;
             }
             if (npc->flags & 0x2000000) {
-                if (t == NULL || t->healthInfo->health <= 0 || (t->npc != NULL && !(NPC_OF(t)->flags & 0x200))) {
+                if (o == NULL || o->healthInfo->health <= 0 || (o->npc != NULL && !(NPC_OF(o)->flags & 0x200))) {
                     target = -1;
                     npc->flags &= ~0x2000000;
                 }
@@ -1389,8 +1388,6 @@ s32 npcRequestKneelRelease(Gobj *obj) {
     return ok;
 }
 
-#ifdef NON_MATCHING
-/* first NPC scan's found block not moved out of line like the target (block-scoped index doesn't help here); tail branch layout */
 void npcGrenadeLanded(s32 which) {
     s32 safe;
     Gobj *obj;
@@ -1424,13 +1421,14 @@ void npcGrenadeLanded(s32 which) {
         npcAlertByScream = 0;
         npcGrenadeLandedCheck |= which + 1;
         if (which == 0 && !(rand() & 1) && safe >= 0 && safe == 0 && NPC_OF(obj)->voice == 0) {
-            SysPlayXA((rand() & 1) ? 0x23A : 0x27B, (s32)obj, 0);
+            if (!(rand() & 1)) {
+                SysPlayXA(0x27B, (s32)obj, 0);
+            } else {
+                SysPlayXA(0x23A, (s32)obj, 0);
+            }
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", npcGrenadeLanded);
-#endif
 
 #ifdef NON_MATCHING
 /* draft: structure right, 17 insns long; abs/loop register allocation differs */
@@ -3036,10 +3034,8 @@ void NPCGetNumActive(void) {
     } while (0);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: info/paths pointers and the kind/flags register pair (v0/v1/a0) differ */
 s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
-    GameObjectInfo *info = &gameObjectsInfo[id];
+    GameObjectInfo *info = (GameObjectInfo *)(id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
     s32 p = gen->paths[path];
     Gobj *obj = info->runtime;
     u8 model = gen->models[variant];
@@ -3082,12 +3078,11 @@ s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
             kind = 2;
         }
         flags = (gen->unk02 & 0xFFE0) | kind;
+    } else if ((gen->unk02 & 0x1F) == 3) {
+        elite = 1;
+        flags = gen->unk02 & 0xFFE0;
     } else {
         flags = gen->unk02;
-        if ((gen->unk02 & 0x1F) == 3) {
-            elite = 1;
-            flags = gen->unk02 & 0xFFE0;
-        }
     }
     GOBJ_INFO_FLAGS(&gameObjectsInfo[id]) = flags & 0x7FFF;
     EGSAnimHMDLinkModel(obj->anim, *(s32 *)gameObjectsModelInfo[model].unk08);
@@ -3111,9 +3106,6 @@ s32 NPCCreateGenerator(NPCGenerator *gen, s32 id, s32 path, u32 variant) {
     GSActivateGameObject(obj, *gCamera, (s32)sniper);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCCreateGenerator);
-#endif
 
 s32 NPCGenerate(s32 genIdx) {
     s32 ret = 0;

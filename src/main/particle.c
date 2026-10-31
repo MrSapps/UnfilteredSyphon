@@ -1927,8 +1927,6 @@ typedef struct PathData {
 extern s32 gLevelGameObjCount;
 u8 LevelGetPathInfo(s32 id, s32 *velocity, PathData **path);
 
-#ifdef NON_MATCHING
-/* 0x41010 lands in a0 and is hoisted into a load delay slot; the original uses v1 after the last path use */
 void ParticleFireShow(s16 id, VECTOR32 *pos, s32 size, s32 type) {
     s32 velocity;
     PathData *path = NULL;
@@ -1948,9 +1946,9 @@ void ParticleFireShow(s16 id, VECTOR32 *pos, s32 size, s32 type) {
         ParticleInitLifeColorNoInfrared(16, 0x808080);
         v.vx = path->points[0].x;
         v.vy = path->points[0].y;
-        D_801100B4 = 0x41010;
         v.vz = path->points[0].z;
         kind = 0;
+        D_801100B4 = 0x41010;
         if (gSysInfo.level != 18 || type != 0) {
             div = 9;
             if (gSysInfo.level == 18) {
@@ -1993,9 +1991,6 @@ void ParticleFireShow(s16 id, VECTOR32 *pos, s32 size, s32 type) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleFireShow);
-#endif
 
 void ParticleFireHide(s16 id) {
     ParticleGroup *g = ParticleFindGroup(id);
@@ -2215,7 +2210,7 @@ void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
 void EGSDisplaySetFlashTime(s32 ticks);
 
 #ifdef NON_MATCHING
-/* camera-frame loads scheduled differently, one instruction longer */
+/* sched only: the original issues pos.vx += vel.vx >> 2 and the particleFireWaveFlag store before the m[1][2] load (6 insns) */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
@@ -2233,10 +2228,10 @@ void ParticleFireWaveDeath(void) {
         pos.vy = -pos.vy;
         vel.vx = (*D_8011008C)->m[0][2];
         vel.vy = (*D_8011008C)->m[1][2];
-        particleFireWaveFlag = 1;
-        vel.vy = -vel.vy;
         vel.vz = (*D_8011008C)->m[2][2];
+        vel.vy = -vel.vy;
         pos.vx += vel.vx >> 2;
+        particleFireWaveFlag = 1;
         pos.vy = D_80110088;
         pos.vz += vel.vz >> 2;
         ParticleInitLifeColorNoInfrared(16, 0x808080);

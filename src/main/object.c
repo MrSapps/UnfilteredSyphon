@@ -475,17 +475,11 @@ void ObjectSetLights(s32 state) {
     }
 }
 
-#ifdef NON_MATCHING
-/* Branch layout: the original places both flag tests before the on/off bodies, and lays out the sector lookup differently */
 static inline TerrSector *ObjectGetTerrSector(s32 sector) {
-    TerrSector *ts;
-
     if (sector < gTerrSectorCount && sector >= 0) {
-        ts = &gTerrSector[sector];
-    } else {
-        ts = NULL;
+        return &gTerrSector[sector];
     }
-    return ts;
+    return NULL;
 }
 
 /* Switch a light object on/off and update the lighting of the player's sector and its neighbours. */
@@ -498,11 +492,10 @@ void ObjectSetLightState(Gobj *gobj, s32 on) {
     TerrSectorModel *model;
     s16 type;
 
-    if (on) {
-        if (gobj->flags0 & 2) {
-            return;
-        }
-    } else if (!(gobj->flags0 & 2)) {
+    if (on && (gobj->flags0 & 2)) {
+        return;
+    }
+    if (!on && !(gobj->flags0 & 2)) {
         return;
     }
     if (on) {
@@ -519,7 +512,7 @@ void ObjectSetLightState(Gobj *gobj, s32 on) {
             EGSAnimShowDetailDef(gobj->anim);
         }
     }
-    for (i = -1, p = links - 1;; i++, p++) {
+    for (i = -1, p = links - 1;; p++, i++) {
         if (i == -1) {
             ts = ObjectGetTerrSector(gGabeSector);
         } else {
@@ -539,9 +532,6 @@ void ObjectSetLightState(Gobj *gobj, s32 on) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", ObjectSetLightState);
-#endif
 
 s32 ObjectSetSectorLighting(s32 sector) {
     TerrSector *ts;
@@ -660,16 +650,15 @@ ObjectCallback ObjectSetSpecialAmbientCallback(ObjectCallback cb) {
 
 static inline void ObjectSetAmbient2(s32 id, s32 path, GameObjectInfo *other) {
     GameObjectInfo *info = &gameObjectsInfo[id];
+    GameObjectInfo *info2 = info;
 
     if (path == other->pathStart) {
         info->flags24 |= 0x20;
     } else {
-        info->flags24 &= ~0x20;
+        info2->flags24 &= ~0x20;
     }
 }
 
-#ifdef NON_MATCHING
-/* count reload and per-branch info pointer copy differ (see ObjectUpdateAmbientSndObjectSetting for the matching pattern) */
 void ObjectUpdateAmbientObjectSetting(s32 id, s32 type) {
     s32 i;
     s32 path = gameObjectsInfo[id].pathStart;
@@ -681,9 +670,6 @@ void ObjectUpdateAmbientObjectSetting(s32 id, s32 type) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", ObjectUpdateAmbientObjectSetting);
-#endif
 
 static inline void ObjectAmbientSndOn(s32 id, s32 path, GameObjectInfo *other) {
     GameObjectInfo *info = &gameObjectsInfo[id];

@@ -9,7 +9,7 @@ static const s32 D_80010F50[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdat
 
 /* .sdata */
 static EGSListNode *D_8010F7B8 = NULL; /* gobjs with pending CAS requests */
-static char D_8010F7BC[8] = "s/cas.c"; /* __FILE__; first used by CASInit (still asm) */
+static char D_8010F7BC[8] = "s/cas.c"; /* __FILE__; first used by CASInit */
 static u8 D_8010F7C4 = 1;              /* the generated hip table still needs building */
 static s32 D_8010F7C8 = 0;             /* unreferenced; taken as cas.c's (object.c's .sdata follows) */
 
@@ -420,10 +420,10 @@ static s32 func_80029C04(GameObjectRuntime *rt, CASAnimSet *set, u8 *req) {
     return found == -1 ? 0 : found;
 }
 
-#ifdef NON_MATCHING
-/* prologue only: the sets copy is scheduled after the other argument copies */
 void CASInit(s32 id, CASAnimSet *sets, CASAction *actions, s32 maxRequests) {
     CASAnimSet *base = sets;
+    CASAction *act = actions;
+    s32 max = maxRequests;
     GameObjectRuntime *rt;
     CASState *cas;
     CASQueue *queue;
@@ -455,12 +455,12 @@ count:
     if (queue == NULL) {
         EGSDebugAssert(1, 0, D_8010F7BC, 675);
     }
-    queue->items = EGSMemMalloc(maxRequests * 4);
+    queue->items = EGSMemMalloc(max * 4);
     if (queue->items == NULL) {
         EGSDebugAssert(1, 0, D_8010F7BC, 678);
     }
     queue->count = 0;
-    queue->max = maxRequests;
+    queue->max = max;
     queue->slots.current = -1;
     queue->slots.numDeferred = 0;
     for (i = 0; i < 3; i++) {
@@ -471,7 +471,7 @@ count:
     cas->mode = 1;
     cas->queue = queue;
     cas->animSets = base;
-    cas->actionTable = actions;
+    cas->actionTable = act;
     rt->cas = cas;
     cas->flags = 0;
     rt->cas->flags2 = 0;
@@ -484,15 +484,13 @@ count:
         }
     }
 }
-#else
+
 #ifndef _PSYQ
 /* INCLUDE_ASM functions still address these through their splat labels */
 __asm__(
         ".set D_8010521D, D_8010521C+0x1\n"
         ".set D_80105220, D_8010521C+0x4\n"
         ".set D_80115670, D_80115638+0x38\n");
-#endif
-INCLUDE_ASM("asm/main/nonmatchings/cas", CASInit);
 #endif
 
 void CASReset(s32 id) {

@@ -70,25 +70,26 @@ static s32 func_80141B78(void);
 static s32 func_80141B88(s16 id, s16 kind);
 static void func_80141C34(void);
 
-#ifdef NON_MATCHING
-/* Same instructions; the original schedules both index loads up front. */
 /* Countdown expired: the bomb goes off. */
 static void func_801412D0(void) {
     s32 pos[4];
     s16 bomb;
     GameObjectRuntime *bombRt;
-    GameObjectHealth *health;
 
     bomb = D_801420B0;
     bombRt = gameObjectsInfo[bomb].runtime;
-    health = gameObjectsInfo[D_801420B4].runtime->healthInfo;
-    health->armor = 1;
-    health->health = 1;
+    {
+        GameObjectHealth *h = gameObjectsInfo[D_801420B4].runtime->healthInfo;
+        h->armor = 1;
+        h->health = 1;
+    }
     ObjectBigExplosionFX(bomb, pos, 0x1800, 5, 10);
     DamageRadius(bomb, pos, 0x1C2, 0x1E0, 0x60, 0x11, 0);
-    health = bombRt->healthInfo;
-    health->armor = -1;
-    health->health = -1;
+    {
+        GameObjectHealth *h = bombRt->healthInfo;
+        h->armor = -1;
+        h->health = -1;
+    }
     bombRt->flags23 |= 2;
     NPCHazmatStart(D_801420AC->id);
     SysPlayXA(0x8F, 0, 1);
@@ -96,9 +97,6 @@ static void func_801412D0(void) {
     D_801420B8 = 0;
     D_801420BC = 1;
 }
-#else
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_801412D0);
-#endif
 
 static void func_80141400(s16 id, s16 by) {
     if (by == gPlayerOffset) {

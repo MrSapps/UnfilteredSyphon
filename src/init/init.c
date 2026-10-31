@@ -953,69 +953,57 @@ void LevelSpecificInit(s32 arg0) {
     D_80145C54[gSysInfo.level](arg0);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: box/size swap a0 and t0 */
 /* Grows the collision box to at least w x h x d. */
 void ObjectMakeMinimumBox(InitRuntime *rt, s32 w, s32 h, s32 d) {
-    InitAnim *anim;
-    s32 *box;
-    s32 grow;
-
-    anim = rt->anim;
-    if (anim != NULL) {
-        box = anim->box;
-        if (box[4] - box[0] < w) {
-            grow = (w - (box[4] - box[0])) >> 1;
-            box[0] -= grow;
-            box[4] += grow;
+    if (rt->anim != NULL) {
+        s32 *box = rt->anim->box;
+        s32 sx = box[4] - box[0];
+        s32 sy, sz;
+        if (sx < w) {
+            sx = (w - sx) >> 1;
+            box[0] -= sx;
+            box[4] += sx;
         }
-        if (box[5] - box[1] < h) {
-            grow = (h - (box[5] - box[1])) >> 1;
-            box[1] -= grow;
-            box[5] += grow;
+        sy = box[5] - box[1];
+        if (sy < h) {
+            sy = (h - sy) >> 1;
+            box[1] -= sy;
+            box[5] += sy;
         }
-        if (box[6] - box[2] < d) {
-            grow = (d - (box[6] - box[2])) >> 1;
-            box[2] -= grow;
-            box[6] += grow;
+        sz = box[6] - box[2];
+        if (sz < d) {
+            sz = (d - sz) >> 1;
+            box[2] -= sz;
+            box[6] += sz;
         }
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", ObjectMakeMinimumBox);
-#endif
 
-#ifdef NON_MATCHING
-/* regalloc: box/size swap a0 and t0 */
 /* Shrinks the collision box to at most w x h x d. */
 void ObjectMakeMaximumBox(InitRuntime *rt, s32 w, s32 h, s32 d) {
-    InitAnim *anim;
-    s32 *box;
-    s32 shrink;
-
-    anim = rt->anim;
-    if (anim != NULL) {
-        box = anim->box;
-        if (w < box[4] - box[0]) {
-            shrink = ((box[4] - box[0]) - w) >> 1;
-            box[0] += shrink;
-            box[4] -= shrink;
+    if (rt->anim != NULL) {
+        s32 *box = rt->anim->box;
+        s32 sx = box[4] - box[0];
+        s32 sy, sz;
+        if (w < sx) {
+            sx = (sx - w) >> 1;
+            box[0] += sx;
+            box[4] -= sx;
         }
-        if (h < box[5] - box[1]) {
-            shrink = ((box[5] - box[1]) - h) >> 1;
-            box[1] += shrink;
-            box[5] -= shrink;
+        sy = box[5] - box[1];
+        if (h < sy) {
+            sy = (sy - h) >> 1;
+            box[1] += sy;
+            box[5] -= sy;
         }
-        if (d < box[6] - box[2]) {
-            shrink = ((box[6] - box[2]) - d) >> 1;
-            box[2] += shrink;
-            box[6] -= shrink;
+        sz = box[6] - box[2];
+        if (d < sz) {
+            sz = (sz - d) >> 1;
+            box[2] += sz;
+            box[6] -= sz;
         }
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", ObjectMakeMaximumBox);
-#endif
 
 #define INIT_MAX(a, b) ((a) < (b) ? (b) : (a))
 

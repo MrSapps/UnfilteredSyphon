@@ -281,33 +281,26 @@ typedef struct ReactionSet {
     /* 0x14 */ s32 unk14;
 } ReactionSet;
 
-#ifdef NON_MATCHING
-/* 2 insns: the original schedules the u8 key andi before the offset=0 init. Static in the original (only caller: GameSysJoystick). */
 /* First entry matching key/mask/flags; returns its result (0 if none). */
 s32 func_80035328(ReactionSet *set, u8 key, u32 mask, GameObjectRuntime *rt) {
     ReactionEntry *e;
     s32 result;
-    s32 offset;
-    ReactionEntry *entries;
+    s32 i;
 
     result = 0;
-    offset = 0;
-    entries = set->entries;
+    i = 0;
     do {
-        e = (ReactionEntry *)((u8 *)entries + offset);
+        e = &set->entries[i];
         if (e->key == key && (e->mask == 0 || (e->mask & mask)) &&
             (e->requiredFlags == 0 || (e->requiredFlags & rt->cas->flags))) {
             set->unk14 = set->unk10 + 1;
             result = e->result;
             break;
         }
-        offset += sizeof(ReactionEntry);
-    } while (((ReactionEntry *)(offset + (s32)set->entries))->result != 0);
+        i++;
+    } while (set->entries[i].result != 0);
     return result;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80035328);
-#endif
 
 void iJoystickRelTimerCB(JoyBtnInfo *btn) {
     Gobj *gobj = gameObjectsInfo[gCASJoystickGobjID].runtime;

@@ -858,7 +858,7 @@ void DamageGobjCAS2(s16 id, s16 from, s16 by, s32 amount, s32 kind, s32 aimed, V
 }
 
 #ifdef NON_MATCHING
-/* Register allocation: the original keeps the raw id in fp and re-extends it per use (all ten callee-saved registers busy) */
+/* regalloc only: callee-saved permutation (original: attacker s1, gobj s2, packet s3, from s4; ours gobj s1, packet s2, from s3, attacker s4) */
 /* Hit animation callback: work out where the pending damage hit and from which direction,
  * then apply it now or queue it as a delayed bullet impact. */
 void DamageGobjCAS(s16 id, s32 action) {
@@ -884,19 +884,21 @@ void DamageGobjCAS(s16 id, s32 action) {
             attacker = gameObjectsInfo[from].runtime;
             target = (DamageTarget *)attacker->target;
             aimed = 1;
-            if ((from == gPlayerOffset && (GameCameraCheckMode(0xF) || GameCameraCheckMode(0x10))) ||
-                id == target->targetId) {
+            if (from == gPlayerOffset && (GameCameraCheckMode(0xF) || GameCameraCheckMode(0x10))) {
+                D_8011E8D8 = target->targetPos;
+                dir = target->targetDir;
+            } else if (id == target->targetId) {
                 D_8011E8D8 = target->targetPos;
                 dir = target->targetDir;
             } else if (id == target->targetId2) {
                 D_8011E8D8 = target->aimPos;
                 dir = target->aimDir;
             } else {
+                aimed = 0;
                 D_8011E8D8.vx = gobj->anim->frame->pos.vx;
                 D_8011E8D8.vy = gobj->anim->frame->pos.vy;
                 D_8011E8D8.vz = gobj->anim->frame->pos.vz;
                 D_8011E8D8.vy = -D_8011E8D8.vy;
-                aimed = 0;
                 func_800669B0(&D_8011E8D8, attacker, &dir);
             }
         } else {
