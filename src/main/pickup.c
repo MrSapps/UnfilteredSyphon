@@ -442,8 +442,6 @@ void PickupObjectAddUseMsgs(Gobj *obj, u8 data) {
     PickupObjectSet(obj->id, armor, weapon, amount, 1);
 }
 
-#ifdef NON_MATCHING
-/* PickupRemoveUseMsg gets objId (s2) in the original, the equal 'to' (a3) here */
 void UseObject(s16 objId) {
     u8 found = 0;
     s32 i;
@@ -461,7 +459,7 @@ void UseObject(s16 objId) {
             s32 from;
             u8 prio;
 
-            if (objId != to) {
+            if (objId != (s16)to) {
                 prio = 3;
                 from = gPlayerOffset;
             } else {
@@ -475,9 +473,6 @@ void UseObject(s16 objId) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", UseObject);
-#endif
 
 void PickUpInventory(s16 objId) {
     Gobj *obj = gameObjectsInfo[objId].runtime;
@@ -1029,18 +1024,17 @@ INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 
 
 
-#ifdef NON_MATCHING
-/* stack layout only: the original reuses case 41's pos slot (0x50) in case 42 */
 void AUTOPICKUPObjDispatch(SysMsg *msg) {
-    VECTOR32 playerPos;
-    VECTOR32 keyPos;
-    s32 dist;
     Gobj *key = gameObjectsInfo[msg->to].runtime;
     s32 ref;
     Gobj *npc;
 
     switch (msg->id) {
-    case 10:
+    case 10: {
+        VECTOR32 playerPos;
+        VECTOR32 keyPos;
+        s32 dist;
+
         if ((*(u32 *)key & 0x62) == 0x42) {
             playerPos = gObjPlayer->move->pos;
             keyPos.vx = key->anim->frame->pos.vx;
@@ -1062,9 +1056,11 @@ void AUTOPICKUPObjDispatch(SysMsg *msg) {
             }
         }
         break;
+    }
     case 41: {
         SVECTOR16 saved;
         VECTOR32 pos;
+        VECTOR32 up;
 
         ref = gameObjectsInfo[key->id].refId;
         if (ref != -1) {
@@ -1089,12 +1085,7 @@ void AUTOPICKUPObjDispatch(SysMsg *msg) {
         *(s32 *)msg->data[0] = (u16)saved.vx | ((u16)saved.vy << 16);
         *(s16 *)msg->data[1] = saved.vz;
         break;
-    }
-    case 42: {
-        SVECTOR16 saved;
-        VECTOR32 pos;
-        VECTOR32 up;
-
+    case 42:
         saved.vx = ((s16 *)msg->data[0])[0];
         saved.vy = ((s16 *)msg->data[0])[1];
         saved.vz = *(s16 *)msg->data[1];
@@ -1131,9 +1122,6 @@ void AUTOPICKUPObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", AUTOPICKUPObjDispatch);
-#endif
 
 void BOMBObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
@@ -2014,8 +2002,6 @@ void INTERACTObjDispatch(SysMsg *msg) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: v0/v1 swapped when reading the placement position */
 void PICKUPObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
     VECTOR32 playerPos;
@@ -2042,7 +2028,7 @@ void PICKUPObjDispatch(SysMsg *msg) {
                 pos.vz = obj->anim->frame->pos.vz;
                 pos.vy = -pos.vy;
             } else {
-                GameObjectInfo *info = &gameObjectsInfo[obj->id];
+                GameObjectInfo *info = (GameObjectInfo *)(obj->id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
 
                 pos.vx = info->matrix.t[0];
                 pos.vy = info->matrix.t[1];
@@ -2083,12 +2069,9 @@ void PICKUPObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", PICKUPObjDispatch);
-#endif
 
 #ifdef NON_MATCHING
-/* 15 insns: scheduling of result = 1 before SysPlaySong, s1/s2 swap in the case 42 loop */
+/* 8 insns: result = 1 scheduled first instead of after the SysPlaySong args; case 42 loop's other==NULL branch fills its delay slot from the fallthrough */
 void SWITCHObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
     Gobj *sw = gameObjectsInfo[msg->to].runtime;
@@ -2266,8 +2249,8 @@ void SWITCHObjDispatch(SysMsg *msg) {
         if (*(s32 *)msg->data[0] != 0) {
             sw->flags23 |= 2;
             if (type == 0x3A) {
-                linked = 1;
                 ref = sw->id;
+                linked = 1;
                 do {
                     ref = gameObjectsInfo[ref].refId;
                     if (ref != -1) {

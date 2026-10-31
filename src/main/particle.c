@@ -3286,17 +3286,12 @@ void ParticleGroupUpdateRain(ParticleGroup *g) {
     ParticleGroupUpdateWind(g);
 }
 
-#ifdef NON_MATCHING
-/* velocity loads scheduled above the pos.vy store */
 void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
     s32 prev = 0;
     s32 i = g->head;
     s32 next;
     Particle *p;
     s32 range;
-    s32 half;
-    s32 vx;
-    s32 vz;
 
     while (i >= 0) {
         p = &D_80119040[i];
@@ -3307,19 +3302,14 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
             p->pos.vx += p->vel.vx;
             p->pos.vy += p->vel.vy >= 0 ? p->vel.vy >> 12 : -(-p->vel.vy >> 12);
             p->pos.vz += p->vel.vz;
-            vx = p->vel.vx;
-            vz = p->vel.vz;
-            vx -= (vx + 1) >> 4;
-            vz -= (vz + 1) >> 4;
             p->vel.vy += g->wind;
-            p->vel.vx = vx;
-            p->vel.vz = vz;
+            p->vel.vx -= (p->vel.vx + 1) >> 4;
+            p->vel.vz -= (p->vel.vz + 1) >> 4;
             if (p->pos.vy < g->unk1C) {
                 p->vel.vy = -p->vel.vy >> ((rand() & 1) + 2);
                 range = func_80052D90(p->vel.vy >> 11);
-                half = range >> 1;
-                p->vel.vx = (rand() & range) - half;
-                p->vel.vz = (rand() & range) - half;
+                p->vel.vx = (rand() & range) - (range >> 1);
+                p->vel.vz = (rand() & range) - (range >> 1);
                 p->pos.vy = g->unk1C;
             }
             p->unk62 += p->unk64;
@@ -3328,9 +3318,6 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
         i = next;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateFragmentMeterFrictionFloor);
-#endif
 
 #ifdef NON_MATCHING
 /* regalloc: prev and p swap s0/s1; min-loop head lands in a0 */

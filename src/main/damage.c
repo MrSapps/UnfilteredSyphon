@@ -1223,14 +1223,13 @@ s32 DamageRadius(s16 id, VECTOR32 *pos, s32 damage, s32 inner, s32 outer, s32 ki
     return hits;
 }
 
-#ifdef NON_MATCHING
-/* Register allocation: id/pos callee-saved regs swapped, hit count not sharing radius's reg. */
 void DamageExplosion(s32 id, VECTOR32 *pos, u8 grenade) {
     VECTOR32 dir = D_80012164;
     VECTOR32 shake = D_80012174;
     s32 radius = 0x280;
     s32 radius2 = 0x280;
     s32 hits;
+    s32 one;
     u8 flags;
 
     if (grenade) {
@@ -1240,8 +1239,13 @@ void DamageExplosion(s32 id, VECTOR32 *pos, u8 grenade) {
             radius2 = 0x140;
         }
     }
-    hits = DamageRadius(id, pos, (D_801061C0 >> 6) & 0x3FF, radius, radius2, 0x11, 1);
-    ParticleExplosion((hits > 0 || !grenade) ? 0x29A : -1, pos, &dir, 0x1000, 1);
+    one = 1;
+    hits = DamageRadius(id, pos, (D_801061C0 >> 6) & 0x3FF, radius, radius2, 0x11, one);
+    if (hits > 0 || !grenade) {
+        ParticleExplosion(0x29A, pos, &dir, 0x1000, one);
+    } else {
+        ParticleExplosion(-1, pos, &dir, 0x1000, one);
+    }
     if (hits > 0) {
         ParticleFire(-1, pos, 0x1000, -1, 0, 0x32, 0x4B);
     }
@@ -1251,28 +1255,22 @@ void DamageExplosion(s32 id, VECTOR32 *pos, u8 grenade) {
         npcGrenadeLandedCheck = id == gPlayerOffset ? flags & ~1 : flags & ~2;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageExplosion);
-#endif
 
-#ifdef NON_MATCHING
-/* The else branch should read g from a0, not the callee-saved copy. */
 void func_80069C70(Grenade *g) {
+    Grenade *cur = g;
+    Grenade *self = cur;
     s32 radius;
     u8 flags;
 
-    if (--g->fuse != -1) {
-        radius = 0x180 - (u32)((200 - g->fuse) * 3) / 2;
-        DamageRadius(g->owner, g, (D_801061E0 >> 6) & 0x3FF, radius, radius, 0x12, 1);
-        SysExeTickQueueTimer(func_80069C70, 1, g);
-    } else if (g->active) {
+    if (--cur->fuse != -1) {
+        radius = 0x180 - (u32)((200 - cur->fuse) * 3) / 2;
+        DamageRadius(cur->owner, self, (D_801061E0 >> 6) & 0x3FF, radius, radius, 0x12, 1);
+        SysExeTickQueueTimer(func_80069C70, 1, cur);
+    } else if (cur->active) {
         flags = npcGrenadeLandedCheck;
-        npcGrenadeLandedCheck = g->owner == gPlayerOffset ? flags & ~1 : flags & ~2;
+        npcGrenadeLandedCheck = cur->owner == gPlayerOffset ? flags & ~1 : flags & ~2;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/damage", func_80069C70);
-#endif
 
 void DamageGasCloud(s32 id, VECTOR32 *pos, s8 active) {
     VECTOR32 dir = D_80012164;
