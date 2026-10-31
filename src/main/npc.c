@@ -3922,7 +3922,7 @@ void NPCDropPickupStuff(s32 id) {
 }
 
 #ifdef NON_MATCHING
-/* 4 insns: drop gets v1 instead of v0 (target stores unk28 before the slti) */
+/* 4 insns: drop gets v1 instead of v0 (target stores unk28 before the slti; sched1 only orders it so when the slt dest is single-set, i.e. gets birthing priority) */
 void NPCLosUpdateOtherStuff(s32 id) {
     VECTOR32 point;
     s32 start;

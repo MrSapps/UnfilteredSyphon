@@ -314,7 +314,7 @@ GameObjectRuntime *ObjectMatchToRefID(s16 id, s16 type) {
 }
 
 #ifdef NON_MATCHING
-/* Scheduling: the id sign extension is hoisted before the gameObjectsInfo load. */
+/* target hoists the gLevelGameObjCount reload out of the loop (cse2 then copies it, a3 = v1); our loop.c rates that move "not desirable" (44 insns) */
 GameObjectRuntime *ObjectMatchToRefIDByCatID(s16 id, s16 category) {
     s32 i;
     Gobj *gobj;

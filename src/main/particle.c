@@ -3811,8 +3811,6 @@ typedef struct ParticleLine {
     /* 0x18 */ s32 xy1;
 } ParticleLine;
 
-#ifdef NON_MATCHING
-/* depth: v0/a0 swapped between the g->unk26 term and the screen.vz shifts */
 /* Rain: falling gouraud lines in a box around the camera, with a splash at the floor */
 void ParticleDisplayRain(ParticleGroup *g) {
     VECTOR32 cam;
@@ -3926,8 +3924,11 @@ void ParticleDisplayRain(ParticleGroup *g) {
                 width >>= (cam.vy - floor) >> 8;
                 line->xy0 = -(screen.vy << 16) + (u16)(screen.vx - width);
                 line->xy1 = -(screen.vy << 16) + (u16)(screen.vx + width);
-                depth = g->unk26;
-                depth = (screen.vz >> 2) - (screen.vz >> 4) + (depth - 16);
+                {
+                    s32 bias; /* separate temp keeps (unk26 - 16) from reassociating */
+
+                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                }
                 if (depth >= 0) {
                     line->z = depth;
                 } else {
@@ -3947,8 +3948,11 @@ void ParticleDisplayRain(ParticleGroup *g) {
                 EGSDisplayTransformWorldToScreen(&p->pos, &screen);
                 if (screen.vz > 0 && (d = screen.vx - x, (d >= 0 ? d : -d) < 0x40)) {
                     p->xy0 = -(screen.vy << 16) + (u16)screen.vx;
-                    depth = g->unk26;
-                    depth = (screen.vz >> 2) - (screen.vz >> 4) + (depth - 16);
+                    {
+                        s32 bias;
+
+                        depth = (screen.vz >> 2) - (screen.vz >> 4) + (bias = g->unk26 - 16);
+                    }
                     if (depth >= 0) {
                         p->depth = depth;
                     } else {
@@ -3965,9 +3969,6 @@ void ParticleDisplayRain(ParticleGroup *g) {
         i = p->next;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayRain);
-#endif
 
 
 static s32 D_8010F944 = 0x50; /* snow brightness, follows the player's size */
