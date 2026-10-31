@@ -2030,9 +2030,9 @@ void EGSDisplayPacketAreaFree(void) {
 }
 
 #ifdef NON_MATCHING
-/* callee-saved register assignment and gCameraID increment scheduling differ */
+/* same length now; original stores gCameraID+1 before the camera index math (index copied from the loaded value) and assigns pos/dist/region/priority/otShift to s2-s6 in a different order */
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
-    u16 index = gCameraID++;
+    s32 index = gCameraID++;
     EGSCamera *camera = &gCameraArray[(s16)index];
     VECTOR p;
     s32 err;
@@ -2568,7 +2568,7 @@ void InitPointSources(void *anim) {
 }
 
 #ifdef NON_MATCHING
-/* frame/t pointer register allocation and store scheduling differ */
+/* frame loads: original reloads a->frame after the unk28 store (if) and does not CSE the two a2->frame loads (else); t[2] load scheduled before the sum clears */
 void FinalizePointSources(void) {
     VECTOR v;
     EGSPointSource *ps;
@@ -2586,18 +2586,18 @@ void FinalizePointSources(void) {
             continue;
         }
         if (i == 1) {
-            t = a->frame->matrix.t;
             a->unk28 = 0;
+            t = a->frame->matrix.t;
             f = a->frame;
         } else {
-            t = a2->frame->matrix.t;
             f = a2->frame;
             a2->unk28 = 0;
+            t = a2->frame->matrix.t;
         }
         ps->frame = f;
         ps->color = 0;
         ps->pos[0] = t[0];
-        ps->pos[1] = (i != 0) ? t[1] + 0x80 : t[1] + 0x28;
+        ps->pos[1] = t[1] + ((i != 0) ? 0x80 : 0x28);
         ps->count = 0;
         ps->sum[2] = 0;
         ps->sum[1] = 0;
@@ -2724,29 +2724,25 @@ s32 EGSDisplayStopTextureAnimation(EGSTexAnim *ta) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* original re-sign-extends count at every use (K&R-style s8 param?) */
-void EGSDisplayInitBillboardAnimation(EGSAnim *anim, s16 *src, s8 count) {
+void EGSDisplayInitBillboardAnimation(EGSAnim *anim, s16 *src, s32 count) {
     BillboardAnim *ba = EGSMemMalloc(sizeof(BillboardAnim));
-    s32 i;
     s16 *frames = EGSMemMalloc(count * 4);
-    s16 *dst;
+    s32 i;
 
-    for (i = 0, dst = frames; i < count; i++, src += 2, dst += 2) {
-        dst[0] = src[0] - ((src[0] >> 6) << 6);
-        dst[1] = src[1] & 0xFF;
+    for (i = 0; i < count; i++) {
+        s16 x = src[i * 2];
+        s16 y = src[i * 2 + 1];
+        frames[i * 2] = x - ((x >> 6) << 6);
+        frames[i * 2 + 1] = y & 0xFF;
     }
     ba->frames = frames;
     ba->numFrames = count;
     ba->frame = rand() % count;
-    ba->lastTick = 0;
     ba->delay = rand() % 3 + 4;
+    ba->lastTick = 0;
     anim->model->flags |= 0x10000000;
     anim->unk18 = ba;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayInitBillboardAnimation);
-#endif
 
 void EGSDisplayGetSectorRotBoxList(EGSAnim *anim, s32 *count, void **boxes) {
     EGSSectorInfo *info = anim->model->info;
@@ -2961,8 +2957,6 @@ void EGSDisplayRemoveDamage(void *owner) {
     }
 }
 
-#ifdef NON_MATCHING
-/* scheduling: the two mask bytes are loaded p[1] first; original loads p[0] first */
 s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
     HAnimation *ha = EGSDisplayGetHA(anim, id);
     EGSSectorInfo *info = anim->model->info;
@@ -2990,7 +2984,10 @@ s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
             return 0x2E;
         }
         p += 2;
-        mask = p[1] | (p[0] << 8);
+        {
+            u32 hi = p[0];
+            mask = p[1] | (hi << 8);
+        }
         p += 2;
         for (i = 0; i < info->numParts; i++, mask >>= 1) {
             b = *p;
@@ -3011,9 +3008,6 @@ s32 EGSDisplayHASetCurrentFrame(EGSAnim *anim, s32 id, s32 frame) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayHASetCurrentFrame);
-#endif
 
 void EGSDisplaySetAlternateViewpoint(MATRIX *m) {
     gGabeCoord.flg = 0;
@@ -3068,24 +3062,16 @@ void EGSDisplayPointSourceParams(EGSPointSource *ps, s16 radius, s32 color) {
     ps->color = color;
 }
 
-#ifdef NON_MATCHING
-/* result lives in v1 instead of v0 (return-value allocation) */
 s32 EGSDisplayPointSourceOn(EGSPointSource *ps) {
-    s32 ret;
-
     if (ps->node != NULL) {
         return 0;
     }
-    ret = 0;
     if (ps->frame != NULL) {
         ps->node = EGSListAdd(&gPointSourceList, ps);
-        ret = 1;
+        return 1;
     }
-    return ret;
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayPointSourceOn);
-#endif
 
 s32 EGSDisplayPointSourceOff(EGSPointSource *ps) {
     if (ps->node == NULL) {
@@ -3118,24 +3104,16 @@ void EGSDisplayFlashlightParams(EGSFlashlight *fl, s32 range, s32 width, s32 shi
     fl->shift = shift;
 }
 
-#ifdef NON_MATCHING
-/* result lives in v1 instead of v0 (return-value allocation) */
 s32 EGSDisplayFlashlightOn(EGSFlashlight *fl) {
-    s32 ret;
-
     if (fl->node != NULL) {
         return 0;
     }
-    ret = 0;
     if (fl->frame != NULL) {
         fl->node = EGSListAdd(&gFlashlightList, fl);
-        ret = 1;
+        return 1;
     }
-    return ret;
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayFlashlightOn);
-#endif
 
 s32 EGSDisplayFlashlightOff(EGSFlashlight *fl) {
     if (fl->node == NULL) {
@@ -3343,7 +3321,7 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 
 #ifdef NON_MATCHING
-/* ret (always 0) is s3 and copied to v0; the original keeps a dead ret=0 in s2 and returns literal 0, 450 block first */
+/* dead ret=0 in s2 (loop-invariant hoist) now matches; only the 450 path still returns s2 instead of literal 0 and the init schedules earlier */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
@@ -3351,8 +3329,9 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
     EGSModel *model;
     EGSFrame *frame;
     s32 count;
-    s32 ret = 0;
+    s32 ret;
 
+    ret = 0;
     frame = anim->frame;
     acc.pos[0] = frame->matrix.t[0];
     acc.pos[1] = frame->matrix.t[1];
@@ -3360,6 +3339,7 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
     acc.pos[2] = frame->matrix.t[2];
     EGSFrameGetPosition(anim->frame, NULL, &p);
     for (; node != NULL; node = node->next) {
+        ret = 0;
         model = ((EGSAnim *)node->data)->model;
         if ((model->flags & 0x1000000) && p.vx > model->min[0] && p.vx < model->max[0] && p.vz > model->min[2] &&
             p.vz < model->max[2]) {
@@ -3367,13 +3347,13 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
         }
     }
     count = acc.count;
-    if (count == 0) {
-        out->vx = out->vy = out->vz = 450;
-        return ret;
+    if (count != 0) {
+        out->vx = acc.sum[0] / count * 16;
+        out->vy = acc.sum[1] / count * 16;
+        out->vz = acc.sum[2] / count * 16;
+        return 0;
     }
-    out->vx = acc.sum[0] / count * 16;
-    out->vy = acc.sum[1] / count * 16;
-    out->vz = acc.sum[2] / count * 16;
+    out->vx = out->vy = out->vz = 450;
     return ret;
 }
 #else
@@ -3390,16 +3370,14 @@ EGSAnim *EGSDisplayGetHMDSector(EGSAnim *anim) {
     return EGSDisplayGetPointSector(&pos.vx);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: original keeps the sector in v1 and presets v0 = 0 in the beqz delay slot */
 s32 EGSDisplayHMDInActiveSector(EGSAnim *anim) {
     EGSAnim *sector = EGSDisplayGetHMDSector(anim);
 
-    return sector != NULL ? sector->node[0] != NULL : 0;
+    if (sector != NULL && sector->node[0] != NULL) {
+        return 1;
+    }
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayHMDInActiveSector);
-#endif
 
 s16 EGSDisplayGetAnimSector(EGSAnim *anim) {
     EGSAnim *sector = EGSDisplayGetHMDSector(anim);

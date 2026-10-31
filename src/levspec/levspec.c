@@ -206,34 +206,26 @@ static void func_80141BF0(s16 id) {
     LevelMissionCtrMsg(msg, 0);
 }
 
-#ifdef NON_MATCHING
-/* delay slot: original fills the gLevelAlerted branch slot with the id move */
 static void func_80141D5C(s16 id) {
-    s32 objective;
-
     if (id != GOBJ_ID_666 && gameObjectsModelInfo[gameObjectsInfo[id].modelIndex].type == CATA_TYPE_CELL_DOOR) {
         if (!gLevelAlerted) {
-            func_801418E0(id);
+            func_801418E0();
         }
         ObjectTeleportPlayer(id, 0x39);
         GameCameraRequestCutToBehind();
         LevelObjectiveAdd(5, -1);
         LevelObjectiveAdd(6, -1);
-        objective = 4;
         if (gObjectives != NULL) {
             gObjectives->unk24 |= 4;
         }
-    } else {
-        InterfaceSetAddLevelSpecificNPCCallback(func_80141A40);
-        gameObjectsInfo[gLevelSpecificNpcID2].runtime->flags23 &= ~2;
-        NPCSetCopDeactivateCallback(func_80141B70);
-        objective = 5;
+        LevelObjectiveComplete(4);
+        return;
     }
-    LevelObjectiveComplete(objective);
+    InterfaceSetAddLevelSpecificNPCCallback(func_80141A40);
+    gameObjectsInfo[gLevelSpecificNpcID2].runtime->flags23 &= ~2;
+    NPCSetCopDeactivateCallback(func_80141B70);
+    LevelObjectiveComplete(5);
 }
-#else
-INCLUDE_ASM("asm/levspec/nonmatchings/levspec", func_80141D5C);
-#endif
 
 static void func_80141EB4(s32 arg0, s16 weapon) {
     if (!((gWeaponInfo[weapon].flags >> 14) & 1)) {

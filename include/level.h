@@ -20,7 +20,7 @@ void *SetUseStringCallback(void (*cb)()); /* returns the previous callback */
 void NPCCopDamagedCallback(s16 id, s16 by);
 void ObjectBombDamagedCallback(s16 id, s16 by);
 void NPCCopKilledWashington(s16 id, s16 by, s32 refId, s32 arg3, s32 arg4);
-void ObjectBombDeath(s32 arg0, s32 arg1, s32 arg2, s32 id);
+void ObjectBombDeath(s32 reason, s32 xa, s32 secondary, s32 id);
 void ObjectBigExplosionFX(s16 id, void *pos, s32 radius, s32 arg3, s32 arg4);
 void DamageRadius(s16 id, void *pos, s32 arg2, s32 arg3, s32 arg4, s32 arg5, s32 arg6);
 void NPCHazmatStart(s32 id);

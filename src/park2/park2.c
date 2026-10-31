@@ -188,7 +188,7 @@ void EGSFrameCreate(EGSFrame **frame);
 void EGSFrameSetPosition(EGSFrame *frame, s32 arg1, s32 *pos);
 void EGSDisplayPointSourceInit(PointSource *ps);
 void EGSDisplayPointSourceFrame(PointSource *ps, EGSFrame *frame);
-void EGSDisplayPointSourceOn(); /* (ps) or (ps, pos) */
+void EGSDisplayPointSourceOn();
 void ParticleFireFade(s16 handle);
 void ParticleFireShow(s16 handle, s32 *pos, s32 arg2, s32 arg3);
 extern s32 gPlayerNumConsecutiveHits;
@@ -660,8 +660,6 @@ static void func_80141F5C(void) {
     D_80144950.frame = (EGSFrame *)D_801447C0->anim->unk0C;
 }
 
-#ifdef NON_MATCHING
-/* one delay slot: the original moves the light-on call's pos argument into the ps->on branch slot (jal slot stays empty) */
 static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
     PointSource *ps;
     s32 n;
@@ -676,7 +674,7 @@ static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
 
             ps = lights + n;
             if (ps->on == 0) {
-                EGSDisplayPointSourceOn(ps, pos);
+                EGSDisplayPointSourceOn(ps);
             }
         }
         handle = *(u16 *)&gSystemTick | 0x7FFF0000;
@@ -701,9 +699,6 @@ static void func_8014210C(s32 seg, s32 *pos, s32 arg2) {
     }
     EGSDisplayDeletePoly(arg2, &mFlamethrowerJet[seg]);
 }
-#else
-INCLUDE_ASM("asm/park2/nonmatchings/park2", func_8014210C);
-#endif
 
 /* |a - b| is within half of the per-frame step tol */
 #define WITHIN_HALF(a, b, tol) (ABS((tol) / 2) > ABS((a) - (b)))

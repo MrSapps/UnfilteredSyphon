@@ -270,47 +270,45 @@ s32 UseObjectAlreadyInList(s16 objId) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* the original strength-reduces both list offsets; GCC here recomputes idx*6 */
 static void func_8008A550(s32 idx) {
-    s32 count = --D_801101BC;
     s32 i;
+    s32 j;
 
-    for (i = idx; i < count; i++) {
-        UseMsg *dst = &D_80121978[i];
-        UseMsg *src = &D_80121978[i + 1];
-        dst->textId = src->textId;
-        dst->msgId = src->msgId;
-        dst->objId = src->objId;
+    for (D_801101BC--, j = idx, i = idx + 1; j < D_801101BC; j++, i++) {
+        D_80121978[j].textId = D_80121978[i].textId;
+        D_80121978[j].msgId = D_80121978[i].msgId;
+        D_80121978[j].objId = D_80121978[i].objId;
     }
     D_80121978[D_801101BC].textId = 0xFFFF;
     D_80121978[D_801101BC].msgId = -1;
     D_80121978[D_801101BC].objId = -1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008A550);
-#endif
 
-#ifdef NON_MATCHING
-/* same loop shape as func_8008A550 */
 /* global until PickupObjectTake, DOORObjDispatch and ELEVATORObjDispatch are C */
 void func_8008A62C(s32 idx) {
-    for (D_801101C0--; idx < D_801101C0; idx++) {
-        D_80121990[idx].objId = D_80121990[idx + 1].objId;
-        D_80121990[idx].armor = D_80121990[idx + 1].armor;
-        D_80121990[idx].weapon = D_80121990[idx + 1].weapon;
-        D_80121990[idx].amount = D_80121990[idx + 1].amount;
-        D_80121990[idx].showMsg = D_80121990[idx + 1].showMsg;
+    s32 i;
+    s32 j;
+
+    D_801101C0--;
+    if (idx < D_801101C0) {
+        j = idx;
+        i = idx + 1;
+        do {
+            D_80121990[j].objId = D_80121990[i].objId;
+            D_80121990[j].armor = D_80121990[i].armor;
+            D_80121990[j].weapon = D_80121990[i].weapon;
+            D_80121990[j].amount = D_80121990[i].amount;
+            D_80121990[j].showMsg = D_80121990[i].showMsg;
+            j++;
+            i++;
+        } while (j < D_801101C0);
     }
-    D_80121990[D_801101C0].armor = 0;
     D_80121990[D_801101C0].objId = -1;
+    D_80121990[D_801101C0].armor = 0;
     D_80121990[D_801101C0].weapon = 0;
     D_80121990[D_801101C0].amount = 0;
     D_80121990[D_801101C0].showMsg = 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008A62C);
-#endif
 
 void PickupAddUseMsg(s16 objId, s16 msgId) {
     char *str = NULL;
@@ -791,10 +789,10 @@ void ObjectBombDamagedCallback(s16 id, s16 by) {
     }
 }
 
-#ifdef NON_MATCHING
-/* prologue: original copies xa (a1) to s0 before reason (a0) to s1 */
 void ObjectBombDeath(s32 reason, s32 xa, s32 secondary, s32 id) {
     s32 track = xa;
+    s32 r = reason;
+    s32 sec = secondary;
 
     if (!D_801101C8) {
         D_801101C8 = 1;
@@ -807,13 +805,10 @@ void ObjectBombDeath(s32 reason, s32 xa, s32 secondary, s32 id) {
     gDeviceDetonated = 1;
     if (!gMissionFailed) {
         gMissionFailed = 1;
-        LevelMissionFailed((s16)reason, track, secondary);
+        LevelMissionFailed((s16)r, track, sec);
     }
     DamageKillAllPeople(gPlayerOffset, 0x12);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", ObjectBombDeath);
-#endif
 
 void ObjectDetonateBomb(Gobj *obj) {
     VECTOR32 pos;

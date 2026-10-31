@@ -563,8 +563,6 @@ WeaponAnim *iWeaponAllocateAnim(s32 owner, s32 *slotOut) {
     return D_80118A8C[i];
 }
 
-#ifdef NON_MATCHING
-/* Scheduling only: the else branch loads gCamera (into a2) before the slot stores */
 /* Show the object's current weapon in its hand (or hide it when it has none). */
 void WeaponReplace(Gobj *gobj) {
     WeaponInfo *info;
@@ -593,15 +591,14 @@ void WeaponReplace(Gobj *gobj) {
         anim->unk16 = GOBJINFO_NPC_WEAPON(&gameObjectsInfo[gobj->id]);
         EGSDisplayAddAnim(*gCamera, anim);
     } else {
+        void *cam;
         anim->unk0C = 0;
         D_80118F40[D_8010F928] = -1;
+        cam = *gCamera;
         D_8010F928--;
-        EGSDisplayDeleteAnim(*gCamera, anim);
+        EGSDisplayDeleteAnim(cam, anim);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponReplace);
-#endif
 
 void WeaponSelect(Gobj *gobj, s32 weapon, s32 quiet) {
     s32 next;
@@ -1060,23 +1057,23 @@ void WeaponTaser(Gobj *gobj, u8 fire) {
     }
 }
 
-#ifdef NON_MATCHING
-/* giv layout: the original keeps the frame pointer at the array base (fields at +0x14..) and out in s2 (one insn longer) */
 s32 WeaponGetSaveInfo(WeaponSaveInfo *out) {
     s32 i;
     s32 owner;
+    Gobj *gobj;
     WeaponFrame *frame;
     WeaponAnim *anim;
 
     for (i = 0; i < WEAPON_ANIM_MAX; i++) {
-        owner = D_80118F40[i];
-        if ((owner & 0x80000000) && owner != -1 && ((Gobj *)owner)->healthInfo->health <= 0) {
-            WeaponDrop((Gobj *)owner, 1);
+        gobj = (Gobj *)D_80118F40[i];
+        if (((s32)gobj & 0x80000000) && (s32)gobj != -1 && gobj->healthInfo->health <= 0) {
+            WeaponDrop(gobj, 1);
         }
     }
-    for (i = 0, frame = D_80118B08; i < WEAPON_ANIM_MAX; i++, frame++) {
-        owner = D_80118F40[i];
+    for (i = 0; i < WEAPON_ANIM_MAX; i++) {
         anim = D_80118A8C[i];
+        owner = D_80118F40[i];
+        frame = &D_80118B08[i];
         if (!(owner & 0x80000000)) {
             out[i].x = frame->x;
             out[i].y = frame->y;
@@ -1088,9 +1085,6 @@ s32 WeaponGetSaveInfo(WeaponSaveInfo *out) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/weapon", WeaponGetSaveInfo);
-#endif
 
 s32 WeaponRestoreSaveInfo(WeaponSaveInfo *in) {
     s32 i;

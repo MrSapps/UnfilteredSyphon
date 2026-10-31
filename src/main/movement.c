@@ -605,8 +605,6 @@ s32 func_8004966C(Gobj *gobj) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* 2 insns: the loop-preheader inits of pt (sp+0x48) and the points[i] giv (sp+0x28) are scheduled in the other order */
 /*
  * Static inline in the original (inlined into iMovementUpdate1_2); global with an
  * out-of-line copy here since asm MovementGobjReset still calls it.
@@ -622,9 +620,9 @@ inline void func_800498A4(Gobj *gobj) {
     GOBJ_MATRIX *src;
     VECTOR32 *low;
     VECTOR32 *b;
-    MovementSVector *pt;
     s32 t;
     s32 i;
+    MovementSVector *pts;
 
     if (gobj->npcState == 1 || gobj->npcState == 2) {
         func_8004966C(gobj);
@@ -634,6 +632,7 @@ inline void func_800498A4(Gobj *gobj) {
         return;
     }
     low = &lowest;
+    pts = bp.points;
     src = (GOBJ_MATRIX *)gobj->anim->frame;
     m.m[0][0] = src->m[0][0];
     m.m[0][1] = -src->m[0][1];
@@ -656,8 +655,8 @@ inline void func_800498A4(Gobj *gobj) {
     lowest.vx = bp.points[0].vx;
     lowest.vy = bp.points[0].vy;
     lowest.vz = bp.points[0].vz;
-    for (i = 1, pt = &bp.points[1]; i < 8; i++, pt++) {
-        if (pt->vy < low->vy) {
+    for (i = 1; i < 8; i++) {
+        if (pts[i].vy < low->vy) {
             low->vx = bp.points[i].vx;
             low->vy = bp.points[i].vy;
             low->vz = bp.points[i].vz;
@@ -665,9 +664,6 @@ inline void func_800498A4(Gobj *gobj) {
     }
     move->lowest = lowest;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/movement", func_800498A4);
-#endif
 
 extern VECTOR32 D_80011FD0; /* zero vector */
 
@@ -826,7 +822,7 @@ void iMovementUpdate1_1(void) {
 }
 
 #ifdef NON_MATCHING
-/* inlines func_800498A4; the original also hoists &bp.points into s4 and builds pt as s4+8 (a pts pointer set before the early returns does that but breaks func_800498A4) */
+/* inlines func_800498A4 (which matches); the original hoists &bp.points into s4 (pt giv = s4+8) and keeps the call arg as sp+0x40; pts set before the early returns gets within 2 insns but breaks func_800498A4 */
 void iMovementUpdate1_2(void) {
     Gobj *gobj;
     MovementInfo *move;
