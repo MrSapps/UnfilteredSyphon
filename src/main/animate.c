@@ -47,7 +47,7 @@ typedef struct AnimGobj {
     /* 0x02 */ s16 objId; /* gameObjectsInfo index */
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ AnimNode *anim;
-    /* 0x0C */ s32 unk0C;
+    /* 0x0C */ struct AnimRuntime *runtime;
     /* 0x10 */ AnimCharState *state;
     /* 0x14 */ s16 *id; /* gameObjectsInfo index */
     /* 0x18 */ u8 unk18[0xA];
@@ -116,7 +116,814 @@ void func_80079950(struct AnimSlot *slot);
 void func_8007E650(struct AnimSlot *slot);
 u8 func_8007D120(struct AnimSlot *slot);
 
+/* Per-character aim tracking state (gobj->runtime->aim) */
+typedef struct AnimAimState {
+    /* 0x00 */ u8 unk00[0xB4];
+    /* 0xB4 */ s32 tick[3];   /* gSystemTick of the last spine / head / arm update */
+    /* 0xC0 */ AnimVec ang[4]; /* smoothed spine, head, upper-arm and forearm angles */
+} AnimAimState;
+
+typedef struct AnimRuntime {
+    /* 0x000 */ u8 unk000[0x1A8];
+    /* 0x1A8 */ AnimAimState *aim;
+} AnimRuntime;
+
+enum {
+    AIM_SPINE,
+    AIM_HEAD,
+    AIM_UPPER_ARM,
+    AIM_FOREARM,
+};
+
+extern s32 gSystemTick;
+
+void EGSFrameUpdateNode(AnimFrame *frame);
+void MulMatrix0(AnimMatrix *a, AnimMatrix *b, AnimMatrix *out);
+void EGSGeometry_VectorReverseRotateYXZ(AnimVec *v, AnimVec *angle, AnimVec *out);
+void EGSGeometryINT_GetXZDistancePoint2Point(AnimVec *a, AnimVec *b, s32 *out);
+void EGSGeometry_GetFuzzyDistancePoint2Point(AnimVec *a, AnimVec *b, s32 *out);
+void EGSGeometry_VectorToRotationMatrix(AnimVec *v, s32 arg1, AnimMatrix *m);
+void EGSFrameSetRotationParentYXZ(AnimFrame *frame, AnimVec *rot);
+
+#define WRAP_ANGLE(a)          \
+    if ((a) > 0x800) {         \
+        (a) -= 0x1000;         \
+    } else if ((a) < -0x800) { \
+        (a) += 0x1000;         \
+    }
+
+#ifdef NON_MATCHING
+/* local matrix converted to the y-up coordinate system */
+#define GET_MATRIX_YUP(in, out)                \
+    {                                          \
+        (out)->m[0][0] = (in)->m[0][0];        \
+        (out)->m[0][1] = -(in)->m[0][1];       \
+        (out)->m[0][2] = (in)->m[0][2];        \
+        (out)->m[1][0] = -(in)->m[1][0];       \
+        (out)->m[1][1] = (in)->m[1][1];        \
+        (out)->m[1][2] = -(in)->m[1][2];       \
+        (out)->m[2][0] = (in)->m[2][0];        \
+        (out)->m[2][1] = -(in)->m[2][1];       \
+        (out)->m[2][2] = (in)->m[2][2];        \
+        (out)->t[0] = (in)->t[0];              \
+        (out)->t[1] = -(in)->t[1];             \
+        (out)->t[2] = (in)->t[2];              \
+    }
+
+/* translation of a matrix in y-up coordinates */
+#define GET_POS_YUP(m, v)      \
+    {                          \
+        (v).vx = (m)->t[0];    \
+        (v).vy = (m)->t[1];    \
+        (v).vz = (m)->t[2];    \
+        (v).vy = -(v).vy;      \
+    }
+
+#define GET_COLUMNS(mat, x, y, z) \
+    {                             \
+        (x).vx = (mat)->m[0][0];  \
+        (x).vy = (mat)->m[1][0];  \
+        (x).vz = (mat)->m[2][0];  \
+        (y).vx = (mat)->m[0][1];  \
+        (y).vy = (mat)->m[1][1];  \
+        (y).vz = (mat)->m[2][1];  \
+        (z).vx = (mat)->m[0][2];  \
+        (z).vy = (mat)->m[1][2];  \
+        (z).vz = (mat)->m[2][2];  \
+    }
+
+#define SET_COLUMNS(mat, x, y, z) \
+    {                             \
+        (mat)->m[0][0] = (x).vx;  \
+        (mat)->m[1][0] = (x).vy;  \
+        (mat)->m[2][0] = (x).vz;  \
+        (mat)->m[0][1] = (y).vx;  \
+        (mat)->m[1][1] = (y).vy;  \
+        (mat)->m[2][1] = (y).vz;  \
+        (mat)->m[0][2] = (z).vx;  \
+        (mat)->m[1][2] = (z).vy;  \
+        (mat)->m[2][2] = (z).vz;  \
+    }
+
+#define NEGATE_VEC(v)       \
+    {                       \
+        (v).vx = -(v).vx;   \
+        (v).vy = -(v).vy;   \
+        (v).vz = -(v).vz;   \
+    }
+
+/* d = a - b, each component wrapped to [-0x800, 0x800] */
+#define ANGLE_SUB(d, a, b)          \
+    {                               \
+        (d).vx = (a).vx - (b).vx;   \
+        WRAP_ANGLE((d).vx);         \
+        (d).vy = (a).vy - (b).vy;   \
+        WRAP_ANGLE((d).vy);         \
+        (d).vz = (a).vz - (b).vz;   \
+        WRAP_ANGLE((d).vz);         \
+    }
+
+/* d = a + b, each component wrapped to [-0x800, 0x800] */
+#define ANGLE_ADD(d, a, b)          \
+    {                               \
+        (d).vx = (a).vx + (b).vx;   \
+        WRAP_ANGLE((d).vx);         \
+        (d).vy = (a).vy + (b).vy;   \
+        WRAP_ANGLE((d).vy);         \
+        (d).vz = (a).vz + (b).vz;   \
+        WRAP_ANGLE((d).vz);         \
+    }
+
+#define CLAMP(x, lo, hi)  \
+    if ((x) < (lo)) {     \
+        (x) = (lo);       \
+    } else if ((x) > (hi)) { \
+        (x) = (hi);       \
+    }
+
+/* arithmetic shift rounding toward zero */
+#define SHIFT_DOWN(x, n) ((x) >= 0 ? (x) >> (n) : -(-(x) >> (n)))
+
+#define ANGLE_TO_DEG(a) SHIFT_DOWN((a) * 360, 12)
+#define DEG_TO_ANGLE(d) ((d) * 4096 / 360)
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
+/* Euler (y-up) angles to a rotation matrix */
+static inline void AnimRotMatrix(AnimVec *ang, AnimMatrix *m) {
+    AnimSVec r;
+
+    r.vx = -ang->vx;
+    r.vy = ang->vy;
+    r.vz = -ang->vz;
+    RotMatrixYXZ(&r, m);
+    m->m[0][1] = -m->m[0][1];
+    m->m[1][0] = -m->m[1][0];
+    m->m[1][2] = -m->m[1][2];
+    m->m[2][1] = -m->m[2][1];
+}
+
+/* same, for the smoothed aim angles */
+static inline void AnimAimRotMatrix(AnimVec *ang, AnimMatrix *m) {
+    AnimSVec r;
+
+    r.vx = -ang->vx;
+    r.vy = ang->vy;
+    r.vz = -ang->vz;
+    RotMatrixYXZ(&r, m);
+    m->m[1][0] = -m->m[1][0];
+    m->m[0][1] = -m->m[0][1];
+    m->m[2][1] = -m->m[2][1];
+    m->m[1][2] = -m->m[1][2];
+}
+
+/* rotate 180 degrees about y: negate the x and z axes */
+static inline void AnimMatrixFlipXZ(AnimMatrix *m) {
+    AnimVec x, y, z;
+
+    GET_COLUMNS(m, x, y, z);
+    NEGATE_VEC(x);
+    NEGATE_VEC(z);
+    SET_COLUMNS(m, x, y, z);
+}
+
+/* permute the axes into an arm bone's frame */
+static inline void AnimMatrixToArm(AnimMatrix *m) {
+    AnimVec x, y, z;
+
+    GET_COLUMNS(m, x, y, z);
+    NEGATE_VEC(y);
+    NEGATE_VEC(z);
+    SET_COLUMNS(m, y, z, x);
+}
+
+static inline void AnimMatrixFromArm(AnimMatrix *m) {
+    AnimVec x, y, z;
+
+    GET_COLUMNS(m, x, y, z);
+    NEGATE_VEC(x);
+    NEGATE_VEC(y);
+    SET_COLUMNS(m, z, x, y);
+}
+
+/* permute the axes into the hand bone's frame */
+static inline void AnimMatrixToHand(AnimMatrix *m) {
+    AnimVec x, y, z;
+
+    GET_COLUMNS(m, x, y, z);
+    NEGATE_VEC(x);
+    NEGATE_VEC(z);
+    SET_COLUMNS(m, y, z, x);
+}
+
+static inline void AnimMatrixFromHand(AnimMatrix *m) {
+    AnimVec x, y, z;
+
+    GET_COLUMNS(m, x, y, z);
+    NEGATE_VEC(y);
+    NEGATE_VEC(z);
+    SET_COLUMNS(m, z, x, y);
+}
+
+/* heading/pitch of the matrix z axis */
+static inline void AnimMatrixFacing(AnimMatrix *m, AnimVec *ang) {
+    AnimVec z;
+
+    z.vx = m->m[0][2];
+    z.vy = m->m[1][2];
+    z.vz = m->m[2][2];
+    ang->vy = ratan2(z.vx, z.vz);
+    EGSGeometryINT_VectorGetAngleFromXZPlane(&z, ang);
+    ang->vz = 0;
+}
+
+/* full YXZ euler angles of a matrix */
+static inline void AnimMatrixAngles(AnimMatrix *m, AnimVec *ang) {
+    AnimVec x, z, y;
+
+    x.vx = m->m[0][0];
+    x.vy = m->m[1][0];
+    x.vz = m->m[2][0];
+    y.vx = m->m[0][1];
+    y.vy = m->m[1][1];
+    y.vz = m->m[2][1];
+    z.vx = m->m[0][2];
+    z.vy = m->m[1][2];
+    z.vz = m->m[2][2];
+    ang->vy = ratan2(z.vx, z.vz);
+    EGSGeometryINT_VectorGetAngleFromXZPlane(&z, ang);
+    ang->vz = 0;
+    EGSGeometry_VectorReverseRotateYXZ(&x, ang, &x);
+    ang->vz = ratan2(x.vy, x.vx);
+}
+
+/* vector from a bone to the aim point */
+#define AIM_DELTA(bone, pos, delta, target)   \
+    {                                         \
+        GET_POS_YUP(&(bone)->local, pos);     \
+        (delta).vx = (target)->vx - (pos).vx; \
+        (delta).vy = (target)->vy - (pos).vy; \
+        (delta).vz = (target)->vz - (pos).vz; \
+    }
+
+/* heading/pitch of a vector */
+#define VECTOR_ANGLES(v, ang)                                   \
+    {                                                           \
+        (ang).vy = ratan2((v).vx, (v).vz);                      \
+        EGSGeometryINT_VectorGetAngleFromXZPlane(&(v), &(ang)); \
+        (ang).vz = 0;                                           \
+    }
+
+#define AIM_ANGLES(bone, pos, delta, ang, target) \
+    {                                             \
+        AIM_DELTA(bone, pos, delta, target);      \
+        VECTOR_ANGLES(delta, ang);                \
+    }
+
+/*
+ * Aim tracking for the simple (non-scratchpad) animation mode: turns the
+ * spine, head and arms of a character towards slot->aimPoint, smoothing the
+ * angles kept in gobj->runtime->aim, and reacts to recoil and hits.
+ *
+ * NON_MATCHING: same control flow and instruction count (+1) as the original,
+ * 99.8% identical mnemonic sequence. The stack slots of the temporaries differ:
+ * in the original most of the vector/matrix temporaries live in inline-function
+ * frames that cc1 frees and coalesces (block locals are never freed), so their
+ * offsets (and with them the spill slots at 0x308+) depend on the original's
+ * exact inline/block structure. Register allocation also differs in places.
+ */
+void func_80079950(AnimSlot *slot) {
+    AnimVec targetAng;
+    AnimVec step;
+    AnimVec rest;
+    AnimMatrix rootM;
+    AnimMatrix baseM;
+    AnimMatrix boneM;
+    AnimMatrix armM;
+    AnimVec bonePos;
+    AnimVec toTarget;
+    AnimVec rootAng;
+    AnimVec spineAng;
+    AnimVec armAng;
+    AnimVec spineOfs;
+    AnimVec local;
+    AnimMatrix rotM;
+    AnimMatrix m;
+    AnimMatrix restM;
+    AnimVec spineAim;
+    s32 aimType;
+    u8 twoHanded;
+    u8 aiming;
+    u8 recoil;
+    u8 hit;
+    AnimFrame *headBone;
+    AnimFrame *foreArm;
+    AnimFrame *hand;
+    u8 turnBody;
+    u8 crouched;
+    AnimGobj *gobj;
+    AnimVec *target;
+    AnimAimState *aim;
+    AnimMatrix *root;
+    AnimFrame *base;
+    AnimFrame *spine;
+    AnimFrame *upperArm;
+    AnimCharState *state;
+
+    crouched = 0;
+    aiming = slot->aimRequest != 0;
+    gobj = slot->gobj;
+    aimType = slot->aimType;
+    twoHanded = slot->aimTwoHanded;
+    state = gobj->state;
+    target = &slot->aimPoint;
+    recoil = slot->recoil;
+    hit = slot->hit;
+    if (state->action == 1) {
+        crouched = (state->flags >> 3) & 1;
+    }
+    spineAim = D_8001232C;
+    if (gobj == NULL || gobj->runtime == NULL || gobj->runtime->aim == NULL) {
+        return;
+    }
+    aim = gobj->runtime->aim;
+
+    EGSFrameUpdateHierarchy(gobj->anim->frame);
+    root = gobj->anim->frame;
+    base = gobj->anim->bones[14];
+    spine = gobj->anim->bones[13];
+    headBone = gobj->anim->bones[0];
+    upperArm = gobj->anim->bones[11];
+    foreArm = gobj->anim->bones[9];
+    hand = gobj->anim->bones[8];
+    GET_MATRIX_YUP(root, &rootM);
+    AnimMatrixFacing(&rootM, &rootAng);
+    rest.vx = -gobj->anim->restRot[13][0];
+    rest.vy = gobj->anim->restRot[13][1];
+    rest.vz = -gobj->anim->restRot[13][2];
+    AnimRotMatrix(&rest, &restM);
+
+    /* restart the smoothing of anything not updated last frame */
+    if (gSystemTick != aim->tick[0] + 1) {
+        aim->ang[AIM_SPINE] = rootAng;
+    }
+    if (gSystemTick != aim->tick[1] + 1) {
+        aim->ang[AIM_HEAD] = rootAng;
+    }
+    if (gSystemTick != aim->tick[2] + 1) {
+        aim->ang[AIM_UPPER_ARM] = rootAng;
+        aim->ang[AIM_FOREARM] = rootAng;
+    }
+
+    /* always 0 as written; the original tests it in several places */
+    turnBody = 0;
+    if (twoHanded && aimType != 2) {
+        turnBody = aimType == 2;
+    }
+
+    GET_MATRIX_YUP(&base->local, &baseM);
+    MulMatrix0(&baseM, &restM, &boneM);
+    AnimMatrixFlipXZ(&baseM);
+    AnimMatrixFlipXZ(&boneM);
+
+    /* spine */
+    if (twoHanded || !aiming) {
+        AnimVec cur;
+        AnimVec want;
+
+        aim->tick[0] = gSystemTick;
+        AnimMatrixAngles(&boneM, &spineAng);
+        AIM_ANGLES(upperArm, bonePos, toTarget, targetAng, target);
+        targetAng.vx = 0;
+        ANGLE_SUB(cur, aim->ang[AIM_SPINE], rootAng);
+        ANGLE_SUB(want, targetAng, rootAng);
+        if (aiming == 1) {
+            if (crouched) {
+                s32 yaw;
+
+                if (want.vy >= 0) {
+                    yaw = want.vy - 0x2E3;
+                    if (yaw < 0) {
+                        yaw = 0;
+                    }
+                } else {
+                    yaw = want.vy + 0x2E3;
+                    if (yaw > 0) {
+                        yaw = 0;
+                    }
+                }
+                want.vy = yaw;
+            } else if (aimType == aiming) {
+                if (want.vy > 0) {
+                    want.vy = want.vy / 3;
+                } else if (want.vy < 0) {
+                    want.vy = want.vy * 120 / 180;
+                }
+            }
+        }
+        spineAim = want;
+        ANGLE_SUB(spineOfs, spineAng, rootAng);
+        cur.vx += spineOfs.vx;
+        cur.vy += spineOfs.vy;
+        cur.vz += spineOfs.vz;
+        want.vx += spineOfs.vx;
+        want.vy += spineOfs.vy;
+        want.vz += spineOfs.vz;
+        if (recoil) {
+            if (aimType == 2) {
+                cur.vx -= 0x40;
+            } else {
+                cur.vx -= 0x38;
+            }
+            cur.vy += 0x63;
+        }
+        if (!aiming) {
+            want = spineOfs;
+        }
+        if (hit) {
+            AnimVec ang;
+            AnimSVec r;
+            AnimMatrix hitM;
+            AnimVec fwd;
+            AnimVec side;
+            AnimVec dir;
+            s32 dot[2];
+
+            ang.vx = aim->ang[AIM_SPINE].vx + spineOfs.vx;
+            ang.vy = aim->ang[AIM_SPINE].vy + spineOfs.vy;
+            ang.vz = aim->ang[AIM_SPINE].vz + spineOfs.vz;
+            r.vx = -ang.vx;
+            r.vy = ang.vy;
+            r.vz = -ang.vz;
+            RotMatrixYXZ(&r, &hitM);
+            side.vy = 0;
+            hitM.m[0][1] = -hitM.m[0][1];
+            hitM.m[1][2] = -hitM.m[1][2];
+            hitM.m[1][0] = -hitM.m[1][0];
+            hitM.m[2][1] = -hitM.m[2][1];
+            fwd.vx = hitM.m[0][2];
+            fwd.vy = hitM.m[1][2];
+            fwd.vz = hitM.m[2][2];
+            side.vx = hitM.m[2][2];
+            side.vz = -hitM.m[0][2];
+            dir = slot->hitDir;
+            dot[0] = dir.vx * fwd.vx + dir.vy * fwd.vy + dir.vz * fwd.vz;
+            dot[0] = SHIFT_DOWN(dot[0], 12);
+            dot[1] = dir.vx * side.vx + dir.vy * side.vy + dir.vz * side.vz;
+            dot[1] = SHIFT_DOWN(dot[1], 12);
+            if (dot[0] <= 0) {
+                cur.vx -= 0x38;
+                if (dot[1] > 0) {
+                    cur.vy -= 0x71;
+                } else {
+                    cur.vy += 0x71;
+                }
+            } else {
+                cur.vx += 0x71;
+                if (dot[1] <= 0) {
+                    cur.vy -= 0x71;
+                } else {
+                    cur.vy += 0x71;
+                }
+            }
+        }
+        CLAMP(cur.vx, -0x2AA, 0x2AA);
+        CLAMP(cur.vy, -0x271, 0x271);
+        CLAMP(want.vx, -0x2AA, 0x2AA);
+        CLAMP(want.vy, -0x271, 0x271);
+        step.vx = want.vx - cur.vx;
+        step.vy = want.vy - cur.vy;
+        step.vz = want.vz - cur.vz;
+        step.vx = SHIFT_DOWN(step.vx, 2);
+        step.vy = SHIFT_DOWN(step.vy, 2);
+        cur.vx += step.vx;
+        cur.vy += step.vy;
+        cur.vz += step.vz;
+        aim->ang[AIM_SPINE].vx = cur.vx - spineOfs.vx;
+        aim->ang[AIM_SPINE].vy = cur.vy - spineOfs.vy;
+        aim->ang[AIM_SPINE].vz = cur.vz - spineOfs.vz;
+        ANGLE_ADD(aim->ang[AIM_SPINE], aim->ang[AIM_SPINE], rootAng);
+        aim->ang[AIM_SPINE].vz = 0;
+        local.vz = 0;
+        local.vx = cur.vx - spineOfs.vx;
+        local.vy = cur.vy - spineOfs.vy;
+        if (!turnBody) {
+            AnimRotMatrix(&local, &rotM);
+            MulMatrix0(&rootM, &rotM, &m);
+        } else {
+            local.vy += rootAng.vy;
+            AnimRotMatrix(&local, &m);
+        }
+        {
+            AnimMatrix headRest;
+
+            rest.vx = -gobj->anim->restRot[14][0];
+            rest.vy = gobj->anim->restRot[14][1];
+            rest.vz = -gobj->anim->restRot[14][2];
+            AnimRotMatrix(&rest, &headRest);
+            MulMatrix0(&m, &headRest, &m);
+        }
+        MulMatrix0(&m, &restM, &m);
+        AnimMatrixFlipXZ(&m);
+        AnimMatrixFlipXZ(&m);
+        EGSFrameSetRotationMatrix(spine, 0, &m);
+        AnimMatrixFlipXZ(&m);
+    } else {
+        EGSFrameSetRotationMatrixParent(spine, &restM);
+        aim->ang[AIM_SPINE] = rootAng;
+    }
+
+    EGSFrameUpdateNode(spine);
+    GET_MATRIX_YUP(&spine->local, &boneM);
+    AnimMatrixFlipXZ(&boneM);
+    AnimMatrixFacing(&boneM, &spineAng);
+
+    /* head */
+    if (aiming) {
+        AnimVec cur;
+        AnimVec want;
+        AnimVec ofs;
+
+        aim->tick[1] = gSystemTick;
+        EGSFrameUpdateNode(headBone);
+        AIM_ANGLES(headBone, bonePos, toTarget, targetAng, target);
+        ANGLE_SUB(cur, aim->ang[AIM_HEAD], spineAng);
+        ANGLE_SUB(ofs, spineAng, aim->ang[AIM_SPINE]);
+        ANGLE_SUB(want, targetAng, aim->ang[AIM_SPINE]);
+        want.vx -= ofs.vx;
+        want.vy -= ofs.vy;
+        want.vz -= ofs.vz;
+        if (turnBody && spineAng.vx > 0) {
+            AnimVec pos;
+            s32 distTarget;
+            s32 distHead;
+
+            GET_POS_YUP(root, pos);
+            EGSGeometryINT_GetXZDistancePoint2Point(&pos, target, &distTarget);
+            EGSGeometryINT_GetXZDistancePoint2Point(&pos, &bonePos, &distHead);
+            if (distTarget < distHead + 0x20) {
+                want.vx = 0;
+                want.vy = 0;
+                want.vz = 0;
+                want.vy = rootAng.vy - spineAng.vy;
+                WRAP_ANGLE(want.vy);
+            }
+        }
+        if (!slot->aimArg && slot->aimType) {
+            cur.vx += 0x38;
+        }
+        if (recoil) {
+            if (aimType != 2) {
+                cur.vx += 0x1C;
+                cur.vy += 0x31;
+            } else {
+                cur.vx += 0x40;
+                cur.vy += 0x31;
+            }
+        }
+        CLAMP(cur.vx, -0x2AA, 0x2AA);
+        CLAMP(cur.vy, -0x31C, 0x31C);
+        CLAMP(want.vx, -0x2AA, 0x2AA);
+        CLAMP(want.vy, -0x31C, 0x31C);
+        step.vx = want.vx - cur.vx;
+        step.vy = want.vy - cur.vy;
+        step.vz = want.vz - cur.vz;
+        step.vx = SHIFT_DOWN(step.vx, 2);
+        step.vy = SHIFT_DOWN(step.vy, 2);
+        cur.vx += step.vx;
+        cur.vy += step.vy;
+        cur.vz += step.vz;
+        ANGLE_ADD(aim->ang[AIM_HEAD], cur, spineAng);
+        aim->ang[AIM_HEAD].vz = 0;
+        AnimAimRotMatrix(&aim->ang[AIM_HEAD], &m);
+        AnimMatrixFlipXZ(&m);
+        EGSFrameSetRotationMatrix(headBone, 0, &m);
+        AnimMatrixFlipXZ(&m);
+    }
+
+    /* arms */
+    if (aiming) {
+        if (aimType == 1) {
+            AnimVec unused;
+            AnimVec cur;
+            AnimVec want;
+            AnimVec ofs;
+            AnimVec elbow;
+            AnimVec elbowDir;
+            AnimVec elbowAng;
+            s32 bend;
+            s32 dist;
+
+            /* one-handed: upper arm, forearm and hand */
+            AIM_DELTA(upperArm, bonePos, toTarget, target);
+            toTarget.vy -= 0xC0;
+            VECTOR_ANGLES(toTarget, targetAng);
+            ANGLE_SUB(unused, targetAng, rootAng);
+            aim->tick[2] = gSystemTick;
+            EGSFrameUpdateNode(upperArm);
+            AIM_ANGLES(upperArm, bonePos, toTarget, targetAng, target);
+            ANGLE_SUB(cur, aim->ang[AIM_UPPER_ARM], spineAng);
+            ANGLE_SUB(ofs, spineAng, aim->ang[AIM_SPINE]);
+            ANGLE_SUB(want, targetAng, aim->ang[AIM_SPINE]);
+            want.vx -= ofs.vx;
+            want.vy -= ofs.vy;
+            want.vz -= ofs.vz;
+            AIM_DELTA(upperArm, bonePos, elbowDir, target);
+            elbowDir.vy -= 0x40;
+            VECTOR_ANGLES(elbowDir, elbowAng);
+            ANGLE_SUB(elbow, elbowAng, aim->ang[AIM_SPINE]);
+            {
+                s32 v = DEG_TO_ANGLE(MIN(40, MAX(20, 30 - ANGLE_TO_DEG(elbow.vy / 5))));
+
+                if (slot->aimArg) {
+                    bend = v;
+                } else {
+                    bend = 0x71;
+                    if (elbow.vx < 0 && crouched) {
+                        bend = 0xE3;
+                    }
+                }
+            }
+            if (elbow.vx < 0 && elbow.vy < 0) {
+                s32 t = -elbow.vy * 80 / 90 - 0x31C;
+                s32 lim;
+
+                lim = 0x71;
+                if (t < 0x72) {
+                    lim = t;
+                }
+                if (want.vx + bend < lim) {
+                    bend = lim - want.vx;
+                }
+            }
+            want.vx += bend;
+            want.vy += 0xAA;
+            if (recoil) {
+                cur.vx += 0xE;
+                cur.vy += 0x1A;
+            }
+            CLAMP(cur.vx, -0x31C, 0x31C);
+            CLAMP(cur.vy, -0x238, 0x638);
+            CLAMP(want.vx, -0x31C, 0x31C);
+            CLAMP(want.vy, -0x238, 0x638);
+            step.vx = want.vx - cur.vx;
+            step.vy = want.vy - cur.vy;
+            step.vz = want.vz - cur.vz;
+            step.vx = step.vx * 7 / 16;
+            step.vy = step.vy * 7 / 16;
+            cur.vx += step.vx;
+            cur.vy += step.vy;
+            cur.vz += step.vz;
+            ANGLE_ADD(aim->ang[AIM_UPPER_ARM], cur, spineAng);
+            aim->ang[AIM_UPPER_ARM].vz = -0x155;
+            AnimAimRotMatrix(&aim->ang[AIM_UPPER_ARM], &m);
+            AnimMatrixToArm(&m);
+            EGSFrameSetRotationMatrix(upperArm, 0, &m);
+            AnimMatrixFromArm(&m);
+
+            EGSFrameUpdateNode(upperArm);
+            GET_MATRIX_YUP(&upperArm->local, &armM);
+            AnimMatrixFromArm(&armM);
+            AnimMatrixFacing(&armM, &armAng);
+            EGSFrameUpdateNode(foreArm);
+            AIM_ANGLES(foreArm, bonePos, toTarget, targetAng, target);
+            {
+                AnimVec cur;
+                AnimVec want;
+                AnimVec pos;
+
+                ANGLE_SUB(cur, aim->ang[AIM_FOREARM], armAng);
+                ANGLE_SUB(want, targetAng, armAng);
+                GET_POS_YUP(&upperArm->local, pos);
+                EGSGeometry_GetFuzzyDistancePoint2Point(target, &pos, &dist);
+                if (dist < 0x61) {
+                    want.vx = -bend;
+                    want.vy = -0xAA;
+                }
+                if (recoil) {
+                    cur.vx -= 0x55;
+                    cur.vy += 0x1A;
+                }
+                CLAMP(cur.vx, -0x6AA, 0);
+                CLAMP(cur.vy, -0x400, 0);
+                CLAMP(want.vx, -0x6AA, 0);
+                CLAMP(want.vy, -0x400, 0);
+                step.vx = want.vx - cur.vx;
+                step.vy = want.vy - cur.vy;
+                step.vz = want.vz - cur.vz;
+                step.vx = step.vx * 7 / 16;
+                step.vy = step.vy * 7 / 16;
+                cur.vx += step.vx;
+                cur.vy += step.vy;
+                cur.vz += step.vz;
+                ANGLE_ADD(aim->ang[AIM_FOREARM], cur, armAng);
+                aim->ang[AIM_FOREARM].vz = -0x2AA;
+                AnimAimRotMatrix(&aim->ang[AIM_FOREARM], &m);
+                AnimMatrixToArm(&m);
+                EGSFrameSetRotationMatrix(foreArm, 0, &m);
+                AnimMatrixFromArm(&m);
+            }
+            EGSFrameUpdateNode(hand);
+            {
+                AnimVec handAng;
+
+                handAng = aim->ang[AIM_FOREARM];
+                handAng.vz = -0x400;
+                AnimAimRotMatrix(&handAng, &m);
+                AnimMatrixToArm(&m);
+                EGSFrameSetRotationMatrix(hand, 0, &m);
+                AnimMatrixFromArm(&m);
+            }
+        } else if (aimType == 2) {
+            AnimVec cur;
+            AnimVec want;
+            AnimFrame *wrist;
+            AnimVec wristPos;
+            AnimVec handPos;
+            AnimVec dir;
+            AnimVec axis;
+            s32 dist;
+
+            /* two-handed weapon: the hand bone leads, the wrist follows */
+            aim->tick[2] = gSystemTick;
+            EGSFrameUpdateNode(hand);
+            AIM_ANGLES(hand, bonePos, toTarget, targetAng, target);
+            ANGLE_SUB(cur, aim->ang[AIM_UPPER_ARM], rootAng);
+            ANGLE_SUB(want, targetAng, rootAng);
+            if (want.vy < 0 && spineAim.vy > 0x71) {
+                want.vy += 0x1000;
+            } else if (want.vy > 0 && spineAim.vy < -0x71) {
+                want.vy -= 0x1000;
+            }
+            if (recoil) {
+                cur.vx += 0;
+                cur.vy += 0;
+            }
+            CLAMP(cur.vx, -0x31C, 0x31C);
+            CLAMP(cur.vy, -0x400, 0x400);
+            CLAMP(want.vx, -0x31C, 0x31C);
+            CLAMP(want.vy, -0x400, 0x400);
+            step.vx = want.vx - cur.vx;
+            step.vy = want.vy - cur.vy;
+            step.vz = want.vz - cur.vz;
+            step.vx = step.vx * 7 / 16;
+            step.vy = step.vy * 7 / 16;
+            cur.vx += step.vx;
+            cur.vy += step.vy;
+            cur.vz += step.vz;
+            ANGLE_ADD(aim->ang[AIM_UPPER_ARM], cur, rootAng);
+            aim->ang[AIM_UPPER_ARM].vz = -0x400;
+            AnimAimRotMatrix(&aim->ang[AIM_UPPER_ARM], &m);
+            AnimMatrixToArm(&m);
+            EGSFrameSetRotationMatrix(hand, 0, &m);
+            AnimMatrixFromArm(&m);
+
+            wrist = gobj->anim->bones[3];
+            EGSFrameUpdateNode(wrist);
+            GET_POS_YUP(&wrist->local, wristPos);
+            GET_POS_YUP(&hand->local, handPos);
+            axis.vx = m.m[0][2];
+            axis.vy = m.m[1][2];
+            axis.vz = m.m[2][2];
+            axis.vx = EGSMathFIXMul(axis.vx, 0x26);
+            axis.vy = EGSMathFIXMul(axis.vy, 0x26);
+            axis.vz = EGSMathFIXMul(axis.vz, 0x26);
+            handPos.vx += axis.vx;
+            handPos.vy += axis.vy;
+            handPos.vz += axis.vz;
+            EGSGeometry_GetFuzzyDistancePoint2Point(&wristPos, &handPos, &dist);
+            if (dist < 3) {
+                handPos.vx -= axis.vx;
+                handPos.vy -= axis.vy;
+                handPos.vz -= axis.vz;
+            }
+            dir.vx = handPos.vx - wristPos.vx;
+            dir.vy = handPos.vy - wristPos.vy;
+            dir.vz = handPos.vz - wristPos.vz;
+            EGSGeometry_VectorToRotationMatrix(&dir, 0, &m);
+            AnimMatrixToHand(&m);
+            EGSFrameSetRotationMatrix(wrist, 0, &m);
+            AnimMatrixFromHand(&m);
+        } else {
+            rest.vx = -gobj->anim->restRot[11][0];
+            rest.vy = gobj->anim->restRot[11][1];
+            rest.vz = -gobj->anim->restRot[11][2];
+            EGSFrameSetRotationParentYXZ(upperArm, &rest);
+            rest.vx = -gobj->anim->restRot[9][0];
+            rest.vy = gobj->anim->restRot[9][1];
+            rest.vz = -gobj->anim->restRot[9][2];
+            EGSFrameSetRotationParentYXZ(foreArm, &rest);
+            rest.vx = -gobj->anim->restRot[8][0];
+            rest.vy = gobj->anim->restRot[8][1];
+            rest.vz = -gobj->anim->restRot[8][2];
+            EGSFrameSetRotationParentYXZ(hand, &rest);
+        }
+    }
+    EGSFrameUpdateHierarchy(gobj->anim->frame);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
+#endif
 
 #define OBJ_CLASS(id) (*(u8 *)&gameObjectsInfo[id].flags24)
 #define OBJ_SEX(id) (gameObjectsInfo[id].flags24 & 0x3000)
@@ -229,7 +1036,7 @@ void AnimateProcess(u8 paused) {
         }
         if (D_8011F810[i].aimRequest) {
             if ((gobj->unk22 == 1 || gobj->unk22 == 2) && (gobj->anim->master->flags & 0x400000) &&
-                !(gobj->anim->flags & 0x10) && gobj->unk0C) {
+                !(gobj->anim->flags & 0x10) && gobj->runtime) {
                 if (D_8011F810[i].unk14 == 1) {
                     LOSGetGobjLOSTestPoint((void *)D_8011F810[i].aimPoint.vx, &D_8011F810[i].aimPoint);
                 }
@@ -506,7 +1313,7 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
     AnimFrame *bone;
 
     if ((gobj->unk22 == 1 || gobj->unk22 == 2) && (gobj->anim->master->flags & 0x400000) &&
-        !(gobj->anim->flags & 0x10) && gobj->unk0C) {
+        !(gobj->anim->flags & 0x10) && gobj->runtime) {
         i = 0;
         func_8007DD18(gobj->anim->bones[14], &D_8011F750, &D_8011F7B0);
         func_8007DD18(gobj->anim->bones[6], &D_8011F770, &D_8011F7D0);
@@ -562,13 +1369,6 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
     }
 }
 
-#define WRAP_ANGLE(a)          \
-    if ((a) > 0x800) {         \
-        (a) -= 0x1000;         \
-    } else if ((a) < -0x800) { \
-        (a) += 0x1000;         \
-    }
-
 #ifdef NON_MATCHING
 /*
  * Same length and stack layout; differs in global register allocation
@@ -589,7 +1389,7 @@ void func_8007E650(AnimSlot *slot) {
     gobj = slot->gobj;
     moving = slot->unk00;
     if (!((gobj->unk22 == 1 || gobj->unk22 == 2) && (gobj->anim->master->flags & 0x400000) &&
-          !(gobj->anim->flags & 0x10) && gobj->unk0C)) {
+          !(gobj->anim->flags & 0x10) && gobj->runtime)) {
         return;
     }
     spine = D_8001232C;
