@@ -130,7 +130,7 @@ extern Grenade D_8011EAE8;  /* the gas cloud's damage ticker */
 void DamageDestroyImmediately(s32 by, s32 id);
 void NPCPutFireOnNPCShow(s16 id);
 void SysPlaySong(s32 arg0, s32 song, s32 arg2, void *arg3);
-void ParticleExplosion(s16 id, VECTOR32 *pos, void *dir, s32 size, s32 arg4);
+void ParticleExplosion(s32 id, VECTOR32 *pos, void *dir, s32 size, s32 arg4);
 void ParticleFire(s16 id, VECTOR32 *pos, s32 arg2, s32 color, s32 arg4, s32 arg5, s32 arg6);
 /* Delayed bullet impact (D_8011E8E8[], 0x20 bytes each) */
 typedef struct DamagePacket {
@@ -326,7 +326,317 @@ INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012164);
 
 INCLUDE_RODATA("asm/main/nonmatchings/damage", D_80012174);
 
-INCLUDE_ASM("asm/main/nonmatchings/damage", iDamageShowParticle);
+/* A line between two points, or a box as its min/max corners. */
+typedef struct DamageSegment {
+    /* 0x00 */ VECTOR32 p0;
+    /* 0x10 */ VECTOR32 p1;
+} DamageSegment;
+
+/* Oriented box: origin and three edge vectors */
+typedef struct DamageBox {
+    /* 0x00 */ VECTOR32 origin;
+    /* 0x10 */ VECTOR32 axis[3];
+} DamageBox;
+
+extern s32 gSniperBonesHit;
+extern u8 gPlayerOnFireFlag;
+s32 EGSDisplayRegisterHMDDamage(GameObjectAnim *anim, s32 bone, VECTOR32 *in, VECTOR32 *out, u8 byVertex);
+void ParticleHitGobj(s32 id, s32 gobjId, VECTOR32 *pos, VECTOR32 *normal);
+void ParticleSparkShowerTime(VECTOR32 *pos, s32 size, s32 color, s32 count);
+void ParticleWood(s32 id, VECTOR32 *pos, VECTOR32 *normal, s32 color);
+void ParticleHitFlakJacket(s32 id, s32 gobjId, VECTOR32 *pos, VECTOR32 *normal);
+void ParticleHitSnow(s32 id, VECTOR32 *pos, s32 color);
+void ParticleHitWallChopper(s32 id, VECTOR32 *pos, VECTOR32 *normal, s32 color);
+void ParticleHitChopper(s32 id, VECTOR32 *pos, VECTOR32 *normal);
+void EGSCollideGetTransformedBox(GameObjectAnim *anim, s32 unused, DamageBox *out);
+void EGSGeometry_GetBoundingBox(VECTOR32 *pts, s32 n, DamageSegment *out);
+void ParticleGlassPaneCeiling(s32 id, s32 gobjId, VECTOR32 *min, VECTOR32 *max);
+void ParticleGlassPaneWall(s32 id, s32 gobjId, VECTOR32 *min, VECTOR32 *max, VECTOR32 *normal);
+void ParticleGlassPoint(s32 id, s32 gobjId, VECTOR32 *pos);
+void ParticleSparkSphere(VECTOR32 *pos, s32 color);
+
+#define GOBJ_TYPE_GLASS 0x34
+
+/* Glass that can still break: alive, not broken yet and hit hard enough. */
+#define DAMAGE_GLASS_BREAKS(g)                                                                     \
+    ((g) != NULL && GOBJ_HEALTH(g)->health > 0 && !((g)->flags1 & 0x80) &&                          \
+     GOBJ_HEALTH(g)->unk0C >= GOBJ_HEALTH(g)->armor)
+
+/* Impact effects and sounds of a hit of the given surface kind. */
+void iDamageShowParticle(s32 id, Gobj *gobj, s32 kind, VECTOR32 *pos, VECTOR32 *normal) {
+    VECTOR32 bonePos;
+    DamageSegment seg;
+    VECTOR32 dir;
+    Gobj *shooter;
+    u16 weapon;
+    s32 *bones;
+    s32 count;
+    s32 bone;
+    s32 i;
+
+    switch (kind) {
+    case 1:
+        if (gSniperMode == 0) {
+            if (id < 0) {
+                break;
+            }
+            shooter = gameObjectsInfo[id].runtime;
+            weapon = id != gPlayerOffset ? GOBJINFO_NPC_WEAPON(&gameObjectsInfo[shooter->id]) : gCurrentWeapon;
+            seg.p1.vx = shooter->anim->frame->pos.vx;
+            seg.p1.vy = shooter->anim->frame->pos.vy;
+            seg.p1.vz = shooter->anim->frame->pos.vz;
+            seg.p1.vy = -seg.p1.vy;
+            seg.p0.vx = gobj->anim->frame->pos.vx;
+            seg.p0.vy = gobj->anim->frame->pos.vy;
+            seg.p0.vz = gobj->anim->frame->pos.vz;
+            seg.p0.vy = -seg.p0.vy;
+            dir.vx = seg.p0.vx - seg.p1.vx;
+            dir.vy = seg.p0.vy - seg.p1.vy;
+            dir.vz = seg.p0.vz - seg.p1.vz;
+            bone = WhichBoneIsHit(gobj->anim, &dir, &bones, &count);
+            bonePos.vx = gobj->anim->frames[bone]->pos.vx;
+            bonePos.vy = gobj->anim->frames[bone]->pos.vy;
+            bonePos.vz = gobj->anim->frames[bone]->pos.vz;
+            bonePos.vy = -bonePos.vy;
+            if ((u16)(weapon - 6) < 2) {
+                for (i = 0; i < count; i++) {
+                    EGSDisplayRegisterHMDDamage(gobj->anim, bones[i], &dir, &bonePos, 0);
+                }
+            } else {
+                EGSDisplayRegisterHMDDamage(gobj->anim, bone, &dir, &bonePos, 0);
+            }
+            ParticleHitGobj(id, gobj->id, &bonePos, normal);
+        } else {
+            VECTOR32 line;
+            s32 bits;
+            Gobj *sniper;
+
+            if (id < 0) {
+                break;
+            }
+            sniper = gameObjectsInfo[id].runtime;
+            seg.p1.vx = sniper->anim->frame->pos.vx;
+            seg.p1.vy = sniper->anim->frame->pos.vy;
+            seg.p1.vz = sniper->anim->frame->pos.vz;
+            seg.p1.vy = -seg.p1.vy;
+            seg.p0.vx = gobj->anim->frame->pos.vx;
+            seg.p0.vy = gobj->anim->frame->pos.vy;
+            seg.p0.vz = gobj->anim->frame->pos.vz;
+            seg.p0.vy = -seg.p0.vy;
+            line.vx = seg.p0.vx - seg.p1.vx;
+            line.vy = seg.p0.vy - seg.p1.vy;
+            line.vz = seg.p0.vz - seg.p1.vz;
+            bits = gSniperBonesHit;
+            for (i = 0; i < 15; i++) {
+                if (bits & 1) {
+                    EGSDisplayRegisterHMDDamage(gobj->anim, i, &line, pos, 1);
+                }
+                bits >>= 1;
+            }
+            ParticleHitGobj(id, gobj->id, pos, normal);
+        }
+        break;
+    case 4:
+        if (id == -1) {
+            break;
+        }
+        if (gobj == NULL || GOBJ_HEALTH(gobj)->health > 0) {
+            NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+            ParticleSparkShowerTime(pos, 0x40, 0xFFFF, (rand() & 7) + 4);
+            SysPlaySong(2, rand() % 4, 0, pos);
+            break;
+        }
+        /* fallthrough */
+    case 2:
+    case 7:
+    case 15:
+    default:
+        if (id == -1) {
+            break;
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        ParticleHitWall((void *)id, pos, normal, 0xC0FFFF);
+        SysPlaySong(2, rand() % 4, 0, pos);
+        break;
+    case 11:
+    case 14:
+        if (id == -1) {
+            break;
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        ParticleWood(id, pos, normal, 0x3C3232);
+        SysPlaySong(2, rand() % 4, 0, pos);
+        break;
+    case 13:
+    case 20:
+        if (id == -1) {
+            break;
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        ParticleWood(id, pos, normal, 0x20303C);
+        SysPlaySong(2, rand() % 4, 0, pos);
+        break;
+    case 23:
+        NPCSoundGobj(1, (void *)id, pos, 0x640);
+        if (gobj->id != gPlayerOffset || !gPlayerOnFireFlag) {
+            SysPlaySong(1, 0x11, 0, pos);
+        }
+        ParticleHitFlakJacket(id, gobj->id, pos, normal);
+        break;
+    case 3:
+        if (id == -1) {
+            break;
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        ParticleHitSnow(id, pos, 0x808080);
+        SysPlaySong(2, rand() % 4, 0, pos);
+        break;
+    case 19:
+        if (id == -1) {
+            break;
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        ParticleHitSnow(id, pos, 0x80);
+        SysPlaySong(2, rand() % 4, 0, pos);
+        break;
+    case 9:
+        if (id == -1) {
+            break;
+        }
+        if (gobj == NULL || gobj->npcState != 8) {
+            ParticleHitWallChopper(id, pos, normal, 0xEAF7);
+            NPCSoundGobj(1, (void *)id, pos, 0x3E80);
+            SysPlaySong(2, rand() % 4, 0, pos);
+        } else {
+            ParticleHitChopper(id, pos, normal);
+            NPCSoundGobj(1, (void *)id, pos, 0x1900);
+            SysPlaySong(2, rand() % 2 + 0xC, 0, pos);
+        }
+        break;
+    case 5:
+        if (gobj == NULL) {
+            break;
+        }
+        if (DAMAGE_GLASS_BREAKS(gobj)) {
+            VECTOR32 corners[4];
+            DamageBox box;
+
+            if (id != -1) {
+                NPCSoundGobj(1, (void *)id, pos, 0xC80);
+            }
+            EGSCollideGetTransformedBox(gobj->anim, 0, &box);
+            corners[0] = box.origin;
+            corners[1].vx = box.origin.vx + box.axis[0].vx;
+            corners[1].vy = box.origin.vy + box.axis[0].vy;
+            corners[1].vz = box.origin.vz + box.axis[0].vz;
+            corners[2].vx = box.origin.vx + box.axis[2].vx;
+            corners[2].vy = box.origin.vy + box.axis[2].vy;
+            corners[2].vz = box.origin.vz + box.axis[2].vz;
+            corners[3].vx = box.axis[0].vx + corners[2].vx;
+            corners[3].vy = box.axis[0].vy + corners[2].vy;
+            corners[3].vz = box.axis[0].vz + corners[2].vz;
+            EGSGeometry_GetBoundingBox(corners, 4, &seg);
+            ParticleGlassPaneCeiling(id, gobj->id, &seg.p0, &seg.p1);
+            SysPlaySong(0, 3, (s32)gobj, NULL);
+            gobj->flags1 |= 0x80;
+            break;
+        }
+        goto glassSpark;
+    case 6:
+    case 22:
+        if (gobj == NULL) {
+            break;
+        }
+        if (DAMAGE_GLASS_BREAKS(gobj)) {
+            VECTOR32 corners[8];
+            DamageSegment bounds;
+            DamageBox box;
+
+            if (id != -1) {
+                NPCSoundGobj(1, (void *)id, pos, 0xC80);
+            }
+            EGSCollideGetTransformedBox(gobj->anim, 0, &box);
+            corners[0] = box.origin;
+            corners[1].vx = box.origin.vx + box.axis[0].vx;
+            corners[1].vy = box.origin.vy + box.axis[0].vy;
+            corners[1].vz = box.origin.vz + box.axis[0].vz;
+            corners[2].vx = box.origin.vx + box.axis[2].vx;
+            corners[2].vy = box.origin.vy + box.axis[2].vy;
+            corners[2].vz = box.origin.vz + box.axis[2].vz;
+            corners[3].vx = box.axis[0].vx + corners[2].vx;
+            corners[3].vy = box.axis[0].vy + corners[2].vy;
+            corners[3].vz = box.axis[0].vz + corners[2].vz;
+            corners[4].vx = corners[0].vx + box.axis[1].vx;
+            corners[4].vy = corners[0].vy + box.axis[1].vy;
+            corners[4].vz = corners[0].vz + box.axis[1].vz;
+            corners[5].vx = corners[1].vx + box.axis[1].vx;
+            corners[5].vy = corners[1].vy + box.axis[1].vy;
+            corners[5].vz = corners[1].vz + box.axis[1].vz;
+            corners[6].vx = corners[2].vx + box.axis[1].vx;
+            corners[6].vy = corners[2].vy + box.axis[1].vy;
+            corners[6].vz = corners[2].vz + box.axis[1].vz;
+            corners[7].vx = corners[3].vx + box.axis[1].vx;
+            corners[7].vy = corners[3].vy + box.axis[1].vy;
+            corners[7].vz = corners[3].vz + box.axis[1].vz;
+            EGSGeometry_GetBoundingBox(corners, 8, &bounds);
+            ParticleGlassPaneWall(id, gobj->id, &bounds.p0, &bounds.p1, normal);
+            SysPlaySong(0, 4, (s32)gobj, NULL);
+            gobj->flags1 |= 0x80;
+            break;
+        }
+    glassSpark:
+        if (GOBJ_TYPE(gobj->id) == GOBJ_TYPE_GLASS) {
+            SysPlaySong(0, 3, (s32)gobj, NULL);
+            iDamageShowParticleGlassSpark((void *)id, pos, normal);
+        }
+        break;
+    case 10:
+        if (DAMAGE_GLASS_BREAKS(gobj)) {
+            VECTOR32 point;
+
+            point.vx = gobj->anim->frame->pos.vx;
+            point.vy = gobj->anim->frame->pos.vy;
+            point.vz = gobj->anim->frame->pos.vz;
+            point.vy = -point.vy;
+            if (id != -1) {
+                NPCSoundGobj(1, (void *)id, pos, 0x280);
+            }
+            ParticleGlassPoint(id, gobj->id, &point);
+            SysPlaySong(0, 3, (s32)gobj, NULL);
+            gobj->flags1 |= 0x80;
+        }
+        break;
+    case 21:
+        if (id == -1) {
+            break;
+        }
+        iDamageShowParticleGlassSpark((void *)id, pos, normal);
+        if (gobj != NULL) {
+            SysPlaySong(0, 3, (s32)gobj, NULL);
+        }
+        NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        break;
+    case 12:
+    case 16:
+    case 24:
+        ParticleSparkSphere(pos, 0x3214);
+        if (id != -1) {
+            NPCSoundGobj(1, (void *)id, pos, 0x1E0);
+        }
+        break;
+    case 8:
+        if (GOBJ_HEALTH(gobj)->health > 0) {
+            if (id != -1) {
+                NPCSoundGobj(1, (void *)id, pos, 0x7D00);
+            }
+            ParticleExplosion(id, pos, normal, 0x1000, 1);
+        }
+        break;
+    case 17:
+    case 18:
+        break;
+    }
+}
 
 DamageCallback DamageSetDamagedCallback(DamageCallback cb) {
     DamageCallback old = D_8010F980;
