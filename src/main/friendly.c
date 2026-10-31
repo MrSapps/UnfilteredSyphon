@@ -6,6 +6,19 @@
 
 SDATA_LOCAL(D_8010FAB4)
 
+/* Bit-string access that tolerates an unaligned base. */
+#define BITS_WORD(arr, n, w, b)           \
+    {                                     \
+        u32 _m;                           \
+        w = (u32 *)(arr);                 \
+        b = (n);                          \
+        _m = (u32)w & 3;                  \
+        if (_m) {                         \
+            b = (n) + _m * 8;             \
+            w = (u32 *)((u32)w & ~3);     \
+        }                                 \
+    }
+
 /* SPAD_LEAVE followed by a use of $sp: the assembler put a load-delay nop there. */
 #define SPAD_LEAVE_NOP() __asm__ volatile("lui $29, 0x1F80\n\tlw $29, 0($29)\n\tnop")
 
@@ -74,13 +87,22 @@ typedef struct FoundFace {
     /* 0x20 */ VECTOR32 unk20;
     /* 0x30 */ VECTOR32 normal;
     /* 0x40 */ s32 midY;
-    /* 0x44 */ u8 unk44[8];
+    /* 0x44 */ s32 facing; /* normal . collector direction */
+    /* 0x48 */ u8 left;      /* probe point inside the face's left edge */
+    /* 0x49 */ u8 right;
+    /* 0x4A */ u8 unk4A[2];
     /* 0x4C */ u32 kind;
 } FoundFace;
 
 /* One class of collected faces (floor/wall/...). */
 typedef struct FaceGroup {
-    /* 0x00 */ u8 unk00[0x1C];
+    /* 0x00 */ s32 flagBit; /* bit of move->flags1A4 set while best != NULL */
+    /* 0x04 */ s32 leftBit;
+    /* 0x08 */ s32 rightBit;
+    /* 0x0C */ s32 facingMin;
+    /* 0x10 */ s32 facingMax;
+    /* 0x14 */ s32 distMin;
+    /* 0x18 */ s32 distMax;
     /* 0x1C */ s32 count;
     /* 0x20 */ FoundFace *faces[16];
     /* 0x60 */ FoundFace *best;
@@ -101,7 +123,7 @@ typedef struct FaceCollect {
     /* 0xC54 */ s32 foundCount;
 } FaceCollect;
 
-static void func_80087E0C();
+static void func_80087E0C(Gobj *gobj, struct FaceCollect *c, struct FaceGroup *g);
 u8 JoystickGobjShouldCollideWithEdges(Gobj *gobj);
 s32 EGSMathFIXMul(s32 a, s32 b);
 void CollisionGobjAddFakeFace(Gobj *gobj, FriendlyPoly *poly, u8 flags);
@@ -129,12 +151,22 @@ typedef struct FriendlyRideTarget {
     /* 0x00 */ s32 bone;
 } FriendlyRideTarget;
 
+/* Collision box of a ride (fields seen so far). */
+typedef struct FriendlyRideBox {
+    /* 0x00 */ u8 unk00[0x14];
+    /* 0x14 */ s32 height;
+    /* 0x18 */ u8 unk18[0x24];
+    /* 0x3C */ VEC3 offset;
+} FriendlyRideBox;
+
 /* What an object is standing on / attached to. */
 typedef struct FriendlyRide {
     /* 0x00 */ s32 type;
     /* 0x04 */ u8 unk04[4];
     /* 0x08 */ FriendlyRideTarget *target;
-    /* 0x0C */ u8 unk0C[0x2C];
+    /* 0x0C */ u8 unk0C[0x1C];
+    /* 0x28 */ FriendlyRideBox *box;
+    /* 0x2C */ u8 unk2C[0xC];
     /* 0x38 */ struct GroundFace *ground;
 } FriendlyRide;
 
@@ -167,7 +199,8 @@ s32 FriendlyGobjGetReferenceY(Gobj *gobj, u8 useMove);
 s32 GobjCollideLoop(Gobj *gobj);
 static void func_80086D24(Gobj *gobj, u8 unnegate);
 static s32 func_80086E94(Gobj *gobj);
-static void func_80087088(Gobj *gobj, u8 *found, struct GroundFace **face, s32 *arg3, s32 *dist);
+static s32 func_80087088(Gobj *gobj, u8 *found, struct GroundFace **face, s32 *floorY, s32 *dist);
+s32 EGSGeometryINT_PointProjectOnFacePlaneAlongY(VECTOR32 *p, FriendlyPoly *face, u8 *ok, s32 *y);
 u8 ShadowCalculateProjectionMatrix(VECTOR32 *normal, void *out);
 static void func_800874C0(Gobj *gobj);
 static void func_80088EE4(Gobj *gobj);
@@ -434,7 +467,95 @@ static s32 func_80086FAC(VECTOR32 *pt, FriendlyPoly *poly, u8 *inside) {
     return 1;
 }
 
+#ifdef NON_MATCHING
+/* the original hoists &poly.v (spilled, 8-byte larger frame) and keeps &poly in s0; regalloc follows */
+/*
+ * Find the highest face of gobj's face list under its feet (within 0x40 above
+ * them); *face, *floorY and *dist (feet - floor) describe it.
+ */
+static s32 func_80087088(Gobj *gobj, u8 *found, GroundFace **face, s32 *floorY, s32 *dist) {
+    VECTOR32 pos;
+    FriendlyPoly poly;
+    u8 near;
+    u8 hit;
+    s32 y;
+    FakeFace *f;
+    CollisionFace *cf;
+    u32 *words;
+    s32 bit;
+    s32 top;
+    s32 d;
+    s32 i;
+
+    f = ((FriendlyAnim *)gobj->anim)->faceList;
+    pos = ((FriendlyMove *)gobj->move)->unk10C;
+    pos.vy -= 9;
+    pos = *(VECTOR32 *)gobj->move;
+    pos.vx += ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->offset.vx;
+    pos.vy += ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->offset.vy;
+    pos.vz += ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->offset.vz;
+    pos.vy -= ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->height;
+    ((FriendlyMove *)gobj->move)->floorY = 0x80000001;
+    *found = 0;
+    *face = NULL;
+    *dist = 0x7FFFFFFF;
+    top = pos.vy + 0x40;
+    for (; f != NULL; f = f->next) {
+        cf = &f->face;
+        BITS_WORD(&f->face.pad, 0, words, bit);
+        if ((*words & (1 << bit)) || cf->normalPtr[1] <= 0x800) {
+            continue;
+        }
+        switch (cf->count) {
+            case 3:
+                near = 0;
+                if (!(top < cf->verts[0]->y && top < cf->verts[1]->y && top < cf->verts[2]->y)) {
+                    near = 1;
+                }
+                break;
+            case 4:
+                near = 0;
+                if (!(top < cf->verts[0]->y && top < cf->verts[1]->y && top < cf->verts[2]->y &&
+                      top < cf->verts[3]->y)) {
+                    near = 1;
+                }
+                break;
+            default:
+                near = 0;
+                for (i = 0; i < cf->count; i++) {
+                    if (top >= cf->verts[i]->y) {
+                        near = 1;
+                        break;
+                    }
+                }
+                break;
+        }
+        if (near) {
+            poly.count = cf->count;
+            for (i = 0; i < poly.count; i++) {
+                poly.v[i].vx = cf->verts[i]->x;
+                poly.v[i].vy = cf->verts[i]->y;
+                poly.v[i].vz = cf->verts[i]->z;
+            }
+            func_80086FAC(&pos, &poly, &near);
+            if (near) {
+                EGSGeometryINT_PointProjectOnFacePlaneAlongY(&pos, &poly, &hit, &y);
+                d = pos.vy - y;
+                if (hit && d >= -0x3F && d < *dist) {
+                    ((FriendlyMove *)gobj->move)->floorY = y;
+                    *found = 1;
+                    *face = (GroundFace *)cf;
+                    *floorY = y;
+                    *dist = d;
+                }
+            }
+        }
+    }
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087088);
+#endif
 
 static void func_800874C0(Gobj *gobj) {
     u8 found;
@@ -635,9 +756,248 @@ static void func_80087C28(void *arg0, FaceCollect *c, FoundFace *face) {
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087C28);
 #endif
 
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087E0C);
+/* *out = a . b (4.12 fixed point). */
+static inline void FriendlyDot(s32 *a, s32 *b, s32 *out) {
+    *out = EGSMathFIXMul(a[0], b[0]) + EGSMathFIXMul(a[1], b[1]) + EGSMathFIXMul(a[2], b[2]);
+}
 
+/* *out = signed distance of pos from the plane through p with normal n. */
+static inline void FriendlyPlaneDist(VECTOR32 *pos, VECTOR32 *p, VECTOR32 *n, s32 *out) {
+    VECTOR32 rel;
+
+    rel.vx = pos->vx - p->vx;
+    rel.vy = pos->vy - p->vy;
+    rel.vz = pos->vz - p->vz;
+    FriendlyDot(&rel.vx, &n->vx, out);
+}
+
+/* Is pos (XZ) on the inner side of the edge a-b of a face with normal n? */
+static inline void FriendlyInsideEdge(VECTOR32 *a, VECTOR32 *b, VECTOR32 *pos, VECTOR32 *n, u8 *out) {
+    struct {
+        s32 edge, rel;
+    } cross;
+
+    cross.edge = -n->vx * b->vz - -n->vz * b->vx;
+    cross.rel = (pos->vz - a->vz) * -n->vx - (pos->vx - a->vx) * -n->vz;
+    if (cross.edge > 0) {
+        *out = cross.rel >= 0 && !(cross.edge < cross.rel);
+    } else if (cross.edge < 0) {
+        *out = cross.rel <= 0 && !(cross.rel < cross.edge);
+    } else {
+        *out = 0;
+    }
+}
+
+#define FACE_LIST_DROP(g, i)                              \
+    {                                                     \
+        FoundFace *_t = (g)->faces[i];                    \
+        (g)->faces[i] = (g)->faces[(g)->count - 1];       \
+        (g)->faces[(g)->count - 1] = _t;                  \
+        (g)->count--;                                     \
+    }
+
+#ifdef NON_MATCHING
+/* stack layout only: the original puts dist at 0x88 (after the inline's rel) and inside at 0x8C */
+/*
+ * Keep the faces of g that face c's direction and lie within g's distance
+ * range of c->pos; g->best becomes the most facing one.
+ */
+static void func_80087E0C(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
+    VECTOR32 p;
+    VECTOR32 n;
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 pos;
+    VECTOR32 n2;
+    s32 facing;
+    s32 dist;
+    u8 inside;
+    FoundFace *face;
+    FoundFace *best;
+    s32 bestFacing;
+    s32 i;
+
+    bestFacing = 0x7FFFFFFF;
+    best = NULL;
+    inside = 0;
+    for (i = 0; i < g->count;) {
+        face = g->faces[i];
+        FriendlyDot(c->dir, &face->normal.vx, &facing);
+        if (facing < g->facingMin || facing > g->facingMax) {
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        face->facing = facing;
+        p = face->p0;
+        n = face->normal;
+        FriendlyPlaneDist(&c->pos, &p, &n, &dist);
+        if (dist < g->distMin || dist > g->distMax) {
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        i++;
+    }
+    for (i = 0; i < g->count;) {
+        face = g->faces[i];
+        a = face->p0;
+        b = face->unk20;
+        pos = c->pos;
+        n2 = face->normal;
+        FriendlyInsideEdge(&a, &b, &pos, &n2, &inside);
+        if (!inside) {
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        i++;
+    }
+    for (i = 0; i < g->count; i++) {
+        face = g->faces[i];
+        if (best == NULL || face->facing < bestFacing) {
+            best = face;
+            bestFacing = face->facing;
+        }
+    }
+    if (best != NULL) {
+        ((FriendlyMove *)gobj->move)->flags1A4 |= 1 << g->flagBit;
+        g->best = best;
+    } else {
+        ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->flagBit);
+    }
+}
+#else
+INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087E0C);
+#endif
+
+#ifdef NON_MATCHING
+/* stack layout only: the original puts dist at 0x98 (after the inline's rel), len/dot/spills follow */
+/*
+ * Like func_80087E0C, but also work out whether c's position is inside each
+ * face's left/right edge (from the two probe points when Gabe is climbing,
+ * else from points one unit along the face); faces inside neither are dropped.
+ * The best face's left/right flags (or those of faces nearly parallel to it)
+ * set g's leftBit/rightBit in move->flags1A4.
+ */
+static void func_80088270(Gobj *gobj, FaceCollect *c, FaceGroup *g) {
+    VECTOR32 p;
+    VECTOR32 n;
+    VECTOR32 a;
+    VECTOR32 b;
+    VECTOR32 pos;
+    VECTOR32 n2;
+    VECTOR32 dir;
+    s32 facing;
+    s32 dist;
+    s32 len;
+    s32 dot;
+    FoundFace *face;
+    FoundFace *best;
+    s32 bestFacing;
+    u8 left;
+    u8 right;
+    s32 i;
+
+    bestFacing = 0x7FFFFFFF;
+    left = 0;
+    i = 0;
+    right = 0;
+    best = NULL;
+    while (i < g->count) {
+        face = g->faces[i];
+        FriendlyDot(c->dir, &face->normal.vx, &facing);
+        if (facing < g->facingMin || facing > g->facingMax) {
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        face->facing = facing;
+        p = face->p0;
+        n = face->normal;
+        FriendlyPlaneDist(&c->pos, &p, &n, &dist);
+        if (dist < g->distMin || dist > g->distMax) {
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        i++;
+    }
+    for (i = 0; i < g->count;) {
+        face = g->faces[i];
+        a = face->p0;
+        b = face->unk20;
+        if (gobj->cas->active == 8 && g == &c->groups[3]) {
+            pos = c->unk234;
+            n2 = face->normal;
+            FriendlyInsideEdge(&a, &b, &pos, &n2, &face->left);
+            pos = c->unk244;
+            n2 = face->normal;
+            FriendlyInsideEdge(&a, &b, &pos, &n2, &face->right);
+        } else {
+            dir.vx = b.vx;
+            dir.vy = 0;
+            dir.vz = b.vz;
+            EGSMath_VectorModulus(&dir, &len);
+            len = 0x10000 / len;
+            dir.vx = EGSMathFIXMul(dir.vx, len);
+            dir.vy = EGSMathFIXMul(dir.vy, len);
+            dir.vz = EGSMathFIXMul(dir.vz, len);
+            pos.vx = c->pos.vx - dir.vx;
+            pos.vy = c->pos.vy - dir.vy;
+            pos.vz = c->pos.vz - dir.vz;
+            n2 = face->normal;
+            FriendlyInsideEdge(&a, &b, &pos, &n2, &face->left);
+            pos.vx = c->pos.vx + dir.vx;
+            pos.vy = c->pos.vy + dir.vy;
+            pos.vz = c->pos.vz + dir.vz;
+            n2 = face->normal;
+            FriendlyInsideEdge(&a, &b, &pos, &n2, &face->right);
+        }
+        if (*(u16 *)&face->left == 0) { /* neither left nor right */
+            FACE_LIST_DROP(g, i);
+            continue;
+        }
+        i++;
+    }
+    for (i = 0; i < g->count; i++) {
+        face = g->faces[i];
+        if (best == NULL || face->facing < bestFacing) {
+            best = face;
+            bestFacing = face->facing;
+        }
+    }
+    if (best != NULL) {
+        left = best->left;
+        right = best->right;
+        for (i = 0; i < g->count && (!left || !right); i++) {
+            face = g->faces[i];
+            if (face != best) {
+                FriendlyDot(&face->normal.vx, &best->normal.vx, &dot);
+                if (dot >= 0xB50) {
+                    if (!left) {
+                        left = face->left;
+                    }
+                    if (!right) {
+                        right = face->right;
+                    }
+                }
+            }
+        }
+    }
+    ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->leftBit);
+    ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->rightBit);
+    if (best != NULL) {
+        ((FriendlyMove *)gobj->move)->flags1A4 |= 1 << g->flagBit;
+        if (left) {
+            ((FriendlyMove *)gobj->move)->flags1A4 |= 1 << g->leftBit;
+        }
+        if (right) {
+            ((FriendlyMove *)gobj->move)->flags1A4 |= 1 << g->rightBit;
+        }
+        g->best = best;
+    } else {
+        ((FriendlyMove *)gobj->move)->flags1A4 &= ~(1 << g->flagBit);
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088270);
+#endif
 
 /* Turn each found edge into a 0x40-high fake wall face pushed 8 units out along its normal. */
 static void func_80088BAC(Gobj *gobj, FaceCollect *c) {

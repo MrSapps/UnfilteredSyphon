@@ -85,7 +85,7 @@ typedef struct TextRect {
 } TextRect;
 extern TextRect D_801101A8; /* TextStringRect result */
 extern s32 D_8010FA48;
-extern s16 D_8010FA4C;
+extern u16 D_8010FA4C; /* next free string slot */
 extern u8 D_8010FAA0[];         /* camera parameters */
 extern TextChar D_8011FAB0[100];
 
@@ -123,12 +123,20 @@ void EGSDisplayBuildLineF(TextLine *line, s32 arg1, s32 arg2, s32 arg3);
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y);
 void EGSListAddToEnd(EGSListNode **list, EGSListNode *after, void *data);
 void TextUpdate(void);
-void TextSpriteInitialize(TextChar *sprites, s32 count);
+void TextSpriteInitialize(TextChar *sprites, s32 n);
 TextRect *TextStringRect(u16 id, s32 all);
 void func_80082E70();
 void EGSDisplayDeleteSprite(void *camera, TextChar *sprite);
 void func_80085024(TextString *s); /* also called from hotbox.c */
 static void func_800863E8(TextString *s);
+static void func_80085F24(TextString *s);
+static void func_800862B0(TextString *s);
+s32 func_80085F98(TextString *s);
+void func_80082F20(TextString *s, s32 index);
+void CameraGetDisplay(void *camera, void **display);
+void EGSDisplaySetupTransformWorldToScreen(void *display);
+u8 iTextRemoveWindow(TextWindow *w);
+u8 func_80086474(u8 c, TextChar *ch, u8 mini);
 
 INCLUDE_RODATA("asm/main/nonmatchings/text", D_800123D8);
 
@@ -408,7 +416,191 @@ void TextActivateAllWindows(u8 active) {
     }
 }
 
+#ifdef NON_MATCHING
+/* regalloc: the original keeps str in s1 (here s6) and gSystemTick in v1 */
+/*
+ * Lay out str as a new string, in window w (or free-standing at *x, *y using
+ * sprites); advances *x / *y. Returns (checksum << 8) | index, or 0xFFFF.
+ */
+u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x, s16 *y) {
+    TextString *s;
+    TextChar *ch;
+    TextChar *wordStart;
+    TextChar *c;
+    s32 len;
+    s32 i;
+    s32 lines;
+    s32 startX;
+    s32 sum;
+    s32 dx;
+    s32 rows;
+    s32 dy;
+    u32 tick;
+    u32 end;
+    s32 late;
+    s32 n; /* first the starting slot, then the character count */
+    u8 code;
+
+    lines = 1;
+    sum = 0;
+    wordStart = NULL;
+    startX = *x;
+    if (w != NULL && (w->w == 0 || w->h == 0)) {
+        return 0xFFFF;
+    }
+    if (sprites != NULL && sprites->unk28 != 0) {
+        return 0xFFFF;
+    }
+    n = D_8010FA4C;
+    s = &D_80120BE0[n];
+    while (s->flags & 1) {
+        if (++D_8010FA4C >= TEXT_STRING_MAX) {
+            D_8010FA4C = 0;
+        }
+        if (n == D_8010FA4C) {
+            return 0xFFFF;
+        }
+        s = &D_80120BE0[D_8010FA4C];
+    }
+    len = strlen(str);
+    if (sprites == NULL) {
+        if (len + D_8010FA48 >= 100) {
+            D_8010FA48 = 0;
+        }
+        c = &D_8011FAB0[D_8010FA48];
+        s->chars = c;
+        for (i = 0; i < len; i++, c++) {
+            if (c->unk28 != 0) {
+                return 0xFFFF;
+            }
+        }
+    } else {
+        s->chars = sprites;
+    }
+    if (w != NULL) {
+        w->flags |= 3;
+    }
+    late = D_801101B0 != gSystemTick;
+    tick = gSystemTick;
+    s->startTick = tick + late;
+    s->endTick = end = tick + ticks;
+    s->xOffset = *x;
+    if (end < tick) {
+        s->endTick = -1;
+    }
+    ch = s->chars;
+    n = 0;
+    for (i = 0; i < len; str++, i++) {
+        code = *str;
+        sum += code;
+        switch (code) {
+            case ' ':
+                wordStart = NULL;
+                *x += 4;
+                break;
+            case '\r':
+                break;
+            case '\t':
+                if (w != NULL) {
+                    *x = w->x + ((*x - w->x) / 25 + 1) * 25;
+                } else {
+                    *x = sprites->x + ((*x - sprites->x) / 25 + 1) * 25;
+                }
+                wordStart = NULL;
+                break;
+            case '\n':
+                *x = startX;
+                *y += (w != NULL && (w->flags & 0x10)) ? 6 : 8;
+                wordStart = NULL;
+                lines++;
+                break;
+            default:
+                if (w != NULL && w->y + w->h < *y) {
+                    s->length = n;
+                    func_800863E8(s);
+                    return 0xFFFF;
+                }
+                if (w == NULL || *x < w->x + w->w) {
+                    if (wordStart == NULL) {
+                        wordStart = ch;
+                    }
+                    ch->x = *x;
+                    ch->y = *y;
+                    ch->b = 0;
+                    ch->g = 0;
+                    ch->r = 0;
+                    ch->tpage = 0xD;
+                    if (ch->unk28 == 0) {
+                        ch->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gTextCamera + 0x90), ch);
+                    }
+                    if (*str == '%') {
+                        str++;
+                        *x += func_80086710(str, ch);
+                        i++;
+                        if (*str == 'r' || *str == 'l' || *str == 's') {
+                            str++;
+                            i++;
+                        }
+                    } else {
+                        *x += (u8)func_80086474(*str, ch, w != NULL && (w->flags & 0x10));
+                    }
+                    ch++;
+                    n++;
+                } else {
+                    /* wrap: move the current word to the next line */
+                    if (wordStart != NULL) {
+                        dx = wordStart->x - startX;
+                        for (; wordStart != ch; wordStart++) {
+                            wordStart->x -= dx;
+                            wordStart->y += (w != NULL && (w->flags & 0x10)) ? 6 : 8;
+                        }
+                        wordStart = NULL;
+                        *x -= dx;
+                    } else {
+                        *x = startX;
+                    }
+                    *y += (w != NULL && (w->flags & 0x10)) ? 6 : 8;
+                    str--;
+                    i--;
+                    lines++;
+                }
+                break;
+        }
+    }
+    s->length = n;
+    sum &= 0xFF;
+    s->lineHeight = lines;
+    s->serial = sum;
+    if (s->length != 0) {
+        dy = s->chars[n - 1].y - s->chars[0].y;
+        if (w != NULL && (w->flags & 0x10)) {
+            rows = dy / 6;
+        } else {
+            rows = dy / 8;
+        }
+        if (rows < 15) {
+            s->speed = (rows + 1) << 12;
+        } else {
+            s->speed = 0xFFFF;
+        }
+    } else {
+        s->speed = 0x1000;
+    }
+    s->r = w->r;
+    s->g = w->g;
+    s->b = w->b;
+    if (w != NULL && (w->flags & 0x10)) {
+        s->flags |= 0x80;
+    }
+    if (sprites == NULL) {
+        D_8010FA48 += n;
+    }
+    s->flags |= 1;
+    return D_8010FA4C | (sum << 8);
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/text", func_80083F1C);
+#endif
 
 #ifdef NON_MATCHING
 /* Only the final add's operand order and result register (a3 in the original) differ. */
@@ -463,7 +655,90 @@ u16 TextAddString(u8 window, char *str, s32 ticks, TextChar *sprites) {
     return id;
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/text", TextAddStringMulti);
+/*
+ * Add n strings to a window as one multi-line string; each line's id goes to
+ * ids[i]. Returns the first line's id, or 0xFFFF (removing any lines added).
+ */
+u16 TextAddStringMulti(u8 window, s32 n, char **strs, s32 ticks, TextChar *sprites, u16 *ids) {
+    TextWindow *w;
+    TextString *s;
+    TextString *t;
+    TextString *head;
+    TextString *prev;
+    TextChar *ch;
+    s16 x;
+    s16 y;
+    u16 id;
+    u16 first;
+    u16 last;
+    s32 i;
+    s32 off;
+    s32 right;
+    char *str;
+
+    last = 0xFFFF;
+    first = 0xFFFF;
+    TEXT_GET_WINDOW(w, window);
+    if (w == NULL) {
+        return 0xFFFF;
+    }
+    iTextGetWindowOffsets(w, &x, &y);
+    for (i = 0; i < n; i++) {
+        str = strs[i];
+        id = func_80083F1C(w, str, ticks, sprites, &x, &y);
+        if (id == 0xFFFF) {
+            while (i-- > 0) {
+                TEXT_GET_STRING(t, (u8)ids[i]);
+                func_80085024(t);
+            }
+            for (i = 0; i < n; i++) {
+                ids[i] = 0xFFFF;
+            }
+            return 0xFFFF;
+        }
+        TEXT_GET_STRING(s, (u8)id);
+        if (last != 0xFFFF) {
+            TEXT_GET_STRING(prev, (u8)last);
+            prev->next = s;
+            TEXT_GET_STRING(head, (u8)first);
+            head->lineHeight += s->lineHeight - 1;
+        } else {
+            EGSListAddToEnd(&w->strings, NULL, s);
+            first = id;
+        }
+        if (ids != NULL) {
+            ids[i] = id;
+        }
+        last = id;
+        sprites += s->length;
+    }
+    if (w->flags & 4) {
+        right = w->x + w->w;
+        TEXT_GET_STRING(s, (u8)last);
+        ch = &s->chars[s->length - 1];
+        off = ch->x + ch->w;
+        off = (right - off) / 2;
+        TEXT_GET_STRING(s, (u8)first);
+        for (; s != NULL; s = s->next) {
+            ch = &s->chars[s->length - 1];
+            s->xOffset = ((s16)s->xOffset + ch->x + ch->w) / 2 + off;
+            s->flags |= 8;
+            func_80082CE8(s);
+        }
+    }
+    if (w->flags & 8) {
+        TEXT_GET_STRING(s, (u8)first);
+        off = w->x + w->w;
+        TEXT_GET_STRING(prev, (u8)last);
+        off -= (s16)prev->xOffset;
+        for (; s != NULL; s = s->next) {
+            s->xOffset += off;
+            s->flags |= 0x40;
+            func_80082CE8(s);
+        }
+    }
+    return first;
+}
 
 #ifdef NON_MATCHING
 /* Only the order of the gSystemTick / length loads in the default-duration branch differs. */
@@ -762,7 +1037,123 @@ void TextUpdate(void) {
     }
 }
 
+#ifdef NON_MATCHING
+/* regalloc: node/w land in s4/s3 instead of s3/s4; the permuter fixes it only with a dead `if (s || node)` in the reveal loop */
+/*
+ * Animate the strings of window w (or the persistent strings when w is NULL):
+ * reveal and fade them, drop expired ones and scroll the rest up. Returns the
+ * tick at which this needs updating again (0: next frame, -1: never).
+ */
+u32 func_800857B8(TextWindow *w) {
+    EGSListNode *node;
+    EGSListNode *dead;
+    TextString *s;
+    TextChar *last;
+    TextChar *ch;
+    void *display;
+    u32 next;
+    s32 shift;
+    s32 count;
+    s32 scale;
+    s32 lines;
+    s32 dt;
+    s32 k;
+    s32 i;
+    s32 speed;
+    s32 reveal;
+
+    next = -1;
+    count = 0;
+    node = (w != NULL) ? w->strings : D_8010FA50;
+    shift = 0;
+    while (node != NULL) {
+        s = node->data;
+        if (!(s->flags & 0x10)) {
+            if (w != NULL && shift != 0) {
+                for (; s != NULL; s = s->next) {
+                    ch = s->chars;
+                    for (i = 0; i < s->length; i++, ch++) {
+                        ch->y -= shift;
+                    }
+                }
+                s = node->data;
+            }
+            if (s->flags & 2) {
+                if (count == 0) {
+                    CameraGetDisplay(gCamera, &display);
+                    EGSDisplaySetupTransformWorldToScreen(display);
+                }
+                func_80082F20(s, count);
+                count++;
+                next = 0;
+            }
+            if (s->endTick <= gSystemTick) {
+                dt = gSystemTick - s->endTick;
+                scale = 8;
+                if (s->flags & 0x80) {
+                    scale = 6;
+                }
+                lines = s->lineHeight;
+                if (scale > 8) {
+                    k = scale / 9 + 1;
+                    if (8 - scale / k < dt) {
+                        shift += k * lines;
+                    }
+                } else if (8 - scale < dt) {
+                    shift += lines;
+                }
+                if (dt >= 8) {
+                    func_800863E8(s);
+                    dead = node;
+                    node = node->next;
+                    if (w != NULL) {
+                        w->yAdjust -= scale * lines;
+                        EGSListRemove(&w->strings, dead);
+                        if (w->strings == NULL) {
+                            iTextRemoveWindow(w);
+                        }
+                    } else {
+                        EGSListRemove(&D_8010FA50, dead);
+                    }
+                    continue;
+                }
+                func_80085F24(s);
+                next = 0;
+            } else {
+                for (; s != NULL; s = s->next) {
+                    speed = (s->flags & 2) ? 1 : s->speed;
+                    if (gSystemTick <= s->startTick + (reveal = (s->length << 12) / speed + 8)) {
+                        if ((u8)func_80085F98(s)) {
+                            next = 0;
+                        }
+                    } else {
+                        last = &s->chars[s->length - 1];
+                        if ((*(u32 *)&s->r & 0xFFFFFF) != (*(u32 *)&last->r & 0xFFFFFF)) {
+                            func_800862B0(s);
+                            next = 0;
+                        } else if (s->endTick < next) {
+                            next = s->endTick;
+                        }
+                    }
+                }
+            }
+        }
+        node = node->next;
+    }
+    if (w != NULL) {
+        w->yAdjust += shift;
+        if (w->yAdjust < 0) {
+            w->yAdjust = 0;
+        }
+        if (w->strings == NULL && w->yAdjust != 0) {
+            w->yAdjust = 0;
+        }
+    }
+    return next;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/text", func_800857B8);
+#endif
 
 void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
     TextString *s;
@@ -1018,7 +1409,160 @@ static void func_800863E8(TextString *s) {
     }
 }
 
+/*
+ * Font glyphs (u, v, width). The tables live in this file's rodata, but the
+ * rodata split leaves the first 16 bytes (the start of A-Z, 0x800123C8) at the
+ * end of hotbox's blob, so they are addressed relative to D_800123D8.
+ */
+extern u8 D_800123D8[];
+#define TEXT_UPPER        ((u8(*)[3])(D_800123D8 - 0x10))  /* 0x800123C8 */
+#define TEXT_LOWER        ((u8(*)[3])(D_800123D8 + 0x40))  /* 0x80012418 */
+#define TEXT_DIGITS       ((u8(*)[3])(D_800123D8 + 0x90))  /* 0x80012468 */
+#define TEXT_MINI_LETTERS ((u8(*)[3])(D_800123D8 + 0xB0))  /* 0x80012488 */
+#define TEXT_MINI_DIGITS  ((u8(*)[3])(D_800123D8 + 0x100)) /* 0x800124D8 */
+/* Punctuation glyphs in .sdata: normal font, then mini font. */
+extern u8 D_8010FA54[]; /* : */
+extern u8 D_8010FA58[]; /* / */
+extern u8 D_8010FA5C[]; /* . */
+extern u8 D_8010FA60[]; /* ? */
+extern u8 D_8010FA64[]; /* ! */
+extern u8 D_8010FA68[]; /* ' */
+extern u8 D_8010FA6C[]; /* " */
+extern u8 D_8010FA70[]; /* , */
+extern u8 D_8010FA74[]; /* - */
+extern u8 D_8010FA78[]; /* ( */
+extern u8 D_8010FA7C[]; /* ) */
+extern u8 D_8010FA80[]; /* : */
+extern u8 D_8010FA84[]; /* . */
+extern u8 D_8010FA88[]; /* ? */
+extern u8 D_8010FA8C[]; /* ! */
+extern u8 D_8010FA90[]; /* ' */
+extern u8 D_8010FA94[]; /* " */
+extern u8 D_8010FA98[]; /* , */
+extern u8 D_8010FA9C[]; /* - */
+
+#ifdef NON_MATCHING
+/* regalloc: the original keeps glyph in a3 and u/v/w in v1/a0/v0 */
+/*
+ * Set up ch for character c in the normal or mini font; returns its advance
+ * (0 if the font has no glyph for c).
+ */
+u8 func_80086474(u8 c, TextChar *ch, u8 mini) {
+    u8 *glyph;
+    s16 h;
+    u8 u;
+    u8 v;
+    u8 w;
+
+    if (mini) {
+        switch (c) {
+            case 'a' ... 'z':
+                glyph = TEXT_MINI_LETTERS[c - 'a'];
+                break;
+            case 'A' ... 'Z':
+                glyph = TEXT_MINI_LETTERS[c - 'A'];
+                break;
+            case '0' ... '9':
+                glyph = TEXT_MINI_DIGITS[c - '0'];
+                break;
+            case ':':
+                glyph = D_8010FA80;
+                break;
+            case '?':
+                glyph = D_8010FA88;
+                break;
+            case '!':
+                glyph = D_8010FA8C;
+                break;
+            case '.':
+                glyph = D_8010FA84;
+                break;
+            case ',':
+                glyph = D_8010FA98;
+                break;
+            case '\'':
+                glyph = D_8010FA90;
+                break;
+            case '"':
+                glyph = D_8010FA94;
+                break;
+            case '-':
+                glyph = D_8010FA9C;
+                break;
+            default:
+                glyph = NULL;
+                break;
+        }
+        h = 6;
+    } else {
+        switch (c) {
+            case 'a' ... 'z':
+                glyph = TEXT_LOWER[c - 'a'];
+                break;
+            case 'A' ... 'Z':
+                glyph = TEXT_UPPER[c - 'A'];
+                break;
+            case '0' ... '9':
+                glyph = TEXT_DIGITS[c - '0'];
+                break;
+            case ':':
+                glyph = D_8010FA54;
+                break;
+            case '?':
+                glyph = D_8010FA60;
+                break;
+            case '!':
+                glyph = D_8010FA64;
+                break;
+            case '.':
+                glyph = D_8010FA5C;
+                break;
+            case '/':
+                glyph = D_8010FA58;
+                break;
+            case ',':
+                glyph = D_8010FA70;
+                break;
+            case '\'':
+                glyph = D_8010FA68;
+                break;
+            case '"':
+                glyph = D_8010FA6C;
+                break;
+            case '-':
+                glyph = D_8010FA74;
+                break;
+            case '(':
+                glyph = D_8010FA78;
+                break;
+            case ')':
+                glyph = D_8010FA7C;
+                break;
+            default:
+                glyph = NULL;
+                break;
+        }
+        h = 8;
+    }
+    ch->h = h;
+    if (glyph != NULL) {
+        u = glyph[0];
+        v = glyph[1];
+        w = glyph[2];
+        ch->u = u;
+        ch->w = w;
+        ch->v = v;
+        if (mini) {
+            return w + 1;
+        }
+        return w + 2;
+    }
+    ch->w = 0;
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/text", func_80086474);
+#endif
 
 /* Glyphs (u, v, width) of the special characters, in the font rodata above. */
 extern u8 D_800124F8[];
