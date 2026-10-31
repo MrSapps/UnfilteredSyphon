@@ -1277,29 +1277,26 @@ static inline s32 iBlendColor(IfaceColor *a, IfaceColor *b, s32 k) {
     return *(s32 *)mix;
 }
 
-/* Pulses between colour words from and to with the system tick. */
-static inline s32 iPulseColor(s32 from, s32 to) {
-    IfaceColor a;
-    IfaceColor b;
-    u8 mix[4];
-    s32 k;
-    s32 i;
+/* Clamps each channel of *want to within 10 of *cur (a fade step from *cur toward *want). */
+static inline void iStepColor(IfaceColor *cur, IfaceColor *want) {
+    s32 c;
 
-    a.w = from;
-    b.w = to;
-    k = (rcos(gSystemTick << 8) + 0x1000) >> 5;
-    mix[3] = 0;
-    for (i = 0; i < 3; i++) {
-        mix[i] = (k * a.c[i] + (0x100 - k) * b.c[i]) >> 8;
+    for (c = 0; c < 3; c++) {
+        if (want->c[c] < cur->c[c]) {
+            want->c[c] = (want->c[c] < cur->c[c] - 10) ? cur->c[c] - 10 : want->c[c];
+        } else {
+            want->c[c] = (cur->c[c] + 10 < want->c[c]) ? cur->c[c] + 10 : want->c[c];
+        }
     }
-    return *(s32 *)mix;
 }
 
 #ifdef NON_MATCHING
-/* stack slots: the fade's cur/want and the pulse's a/b both sit at sp+0x10/0x14 with mix at 0x20 in the original (here fade 0x10, pulse mix 0x18 a/b 0x20), and the fade compare's v1/a1 swap */
+/* regalloc: the fade-step compare keeps want/cur bytes in a1/v1 (original v1/a1); stack slots and the pulse block now match */
 void func_8003C4F8(s32 slot, s32 level) {
     IfacePoly24 *blip;
     s32 k;
+    IfaceColor cur;
+    IfaceColor want;
 
     D_80117C58[slot] = level;
     blip = (IfacePoly24 *)&D_80117A30[slot];
@@ -1322,10 +1319,28 @@ void func_8003C4F8(s32 slot, s32 level) {
     } else {
         level = 0xFF;
     }
-    level = iFadeColor(blip->color, level);
+    cur.w = blip->color;
+    want.w = level;
+    iStepColor(&cur, &want);
+    level = want.w;
     blip->color = level | 0x28000000;
     if (gObjPlayer->target->targetId == D_80117B2C[slot] && gTargetModeFlag) {
-        D_80117B14 = iPulseColor(level, 0x503028) | 0x28000000;
+        cur.w = level;
+        want.w = 0x503028;
+        {
+            u8 unused[8];
+            u8 mix[4];
+            u8 *m = mix;
+            s32 t;
+            s32 i;
+
+            t = (rcos(gSystemTick << 8) + 0x1000) >> 5;
+            m[3] = 0;
+            for (i = 0; i < 3; i++) {
+                m[i] = (t * cur.c[i] + (0x100 - t) * want.c[i]) >> 8;
+            }
+            D_80117B14 = *(s32 *)mix | 0x28000000;
+        }
     }
 }
 #else
@@ -4216,7 +4231,7 @@ void func_80045548(void) {
 }
 
 #ifdef NON_MATCHING
-/* first draft: same flow, but register allocation and the first loop's -256 store differ (not hoisted in the original) */
+/* loops: the original does not strength-reduce the sprite field addresses (offsets stay in the sh/sw) and keeps the up-counting index in loops 2/3; here loop 1 counts down and loops 2/3 get reduced pointers */
 void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     char buf[16];
     s32 hi;
@@ -4253,7 +4268,11 @@ void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     sp = D_8010F8B8;
     if (sp != NULL) {
         for (i = 0, y = -60; i < 5; i++, sp++, y += 30) {
-            sp->y = (y + off > h / 2 || y + off < -h / 2) ? -256 : y + off;
+            n = y + off;
+            if (n > h / 2 || n < -h / 2) {
+                n = -256;
+            }
+            sp->y = n;
         }
     }
     off = -(pitch * 8 * step / 4096);

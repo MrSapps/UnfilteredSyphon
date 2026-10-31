@@ -249,7 +249,7 @@ void func_80082E70(TextString *text, s32 x, s32 y) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc of the frame/arrow temps (a1/a2 vs a2/a3); the original loads line[0].tag after the colour stores and keeps &line[1] in s0; endTick < -1 compares against a register */
+/* regalloc of the width/room/arrow temps (a1/a0/a2 vs a2/a1/a3); the original loads line[0].tag after the colour stores and keeps &line[1] in s0; endTick < -1 compares against a register */
 /*
  * Place marker string s (index-th marker) over the object it labels: project
  * the object (or the top of its model) to the screen, move the string there
@@ -305,12 +305,12 @@ void func_80082F20(TextString *s, s32 index) {
                 EGSDisplaySetupTransformWorldToScreen(display);
             }
             gobj = NULL;
-            pos.vx += head.vx;
-            pos.vy += head.vy;
-            pos.vz += head.vz;
+            pos.vx = head.vx + pos.vx;
+            pos.vy = head.vy + pos.vy;
+            pos.vz = head.vz + pos.vz;
         }
     } else {
-        info = &gameObjectsInfo[gobj->id];
+        info = (GameObjectInfo *)(gobj->id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
         pos.vx = info->matrix.t[0];
         pos.vy = info->matrix.t[1];
         gobj = NULL;
@@ -671,8 +671,6 @@ void TextActivateAllWindows(u8 active) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: the original keeps str in s1 (here s6) and gSystemTick in v1 */
 /*
  * Lay out str as a new string, in window w (or free-standing at *x, *y using
  * sprites); advances *x / *y. Returns (checksum << 8) | index, or 0xFFFF.
@@ -738,15 +736,20 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
     late = D_801101B0 != gSystemTick;
     tick = gSystemTick;
     s->startTick = tick + late;
-    s->endTick = end = tick + ticks;
-    s->xOffset = *x;
+    end = tick + ticks;
+    {
+        s16 xOffset = *x;
+
+        s->endTick = end;
+        s->xOffset = xOffset;
+    }
     if (end < tick) {
         s->endTick = -1;
     }
     ch = s->chars;
     n = 0;
-    for (i = 0; i < len; str++, i++) {
-        code = *str;
+    for (i = 0; i < len; i++) {
+        code = str[i];
         sum += code;
         switch (code) {
             case ' ':
@@ -788,16 +791,14 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
                     if (ch->unk28 == 0) {
                         ch->unk28 = (s32)EGSListAdd((EGSListNode **)((u8 *)gTextCamera + 0x90), ch);
                     }
-                    if (*str == '%') {
-                        str++;
-                        *x += func_80086710(str, ch);
+                    if (str[i] == '%') {
                         i++;
-                        if (*str == 'r' || *str == 'l' || *str == 's') {
-                            str++;
+                        *x += func_80086710(&str[i], ch);
+                        if (str[i] == 'r' || str[i] == 'l' || str[i] == 's') {
                             i++;
                         }
                     } else {
-                        *x += (u8)func_80086474(*str, ch, w != NULL && (w->flags & 0x10));
+                        *x += (u8)func_80086474(str[i], ch, w != NULL && (w->flags & 0x10));
                     }
                     ch++;
                     n++;
@@ -815,7 +816,6 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
                         *x = startX;
                     }
                     *y += (w != NULL && (w->flags & 0x10)) ? 6 : 8;
-                    str--;
                     i--;
                     lines++;
                 }
@@ -853,9 +853,6 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
     s->flags |= 1;
     return D_8010FA4C | (sum << 8);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_80083F1C);
-#endif
 
 #ifdef NON_MATCHING
 /* Only the final subtract's result register differs (a3 in the original, the add's v0 here). */
