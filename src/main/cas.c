@@ -274,8 +274,6 @@ CASSequence *CASGetAnimSequence(CASAnimSet *set, s32 action, s32 sub) {
     }
 }
 
-#ifdef NON_MATCHING
-/* result computed in v1 and copied to v0; original computes it in v0 */
 static u8 func_80029794(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
     struct CASSlots *slots;
     CASSequence *seq;
@@ -284,19 +282,16 @@ static u8 func_80029794(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub
 
     slots = &rt->cas->queue->slots;
     if (slots->current != -1 && slots->state[slots->current] == 2) {
-        ret = 0;
-    } else {
-        seq = CASGetAnimSequence(set, req[1], sub);
-        ret = 1;
-        if (rt->cas->flags2 & seq->needFlags2) {
-            ret = (rt->cas->flags2 & seq->blockFlags2) == 0;
+        return 0;
+    }
+    seq = CASGetAnimSequence(set, req[1], sub);
+    if (rt->cas->flags2 & seq->needFlags2) {
+        if (rt->cas->flags2 & seq->blockFlags2) {
+            return 0;
         }
     }
-    return ret;
+    return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029794);
-#endif
 
 /* May a request in state *req run under this rule? */
 static u8 func_80029838(GameObjectRuntime *rt, CASRule *rule, u8 *req) {
