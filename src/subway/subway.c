@@ -296,7 +296,7 @@ void GameCameraShakeStop(void *state);
 void GameCameraSetScrimOnFlag(s32 on);
 void GameCameraSetScrimScrollRate(s32 rate);
 void CameraGetDisplay(void *camera, SubwayDisplay **display);
-void TextAddMarker(u16 id, void *msg, s32 ticks, s32 arg3);
+u16 TextAddMarker(u16 id, void *msg, s32 ticks, s32 arg3);
 void DamageGOBJ(s32 arg0, s16 by, s16 id, s16 amount, s32 kind);
 void DamageKillAllPeople(s32 by, s32 kind);
 void ParticleFireWaveDeath(void);
@@ -351,11 +351,7 @@ s32 func_80142934(s16 id);
 static void func_80142A24(s16 id);
 static void func_80142B6C(s16 id, s32 type);
 static void *func_80142C58(s16 id, s16 type);
-#ifdef NON_MATCHING
 static void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos);
-#else
-void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos);
-#endif
 static void *func_80142D74(s16 id, s16 kind);
 static void func_80143740(s32 train);
 static void func_801438EC(s32 train, u8 fast);
@@ -853,8 +849,6 @@ static void *func_80142C58(s16 id, s16 type) {
 }
 
 /* Mark the comm array once the player faces it. */
-#ifdef NON_MATCHING
-/* Same code; the second mflo goes to $v0 instead of $v1. */
 static void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos) {
     VECTOR32 dir;
     s32 dot;
@@ -871,9 +865,6 @@ static void func_80142C7C(SubwayRuntime *rt, VECTOR32 *pos) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80142C7C);
-#endif
 
 #ifndef _PSYQ
 /* labels inside the storage structs above (see the top of the file) */
