@@ -887,4 +887,5 @@ void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
 INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayHAnimate);
 #endif
 
-
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gInfraredColor)

@@ -4978,3 +4978,8 @@ void func_800664F8(Gobj *obj) {
         }
     }
 }
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(copKilledByPCFlag)
+SDATA_LOCAL(getNPCIndex)
+SDATA_LOCAL(grenadeWeaponRestore)

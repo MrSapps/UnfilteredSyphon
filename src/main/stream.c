@@ -395,6 +395,12 @@ void FlushStreamRequests(s32 tag) {
     }
 }
 
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gHogHeader)
+SDATA_LOCAL(gHogPos)
+SDATA_LOCAL(gStreamReqListPause)
+SDATA_LOCAL(gStreamReqListRun)
+
 /* Two unreferenced 1-byte .sdata items follow "T" (orig 0x8010FA40/44) before
  * text.c's data; that they are stream.c's (and statics) is a guess. */
 static char D_8010FA40[] = "";

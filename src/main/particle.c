@@ -4802,3 +4802,7 @@ void ParticleUpdate(void) {
     }
     SysPostMessage(0x10, 4, 0xFFFE, 0xFFFE, 0, 0, 0, 0);
 }
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(group)
+SDATA_LOCAL(groupUpdateList)

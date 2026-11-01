@@ -2997,3 +2997,7 @@ static void func_800C1590(s32 com, s32 pos) {
     D_8010FD90 = 0;
     D_8010FD8C = 1;
 }
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gUserXACallbackData)
+SDATA_LOCAL(gUserXACallbackFrame)

@@ -1381,3 +1381,14 @@ void FixupEMDGameObject(EMDHeader *emd, EMDOwner *owner) {
 
 /* $gp common: let maspsx use $gp for it (kept after the last function, in .text) */
 SDATA_LOCAL(gTextureCache)
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gCache)
+SDATA_LOCAL(gNumTerrainDataBlocks)
+SDATA_LOCAL(gSectorsPerBlock)
+SDATA_LOCAL(gTerrainCache)
+SDATA_LOCAL(gTerrainCacheFreeBlocks)
+SDATA_LOCAL(gTerrainCacheInactiveBlocks)
+SDATA_LOCAL(gTerrainDirectory)
+SDATA_LOCAL(gTerrSector)
+SDATA_LOCAL(gTerrSectorCount)

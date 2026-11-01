@@ -4440,3 +4440,7 @@ void iInterfaceDoSniffer(void) {
         D_80118350 -= dist;
     }
 }
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gInterfaceCurrentMode)
+SDATA_LOCAL(gInterfaceWindow)

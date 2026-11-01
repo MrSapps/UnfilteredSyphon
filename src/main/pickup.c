@@ -2279,3 +2279,9 @@ void SWITCHObjDispatch(SysMsg *msg) {
 #else
 INCLUDE_ASM("asm/main/nonmatchings/pickup", SWITCHObjDispatch);
 #endif
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gDeviceDetonated)
+SDATA_LOCAL(gLevelKeycards)
+SDATA_LOCAL(gLevelKeycardsTaken)
+SDATA_LOCAL(gNextTickAllowMsgLongText)
