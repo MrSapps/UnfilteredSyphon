@@ -1398,8 +1398,6 @@ void iSubway3Init(s32 mode) {
      (v).vz = (frame)->pos.vz, \
      (v).vy = -(v).vy)
 
-#ifdef NON_MATCHING
-/* &D_801456F0 is CSE'd into $s0 for the two flashlight calls (the original rematerialises it each time; ours is 1 insn shorter) and the train-sound flag address/value swap v0/v1 */
 void TRAINObjDispatch(SysMsg *msg) {
     VECTOR32 player;
     VECTOR32 car;
@@ -1412,6 +1410,7 @@ void TRAINObjDispatch(SysMsg *msg) {
     s32 dy;
     s32 dist;
     s16 hp;
+    SubwayLight *light;
     s16 type;
 
     rt = RT(msg->to);
@@ -1430,6 +1429,7 @@ void TRAINObjDispatch(SysMsg *msg) {
                     last = RT(D_8014583C[rt->flags1][D_80145854[rt->flags1] - 1]);
                     GET_POS(car, frame);
                     GET_POS(end, last->anim->frame);
+                    light = &D_801456F0;
                     if (type == SUBWAY_TYPE_TRAIN3) {
                         dy = 0;
                     } else {
@@ -1453,7 +1453,7 @@ void TRAINObjDispatch(SysMsg *msg) {
                                 TRAIN_SOUND->playing = 1;
                                 SysPlaySong(0, 0x18, 0, 0);
                                 D_80145824 = frame;
-                                EGSDisplayFlashlightFrame(&D_801456F0, frame, 0);
+                                EGSDisplayFlashlightFrame(light, frame, 0);
                                 EGSDisplayFlashlightOn(&D_801456F0);
                             }
                         } else if (D_80145874.reverse && rt->move->speed > 0x1388 && dist < 0x4600) {
@@ -1570,6 +1570,3 @@ void TRAINObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/subway/nonmatchings/subway", TRAINObjDispatch);
-#endif
