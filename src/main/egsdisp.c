@@ -3261,7 +3261,8 @@ void EGSDisplayResetOTs(void) {
 }
 
 #ifdef NON_MATCHING
-/* original reads dTicks with lui/lw (not gp) and loads the clut/tpage halves signed */
+/* original reads dTicks with lui/lw (not gp: maybe this was its own TU, dTicks extern there) and vt/vb swap a3/t0 (4 insns) */
+#define POLY_SH(p, o) (*(s16 *)((p) + (o)))
 void BillboardAnimate(EGSAnim *anim) {
     BillboardAnim *ba = anim->unk18;
     u8 *poly;
@@ -3279,10 +3280,10 @@ void BillboardAnimate(EGSAnim *anim) {
         vt = xy[1] << 8;
         POLY_W(poly, 0x28) = vb + u + 0x1F;
         POLY_W(poly, 0x44) = vt + u;
-        POLY_W(poly, 0x24) = (POLY_H(poly, 0x26) << 16) + vt + u;
-        POLY_W(poly, 0x20) = (POLY_H(poly, 0x22) << 16) + vb + u;
-        POLY_W(poly, 0x3C) = (POLY_H(poly, 0x3E) << 16) + vt + u + 0x1F;
-        POLY_W(poly, 0x40) = (POLY_H(poly, 0x42) << 16) + vb + u + 0x1F;
+        POLY_W(poly, 0x24) = (POLY_SH(poly, 0x26) << 16) + vt + u;
+        POLY_W(poly, 0x20) = (POLY_SH(poly, 0x22) << 16) + vb + u;
+        POLY_W(poly, 0x3C) = (POLY_SH(poly, 0x3E) << 16) + vt + u + 0x1F;
+        POLY_W(poly, 0x40) = (POLY_SH(poly, 0x42) << 16) + vb + u + 0x1F;
         if ((s16)ba->frame == ba->numFrames) {
             ba->frame = 0;
         }
