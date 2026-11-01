@@ -139,7 +139,7 @@ void PhysicsGobjBasicInit(Gobj *gobj, s32 arg1, s32 arg2);
 void CollisionGobjBasicInit(Gobj *gobj, s32 a, s32 b, s32 c, s32 d, s32 e);
 void EGSFrameCreate(struct EGSFrame **out);
 void CollisionDetectorCreate(s32 *out, CollisionDetectorDesc *desc, Gobj *gobj);
-void CollisionDetectorAddToList(s32 detector, s32 index, s32 *list);
+s32 CollisionDetectorAddToList(s32 detector, s32 index, s32 *list);
 void CollisionGobjSetPushDetectorList(Gobj *gobj, s32 list);
 void CollisionGobjSetPushDetector(Gobj *gobj, s32 detector);
 
@@ -821,9 +821,6 @@ void func_80025EA8(u8 on) {
     UseMsgUpdate4FlashlightChange();
 }
 
-#ifdef NON_MATCHING
-/* Register allocation only in the last store: the original keeps the move pointer in v1 and sets the return value early */
-/* Set up the player's collision: body, head and feet detectors. */
 s32 func_80025F18(Gobj *gobj) {
     CollisionDetectorDesc desc;
     s32 kind = 3;
@@ -914,9 +911,6 @@ s32 func_80025F18(Gobj *gobj) {
     ((PlayerMoveInfo *)gobj->move)->phys->unk04 = 0x599;
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", func_80025F18);
-#endif
 
 #ifdef NON_MATCHING
 /* Draft: floor material lookup and SysPlaySong argument setup are scheduled differently. */

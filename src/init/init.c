@@ -1640,27 +1640,23 @@ void EGSFrameSetMatrix(void *frame, s32 arg1, MATRIX *m);
         EGSFrameUpdateHierarchy((rt)->anim->frame);                                \
     }
 
-#ifdef NON_MATCHING
-/* refId loaded once as a word and re-truncated in the original; the type local costs an extra stack slot */
-/* Puts a car's driver (and what the car links to) into the car's frame hierarchy. */
 void ObjectSetupCar(s16 id) {
     VECTOR carPos;
     VECTOR pos;
     MATRIX m;
     InitRuntime *rt;
     InitRuntime *car;
-    s32 ref;
     s16 type;
     s16 next;
 
     rt = (InitRuntime *)gameObjectsInfo[id].runtime;
-    ref = gameObjectsInfo[rt->id].refId;
-    if ((s16)ref == -1) {
+    next = gameObjectsInfo[rt->id].refId;
+    if (next == -1) {
         return;
     }
-    type = GOBJ_TYPE((s16)ref);
+    type = GOBJ_TYPE(next);
     if (type == 0x2C) {
-        car = (InitRuntime *)gameObjectsInfo[(s16)ref].runtime;
+        car = (InitRuntime *)gameObjectsInfo[next].runtime;
         carPos.vx = ((MATRIX *)car->anim->frame)->t[0];
         carPos.vy = ((MATRIX *)car->anim->frame)->t[1];
         carPos.vz = ((MATRIX *)car->anim->frame)->t[2];
@@ -1679,9 +1675,6 @@ void ObjectSetupCar(s16 id) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", ObjectSetupCar);
-#endif
 
 void TGTObjInit(InitRuntime *rt, s32 type) {
     if (type == 0x2C && *(s32 *)&gameObjectsInfo[rt->id].flags24 != 0) {
