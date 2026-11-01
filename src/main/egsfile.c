@@ -142,29 +142,24 @@ void FileCloseFog(void)
     }
 }
 
-#ifdef NON_MATCHING
-/* a0/a1 of the ASSERT call get swapped by the scheduler */
 int EGSFileOpenFog(char *name)
 {
     u8 *buf;
     u32 nread;
 
     FileCloseFog();
-    if (EGSFileOpen(name, &gFogFilePtr) != 0) {
-        return 0;
-    }
-    EGSFileRead(gFogFilePtr, buf = EGSMemMalloc(0x800), 0x800, &nread);
+    if (EGSFileOpen(name, &gFogFilePtr) == 0) {
+        EGSFileRead(gFogFilePtr, buf = EGSMemMalloc(0x800), 0x800, &nread);
 #line 131
-    ASSERT(nread == sizeof(buf[0]) * 0x800);
-    EGSMiscMemcpy(&fogHeader, buf, sizeof(FogHeader) / 4);
-    EGSMemFree(buf);
-    gFogHeader = &fogHeader;
-    gFogHeader->sector = CdPosToInt(&gFogFilePtr->pos);
-    return 1;
+        ASSERT(nread == sizeof(buf[0]) * 0x800);
+        EGSMiscMemcpy(&fogHeader, buf, sizeof(FogHeader) / 4);
+        EGSMemFree(buf);
+        gFogHeader = &fogHeader;
+        gFogHeader->sector = CdPosToInt(&gFogFilePtr->pos);
+        return 1;
+    }
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsfile", EGSFileOpenFog);
-#endif
 
 EGSFile *FindFreeFile(void)
 {
