@@ -491,6 +491,7 @@ extern EGSListNode *gPointSourceList;
 extern EGSListNode *gFlashlightList;
 extern void (*gFadeCallback)();
 s32 gGabeCache; /* common, $gp */
+SDATA_LOCAL(gGabeCache)
 extern DamageEntry *D_8011045C; /* gGabeCache + 4 */
 extern DamageEntry gGabeCacheEntry;
 extern void *gDLA_npc_gun_flash[];
@@ -2347,7 +2348,7 @@ void EGSDisplayRegisterHMD(HMDHeader *hmd) {
 }
 
 #ifdef NON_MATCHING
-/* instruction scheduling: gGabeCache store/ref load order differs */
+/* gGabeCache is gp-relative now (SDATA_LOCAL); only the store/load order differs */
 void InitGabeDamage(void) {
     EGSAnim *ref;
 
