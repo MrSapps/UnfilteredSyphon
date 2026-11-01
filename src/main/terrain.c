@@ -197,8 +197,6 @@ void func_8008198C(s32 sector);
 void EGSDisplayAddAnim(void *camera, void *anim);
 void EGSDisplayDeleteAnim(void *camera, void *anim);
 
-#ifdef NON_MATCHING
-/* regalloc: map pointer in a0 instead of v0 (9 insns) */
 void VramSwap(StreamReq *req) {
     TerrainRect rect = D_8010F9E0;
     s32 tag = req->tag;
@@ -212,8 +210,12 @@ void VramSwap(StreamReq *req) {
     } else {
         other = page - 6;
     }
-    map = gTexturePageMap;
-    (map + bank * VRAM_PAGES_PER_BANK)[page] = 1;
+    {
+        u8 *base = gTexturePageMap;
+
+        (base + bank * VRAM_PAGES_PER_BANK)[page] = 1;
+        map = base;
+    }
     /* the same page in the other bank is gone */
     if (bank == 0) {
         map += VRAM_PAGES_PER_BANK;
@@ -235,9 +237,6 @@ void VramSwap(StreamReq *req) {
     }
     LoadImage(&rect, gTextureCache);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", VramSwap);
-#endif
 
 /* terrain.c's .sdata, in address order (0x8010FA04 is unreferenced; the "" and "1"
  * are the VRAM hog name suffixes) */
@@ -1379,3 +1378,6 @@ void FixupEMDGameObject(EMDHeader *emd, EMDOwner *owner) {
     }
     EGSDisplayGetSectorBox(hdr, owner->unk10);
 }
+
+/* $gp common: let maspsx use $gp for it (kept after the last function, in .text) */
+SDATA_LOCAL(gTextureCache)
