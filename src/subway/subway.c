@@ -343,11 +343,7 @@ static void *func_801426FC(void);
 static void func_80142724(s16 id);
 static s32 func_8014277C(s16 id);
 static void func_8014284C(SubwayRuntime *rt);
-#ifdef NON_MATCHING
 static s32 func_80142934(s16 id);
-#else
-s32 func_80142934(s16 id);
-#endif
 static void func_80142A24(s16 id);
 static void func_80142B6C(s16 id, s32 type);
 static void *func_80142C58(s16 id, s16 type);
@@ -763,20 +759,20 @@ static void func_8014284C(SubwayRuntime *rt) {
     }
 }
 
-#ifdef NON_MATCHING
-/* The original keeps the return value 1 in $s0 across the timer call (3 more insns). */
 static s32 func_80142934(s16 id) {
     GameObjectInfo *info;
     s32 ret;
     s32 n;
 
-    info = &gameObjectsInfo[id];
+    info = (GameObjectInfo *)(id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
     ret = 1;
     if (info->refId == -1) {
         n = info->pathStart;
         if (n >= 100) {
             n -= 100;
         }
+        do {
+        } while (0);
         if (0x78 - xaLevelStartIndex[gSysInfo.level] == n) {
             SysExeTickQueueTimer(func_8014284C, 5, (s32)D_80145868);
             ret = 1;
@@ -786,9 +782,6 @@ static s32 func_80142934(s16 id) {
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80142934);
-#endif
 
 static void func_80142A24(s16 id) {
     s32 ref;
