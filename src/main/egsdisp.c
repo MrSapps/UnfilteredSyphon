@@ -3322,7 +3322,7 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 
 #ifdef NON_MATCHING
-/* dead ret=0 in s2 kept; original returns literal 0 on the count path too (ours copies s2) and schedules the s2 init after a1=0 */
+/* one insn off: the original keeps the dead ret=0 in s2 but returns a literal 0 on the count path (ours copies s2) */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
@@ -3337,8 +3337,8 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
     acc.pos[1] = frame->matrix.t[1];
     acc.pos[2] = frame->matrix.t[2];
     acc.count = acc.sum[0] = acc.sum[1] = acc.sum[2] = 0;
-    ret = 0;
     EGSFrameGetPosition(anim->frame, NULL, &p);
+    ret = 0;
     for (; node != NULL; node = node->next) {
         ret = 0;
         model = ((EGSAnim *)node->data)->model;
