@@ -20,10 +20,17 @@ def tu_vars(src):
     return v.get("origname", src), v.get("gsize", "8")
 
 
-def compile(src, defs="-DNON_MATCHING"):
+def compile(src, defs="-DNON_MATCHING", text=None):
+    """Compile src (or `text` standing in for its contents; src itself is never written)."""
     on, g = tu_vars(src)
     o = OUT / (src.replace("/", "_") + ".o")
-    cmd = (f"(printf '#line 1 \"{on}\"\\n'; cat {src}) | cpp -P -undef -D__GNUC__=2 -Dmips -D__psx__ "
+    if text is not None:
+        tmp = OUT / (src.replace("/", "_") + ".variant.c")
+        tmp.write_text(text)
+        src_in = tmp
+    else:
+        src_in = src
+    cmd = (f"(printf '#line 1 \"{on}\"\\n'; cat {src_in}) | cpp -P -undef -D__GNUC__=2 -Dmips -D__psx__ "
            f"-DINCLUDE_ASM_USE_MACRO_INC=1 {defs} -Iinclude -Isrc | tools/compilers/gcc-2.7.2-psx/cc1 -quiet -O2 -G{g} "
            f"-mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -funsigned-char -o - | .venv/bin/python3 tools/maspsx/maspsx.py "
            f"--aspsx-version=2.79 -G{g} --expand-div --use-comm-section | sed 's/^\\s*\\.rdata\\s*$/\\t.section .rodata/' | "
@@ -105,6 +112,19 @@ def score(o, name, sfile):
     sm = difflib.SequenceMatcher(None, am, bm, autojunk=False)
     same = sum(bl.size for bl in sm.get_matching_blocks())
     return max(len(a), len(b)) - same, len(b)
+
+
+def apply_variant(text, vfile, idx):
+    """Return text with variant idx (1-based, vt.py format) of vfile applied; 0 = unchanged."""
+    if not idx:
+        return text
+    v = open(vfile).read().split("====\n")[idx - 1]
+    for part in v.split("~~~~\n"):
+        old, new = part.split("----\n")
+        if old not in text:
+            sys.exit(f"variant {idx}: old text not found")
+        text = text.replace(old, new, 1)
+    return text
 
 
 def nm_funcs(src):

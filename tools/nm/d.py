@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""d.py src func : compile with NON_MATCHING, show only differing regions (ours | orig)."""
+"""d.py src func [ctx [variants.txt idx]] : compile with NON_MATCHING, show only differing
+regions (ours | orig). With a variants file, diff that variant (src is not modified)."""
 import sys, difflib
 sys.path.insert(0, __import__("os").path.dirname(__file__))
-from score import compile, nm_funcs, built_words, orig_insns, maskw, disasm_words
+from score import apply_variant, compile, nm_funcs, built_words, orig_insns, maskw, disasm_words
 
 src, name = sys.argv[1], sys.argv[2]
 ctx = int(sys.argv[3]) if len(sys.argv) > 3 else 2
 d = dict((n, dd) for dd, n in nm_funcs(src))[name]
-o = compile(src)
+text = None
+if len(sys.argv) > 5:
+    text = apply_variant(open(src).read(), sys.argv[4], int(sys.argv[5]))
+o = compile(src, text=text)
 a = built_words(o, name); b = orig_insns(f"{d}/{name}.s")
 da, db = disasm_words(a), disasm_words(b)
 sm = difflib.SequenceMatcher(None, [maskw(w) for w in a], [maskw(w) for w in b], autojunk=False)
