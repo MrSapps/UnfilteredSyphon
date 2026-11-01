@@ -2776,8 +2776,6 @@ void func_8013E30C(void) {
     D_8013F7C4 = gSysInfo.level;
 }
 
-#ifdef NON_MATCHING
-/* id and the row offset swap s0/s1 in the button-name loop */
 void func_8013E324(void) {
     s32 i;
     s32 action;
@@ -2796,14 +2794,13 @@ void func_8013E324(void) {
         action = D_8013FDEC[i];
         if (action >= 0) {
             id = TextReplaceString(D_8013FBD8[action + 4].textIds[1], gButtonStrings[i]);
-            TextSetStringJustification(id, 0);
-            D_8013FBD8[action + 4].textIds[1] = id;
+            do {
+                TextSetStringJustification(id, 0);
+                D_8013FBD8[action + 4].textIds[1] = id;
+            } while (0);
         }
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E324);
-#endif
 
 void func_8013E480(void) {
     MenuLine *line = D_8013FE78;
