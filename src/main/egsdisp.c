@@ -412,6 +412,7 @@ extern void *gFlashlightFrame;
 extern u8 gFlashlightHeadFlag;
 extern u8 gRearViewFlag;
 s16 gHMDVertTriplets; /* common, $gp */
+SDATA_LOCAL(gHMDVertTriplets)
 extern s16 masterAnimCount;
 extern MATRIX gEGSIdentityMatrix;
 extern MATRIX GsIDMATRIX2;
@@ -423,11 +424,13 @@ typedef struct FLEntry {
 } FLEntry;
 extern FLEntry gFLArray[];
 s32 gFLCount; /* common, $gp */
+SDATA_LOCAL(gFLCount)
 extern s16 gCurrentCamera;
 extern VECTOR gPCGouraudLight;
 extern MATRIX gCameraWSMatrix;
 extern s32 gFogFlag;
 u8 gRunFlag; /* common, $gp */
+SDATA_LOCAL(gRunFlag)
 extern s32 lastCounterTick;
 extern s32 lastCounterTickSort;
 extern s32 gImagePtr;
@@ -447,7 +450,9 @@ extern EGSImage gImages[5];
 extern u32 D_80107B1C[];
 extern VECTOR D_80013740; /* up vector */
 s32 gSubsectorsSorted; /* common, $gp */
+SDATA_LOCAL(gSubsectorsSorted)
 s32 gSubsectorPolysSorted; /* common, $gp */
+SDATA_LOCAL(gSubsectorPolysSorted)
 extern s32 gGameTick;
 extern s16 gCurrentDrawBuffer;
 extern s16 gSortBuffer;
@@ -461,6 +466,7 @@ typedef struct Str8 {
 #define SPAD_STACK_ENTER() __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0")
 #define SPAD_STACK_LEAVE() __asm__ volatile("lw $29, 0x1F800000")
 s32 gPointSourceHMD; /* common, $gp */
+SDATA_LOCAL(gPointSourceHMD)
 extern struct CameraAnim {
     /* 0x00 */ u8 unk00[0xC];
     /* 0x0C */ EGSFrame *frame;
@@ -477,6 +483,7 @@ extern GsOT gammaOT[2];
 extern s16 gDisplayBuffer;
 extern void *gInitHeap;
 s16 gMaxPackets; /* common, $gp */
+SDATA_LOCAL(gMaxPackets)
 extern void *gSortInfo;
 extern HAnimation gHAnimationArray[HANIM_MAX];
 extern EGSDamagePoly gDamagePolys[DAMAGE_MAX];
@@ -485,6 +492,7 @@ extern s32 gPacketAreaMallocSize;
 extern s32 gPacketAreaSize;
 extern s32 gPacketAreaSafeSize;
 u8 *gOutPacket; /* common, $gp */
+SDATA_LOCAL(gOutPacket)
 extern u8 *D_80110234; /* gOutPacket + 4 */
 extern EGSListNode *gTextureAnimationList;
 extern EGSListNode *gPointSourceList;
@@ -509,6 +517,7 @@ extern u16 gLoadC;
 extern u16 gLoadG;
 extern u16 gLoadP;
 char gErrorString[8]; /* common, $gp */
+SDATA_LOCAL(gErrorString)
 extern s32 gCollideXZ;
 extern s32 gFineCollideXZ;
 extern s32 gPointSourceCount;
@@ -519,7 +528,9 @@ extern s16 gFadeRGB;
 extern void *gScrimModel;
 void (*gHADoneCallback)(); /* egshmd.c defines it; a tentative definition here so aspsx reaches it through $gp */
 s32 gpuTime; /* common, $gp */
+SDATA_LOCAL(gpuTime)
 struct EGSFogInfo *gFogInfo; /* common, $gp */
+SDATA_LOCAL(gFogInfo)
 extern u8 gFogScrimFlag;
 extern s32 gAmbientLight; /* 0x00BBGGRR */
 extern s32 gFlashlightIntensity;

@@ -64,6 +64,7 @@ typedef struct ShadowGobj {
 } ShadowGobj;
 
 EGSListNode *mShadowRequestList; /* common, $gp */
+SDATA_LOCAL(mShadowRequestList)
 extern Shadow mShadowPool[SHADOW_POOL_SIZE];
 extern u16 mShadowTexture[32][16]; /* 16x32 15-bit shadow blob, built by ShadowInit */
 extern void **gCamera;

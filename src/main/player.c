@@ -11,6 +11,7 @@
 static const s32 D_8001040C[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 u16 mUseInfo;            /* (common, $gp) message id of the pending use action, 0 for none */
+SDATA_LOCAL(mUseInfo)
 extern s16 D_801103BE;   /* object the pending use action targets, -1 for none */
 extern s32 gPlayerOffset;
 /* Player flashlight (EGS display light); the first word is nonzero while it is on */
@@ -107,7 +108,9 @@ typedef struct PlayerLevData {
 
 extern PlayerLevData *gLevData;
 void *mGabeAnim;      /* common, $gp */
+SDATA_LOCAL(mGabeAnim)
 Gobj *mGrenadeGobj[2]; /* common, $gp */
+SDATA_LOCAL(mGrenadeGobj)
 extern struct EGSFrame *mGrenadeFrame[2];
 /* Fire button state */
 typedef struct PlayerShootState {
@@ -117,6 +120,7 @@ typedef struct PlayerShootState {
 } PlayerShootState;
 extern PlayerShootState mShootInfo;
 s32 gPlayerNumConsecutiveHits; /* common, $gp */
+SDATA_LOCAL(gPlayerNumConsecutiveHits)
 extern u8 gPlayerOnFireFlag;
 
 void LevelGetHMDModel(char *name, void **out);
@@ -174,12 +178,14 @@ typedef struct PlayerAnimFrames {
 
 extern u8 gSoundFootstep[];
 s32 mFootFx; /* common, $gp */
+SDATA_LOCAL(mFootFx)
 
 s32 SpriteFootFxTextureGet(s32 foot);
 void EGSDisplayRegisterFootprint(void *frame, s32 tex, VECTOR32 *pos);
 void SysPlaySong(s32 arg0, s32 song, void *arg2, s32 arg3);
 
 u8 mShootReqFlag; /* (common, $gp) 1: shot requested, 2: shot queued, 3: shot queued unrequested */
+SDATA_LOCAL(mShootReqFlag)
 extern s32 gCurrentWeapon;
 extern u8 iAnimationArray[];
 
