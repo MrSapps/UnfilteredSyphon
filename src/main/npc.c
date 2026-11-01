@@ -3913,8 +3913,6 @@ void NPCDropPickupStuff(s32 id) {
     }
 }
 
-#ifdef NON_MATCHING
-/* 4 insns: drop gets v1 instead of v0 (target stores unk28 before the slti; sched1 only orders it so when the slt dest is single-set, i.e. gets birthing priority) */
 void NPCLosUpdateOtherStuff(s32 id) {
     VECTOR32 point;
     s32 start;
@@ -3971,8 +3969,6 @@ void NPCLosUpdateOtherStuff(s32 id) {
         if (obj->healthInfo->health > 0) {
             NPCIQ(obj);
         } else {
-            s32 drop;
-
             NPCDeadContactTheLiving(obj);
             if (obj->healthInfo->health == 0) {
                 VECTOR32 pos;
@@ -3986,12 +3982,10 @@ void NPCLosUpdateOtherStuff(s32 id) {
                 pos.vy = -pos.vy;
                 EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &pc, &d);
                 npc->unk28 = d;
-                drop = d < 0xA0;
-            } else {
-                drop = 0x100000;
-                drop &= obj->move->collFlags;
-            }
-            if (drop) {
+                if (d < 0xA0) {
+                    NPCDropPickupStuff(obj->id);
+                }
+            } else if (obj->move->collFlags & 0x100000) {
                 NPCDropPickupStuff(obj->id);
             }
         }
@@ -4019,9 +4013,6 @@ void NPCLosUpdateOtherStuff(s32 id) {
         TargetSetThreatLevel(id);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCLosUpdateOtherStuff);
-#endif
 
 void NPCTakeShot(Gobj *obj, s32 dist) {
     NPC *npc = NPC_OF(obj);
