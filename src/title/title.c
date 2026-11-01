@@ -1104,9 +1104,6 @@ static void func_80143718(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: sprite pointer and colour value swap a0/a1 */
-/* Fades the "New game" / "Load game" sprites. */
 static void func_80143764(void) {
     TitleRGB c;
     s32 i;
@@ -1134,6 +1131,9 @@ static void func_80143764(void) {
             } else {
                 c.r = 0;
             }
+            c.g = c.b = c.r;
+            SpritePutRGB(&mTitleScreenSprite[i], &c);
+            continue;
         } else if (i == mCurItem) {
             if (c.r == 200) {
                 continue;
@@ -1143,6 +1143,9 @@ static void func_80143764(void) {
             } else {
                 c.r = 200;
             }
+            c.g = c.b = c.r;
+            SpritePutRGB(&mTitleScreenSprite[i], &c);
+            continue;
         } else {
             if (c.r == 70) {
                 continue;
@@ -1159,9 +1162,6 @@ static void func_80143764(void) {
         SpritePutRGB(&mTitleScreenSprite[i], &c);
     }
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", func_80143764);
-#endif
 
 /* Builds the text of the current menu. */
 static void func_80143920(void) {
