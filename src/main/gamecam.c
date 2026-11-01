@@ -2818,7 +2818,7 @@ INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
 #endif
 
 #ifdef NON_MATCHING
-/* the CameraAccessFrameInfo mode select: original loads gCamera after the arms (shared call tail) */
+/* per-arm calls (cross-jumped); ours still loads gCamera in each arm, the original once in the shared tail (2 insns) */
 s32 func_80021BA4(void) {
     VECTOR32 cur;
     VECTOR32 pos;
@@ -2839,11 +2839,11 @@ s32 func_80021BA4(void) {
         s32 which;
 
         if (D_80113B2C.mode == 13 || D_80113B2C.mode == 18 || D_80113B2C.unk05C == 2) {
-            which = 2;
+            CameraAccessFrameInfo(gCamera, 0, 2, 1);
         } else {
             which = 1;
+            CameraAccessFrameInfo(gCamera, 0, which, 1);
         }
-        CameraAccessFrameInfo(gCamera, 0, which, 1);
         cur = CAM->unkD1C;
         d.vx = pos.vx - cur.vx;
         d.vy = pos.vy - cur.vy;
