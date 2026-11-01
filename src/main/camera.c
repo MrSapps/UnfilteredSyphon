@@ -318,23 +318,16 @@ u8 CameraActivateAndDisplay(Camera *cam, u8 on) {
     return ret;
 }
 
-#ifdef NON_MATCHING
-/* layout matches; ret lands in v1 (the display load takes v0) where the original keeps ret in v0 and loads into v1 */
 u8 CameraGetDisplay(Camera *cam, EGSCamera **out) {
-    u8 ret = 0;
-
-    if (cam != NULL) {
-        ret = 1;
-        if (out == NULL) {
-            return 0;
-        }
-        *out = cam->display;
+    if (cam == NULL) {
+        return 0;
     }
-    return ret;
+    if (out != NULL) {
+        *out = cam->display;
+        return 1;
+    }
+    return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/camera", CameraGetDisplay);
-#endif
 
 u8 CameraSetDisplayRegion(Camera *cam, void *region) {
     u8 ret = 0;
