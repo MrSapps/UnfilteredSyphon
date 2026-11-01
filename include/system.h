@@ -130,7 +130,7 @@ void SysStatePop(void);
 void SysStopSound(void);
 void SysStopAllSongs(void);
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3);
-void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer);
+s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer);
 void SysLoadTextureCacheOverlay(char *name, u8 arg1);
 
 /* EGS file API; open/read return 0 on success. */

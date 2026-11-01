@@ -477,8 +477,8 @@ s32 SysLoadData(char *name, void **buf, s32 size) {
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
 
 #ifdef NON_MATCHING
-/* Register allocation differs around the size clamp (limit lands in $a3 directly). */
-void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
+/* Returns the loaded size. Register allocation differs around the size clamp (the original builds the limit in v0 and copies it to a3). */
+s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
     char path[56];
     s32 file;
     u32 len;
@@ -509,6 +509,7 @@ void SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
         tcOverlay[0] = 0;
     }
     EGSFileClose(&file);
+    return len;
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadOverlay);
