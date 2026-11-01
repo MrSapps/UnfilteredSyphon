@@ -49,6 +49,9 @@ def main():
         f'DIR="$(dirname "$0")"\n'
         f'cat "$DIR/prelude.c" "$1" | {cc1} -quiet -O2 -G{gsize} -mgas -mgpOPT -mgpopt -msoft-float '
         "-fno-builtin -funsigned-char -o - "
+        # maspsx can't parse `.set sym, other+N` aliases inside .sdata (the top-level
+        # asm in interface.c/particle.c): leave .sdata first
+        "| sed -E '/^\\s*\\.set\\s+\\w+\\s*,/i .text' "
         f"| {py} {maspsx} --aspsx-version=2.79 -G{gsize} --expand-div "
         "| sed 's/^\\s*\\.rdata\\s*$/\\t.section .rodata/' "
         f'| {asbin} -EL -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 -I{ROOT}/include -o "$3" -\n'
