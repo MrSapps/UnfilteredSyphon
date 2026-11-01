@@ -516,6 +516,24 @@ u8 *LevelGetMenuHogHeader(void) {
     return levelLoadHeader->base + offset;
 }
 
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(gAddingObjectiveViaQuip)
+SDATA_LOCAL(gameObjectsModelInfo)
+SDATA_LOCAL(gHanHogFile)
+SDATA_LOCAL(gHanLvlHogFile)
+SDATA_LOCAL(gInEOLState)
+SDATA_LOCAL(gLevelGameObjCount)
+SDATA_LOCAL(gLevelSpecificNpcID)
+SDATA_LOCAL(gLevelSpecificNpcID2)
+SDATA_LOCAL(gMissionFailed)
+SDATA_LOCAL(gObjectives)
+SDATA_LOCAL(gPermHogFile)
+SDATA_LOCAL(gStartedEOLFade)
+SDATA_LOCAL(levelLoadHeader)
+SDATA_LOCAL(mLastTickAddedObjectives)
+SDATA_LOCAL(mNextTickAllowMsgIncompleteObjectives)
+SDATA_LOCAL(mNextTickAllowMsgMissionFailed)
+
 /* An unreferenced "" follows "\\EOL\\%s" (orig 0x8010F6FC) before camera.c's data;
  * that it is level.c's (and a static) is a guess. */
 static char D_8010F6FC[] = "";

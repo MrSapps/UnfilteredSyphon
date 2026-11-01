@@ -1640,3 +1640,12 @@ INCLUDE_ASM("asm/main/nonmatchings/cobj", GTELOSLoop);
 #endif
 
 /* D_800122F4: "s/cobj.c", now emitted by PreSortHits (see config/syms.d/main/cobj.ld) */
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(losBlocker)
+SDATA_LOCAL(losEndPointZ)
+SDATA_LOCAL(losGCount)
+SDATA_LOCAL(losHitCount)
+SDATA_LOCAL(losInvMatrix)
+SDATA_LOCAL(losSectorHitCount)
+SDATA_LOCAL(losSortedCount)

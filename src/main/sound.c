@@ -859,3 +859,6 @@ void SysSoundPlayPeriodicSong(s32 song, s32 arg1) {
     D_801101A4 = 0;
     SysExeTickQueueTimer(func_8006B6A0, 60, 0);
 }
+
+/* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
+SDATA_LOCAL(mXABlock)
