@@ -210,8 +210,6 @@ void WindowLOSLoop(LOSQuery *query) {
     LOSVerifyHits(query);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: node/hit swap s3/s4 (forced is computed in an int temp and copied) */
 void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     LOSNode *node;
     GameObjectRuntime *gobj;
@@ -250,28 +248,27 @@ void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
         } else {
             box->id = 0;
         }
-        if (gobj != ignore1 && gobj != ignore0 && (!forcedOnly || forced)) {
-            LOSSetupGTE(&gobj->anim->frame->matrix);
-            if (forced || LOSOnScreen(6000, 150)) {
-                losGCount++;
-                hit->owner = (LOSCollideAnim *)gobj->anim;
-                if (LOSRotBoxV(box, losEndPointZ, hit, &losRay)) {
-                    hit->window = node;
-                    hit->type = type;
-                    hit->box = box;
-                    if (++losHitCount == LOS_HIT_MAX) {
-                        PreSortHits(query);
-                    }
-                    hit = &losHitArray[losHitCount];
+        if (gobj == ignore1 || gobj == ignore0 || (forcedOnly && !forced)) {
+            node = node->next;
+            continue;
+        }
+        LOSSetupGTE(&gobj->anim->frame->matrix);
+        if (forced || LOSOnScreen(6000, 150)) {
+            losGCount++;
+            hit->owner = (LOSCollideAnim *)gobj->anim;
+            if (LOSRotBoxV(box, losEndPointZ, hit, &losRay)) {
+                hit->window = node;
+                hit->type = type;
+                hit->box = box;
+                if (++losHitCount == LOS_HIT_MAX) {
+                    PreSortHits(query);
                 }
+                hit = &losHitArray[losHitCount];
             }
         }
         node = node->next;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gtegeo", GobjLOSLoop);
-#endif
 
 #ifdef NON_MATCHING
 /* frame is 8 bytes larger and registers differ in the edge loop */
