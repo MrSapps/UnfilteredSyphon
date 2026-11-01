@@ -74,6 +74,7 @@ typedef struct TextWindow {
 extern TextString D_80120BE0[TEXT_STRING_MAX];
 extern TextWindow D_80121158[TEXT_WINDOW_MAX];
 void *gTextCamera;              /* common, $gp */
+SDATA_LOCAL(gTextCamera)
 /* .sdata (the rest, which the original reaches with lui, is defined at the end) */
 static s32 D_8010FA48 = 0;      /* next free sprite */
 static u16 D_8010FA4C = 0;      /* next free string slot */
@@ -1423,7 +1424,7 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
 }
 
 #ifdef NON_MATCHING
-/* scheduling only: the original stores s->serial after the (u8)sum << 8 / id load (3 insns differ) */
+/* scheduling only: the original stores s->serial after the (u8)sum << 8 / id load (1 insn off) */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;
