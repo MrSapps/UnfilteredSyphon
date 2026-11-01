@@ -1051,7 +1051,6 @@ int EGSGeometry_GetIntersectRaySegment2UnrotBox(EGSSegment *ray, EGSBox *box, s3
     EGSBox bb;
     VECTOR hp;
     u8 found;
-    s32 t;
     s32 am;
 
     seg = *ray;
@@ -1091,7 +1090,7 @@ int EGSGeometry_GetIntersectRaySegment2UnrotBox(EGSSegment *ray, EGSBox *box, s3
         found = 0;
     }
     if (found == 1) {
-        t = hp.vx - seg.p0.vx;
+        s32 t = hp.vx - seg.p0.vx;
         hp.vy = seg.p1.vy * t / seg.p1.vx + seg.p0.vy;
         hp.vz = seg.p1.vz * t / seg.p1.vx + seg.p0.vz;
         if (hp.vy >= b.min.vy - margin && b.max.vy + margin >= hp.vy &&
@@ -1116,7 +1115,7 @@ int EGSGeometry_GetIntersectRaySegment2UnrotBox(EGSSegment *ray, EGSBox *box, s3
         found = 0;
     }
     if (found == 1) {
-        t = hp.vy - seg.p0.vy;
+        s32 t = hp.vy - seg.p0.vy;
         hp.vx = seg.p1.vx * t / seg.p1.vy + seg.p0.vx;
         hp.vz = seg.p1.vz * t / seg.p1.vy + seg.p0.vz;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
@@ -1141,7 +1140,7 @@ int EGSGeometry_GetIntersectRaySegment2UnrotBox(EGSSegment *ray, EGSBox *box, s3
         found = 0;
     }
     if (found == 1) {
-        t = hp.vz - seg.p0.vz;
+        s32 t = hp.vz - seg.p0.vz;
         hp.vx = seg.p1.vx * t / seg.p1.vz + seg.p0.vx;
         hp.vy = seg.p1.vy * t / seg.p1.vz + seg.p0.vy;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
@@ -1171,7 +1170,6 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
     EGSBox bb;
     VECTOR hp;
     u8 found;
-    s32 t;
 
     seg = *segment;
     b = *box;
@@ -1210,7 +1208,7 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        t = hp.vx - seg.p0.vx;
+        s32 t = hp.vx - seg.p0.vx;
         hp.vy = seg.p1.vy * t / seg.p1.vx + seg.p0.vy;
         hp.vz = seg.p1.vz * t / seg.p1.vx + seg.p0.vz;
         if (hp.vy >= b.min.vy - margin && b.max.vy + margin >= hp.vy &&
@@ -1234,7 +1232,7 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        t = hp.vy - seg.p0.vy;
+        s32 t = hp.vy - seg.p0.vy;
         hp.vx = seg.p1.vx * t / seg.p1.vy + seg.p0.vx;
         hp.vz = seg.p1.vz * t / seg.p1.vy + seg.p0.vz;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
@@ -1258,7 +1256,7 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        t = hp.vz - seg.p0.vz;
+        s32 t = hp.vz - seg.p0.vz;
         hp.vx = seg.p1.vx * t / seg.p1.vz + seg.p0.vx;
         hp.vy = seg.p1.vy * t / seg.p1.vz + seg.p0.vy;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
