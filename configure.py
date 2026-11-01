@@ -69,7 +69,7 @@ CFLAGS = "-quiet -O2 -G$gsize -mgas -mgpOPT -mgpopt -msoft-float -fno-builtin -f
 # --use-comm-section: uninitialised globals stay `.comm` so they resolve to the splat
 # .sbss/.bss definitions (psylink places commons after all objects, in hash order),
 # instead of maspsx allocating a private copy in the object (docs/data_migration.md).
-MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.79 -G$gsize --expand-div --use-comm-section"
+MASPSX = f"{TOOLS}/maspsx/maspsx.py --aspsx-version=2.77 -G$gsize --expand-div --use-comm-section"
 
 
 def gnu_cc_command():

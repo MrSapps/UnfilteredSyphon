@@ -52,7 +52,7 @@ def main():
         # maspsx can't parse `.set sym, other+N` aliases or `.macro` (scratch.h) inside
         # .sdata (top-level asm in interface.c/particle.c): leave .sdata first
         "| sed -E '/^\\s*(\\.set\\s+\\w+\\s*,|\\.macro\\s)/i .text' "
-        f"| {py} {maspsx} --aspsx-version=2.79 -G{gsize} --expand-div "
+        f"| {py} {maspsx} --aspsx-version=2.77 -G{gsize} --expand-div "
         "| sed 's/^\\s*\\.rdata\\s*$/\\t.section .rodata/' "
         f'| {asbin} -EL -march=r3000 -mtune=r3000 -no-pad-sections -O1 -G0 -I{ROOT}/include -o "$3" -\n'
     )
