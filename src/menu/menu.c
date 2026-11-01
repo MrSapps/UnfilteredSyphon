@@ -1119,18 +1119,19 @@ void func_80139710(void) {
 }
 
 
-#ifdef NON_MATCHING
-/* gMissionFailed as a struct member fixes the store order; the D_8013F7C4 reload is not hoisted above the last three stores and gObjectives/0xFF swap v0/v1 */
 void func_80139738(void) {
     Gobj *player;
+    s32 v;
 
-    switch (D_8013F7C4) {
+    v = D_8013F7C4;
+    switch (v) {
         case 0:
             func_80138DE0(2);
             break;
         case 1:
         case 2:
-            gObjectives->unk24 = gObjectives->completed = gObjectives->unk18 = gObjectives->unk1C = 0xFF;
+            v = 0xFF;
+            gObjectives->unk24 = gObjectives->completed = gObjectives->unk18 = gObjectives->unk1C = v;
             gObjectives->unk20 = gObjectives->unk14 = ((struct { u8 v; } *)&gMissionFailed)->v = 0;
             if (D_8013F7C4 == 1 && LevelZoom(0) && gSysInfo.level == 13) {
                 func_801417AC();
@@ -1157,9 +1158,6 @@ void func_80139738(void) {
             break;
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_80139738);
-#endif
 
 void func_801398A4(void) {
     switch (D_8013F7C4) {
