@@ -918,10 +918,10 @@ s32 func_80025F18(Gobj *gobj) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* Per-arm SysPlaySong calls (cross-jumped; the original shares only a3/a1+2/jal) and per-arm
- * material = floor->data - k took this from 12 to 8 lines. Left: the original keeps material in
- * v0 and the kind constant 4 in a0 (ours a1/v0), and sets a0 = 0 in the bne delay slot. */
+/*
+ * Per-arm SysPlaySong calls (cross-jumped; the original shares only a3/a1+2/jal);
+ * material = data - (kind == 4 ? 2 : 0xD) (one subtract of a selected constant) keeps material in v0.
+ */
 void PlayerLandCASAnimCB(s16 id) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
     VECTOR32 pos = ((PlayerMoveInfo *)gobj->move)->groundPos;
@@ -930,11 +930,7 @@ void PlayerLandCASAnimCB(s16 id) {
 
     if (id == gPlayerOffset) {
         floor = ((PlayerMoveInfo *)gobj->move)->feet->floor;
-        if (floor->kind == 4) {
-            material = floor->data - 2;
-        } else {
-            material = floor->data - 0xD;
-        }
+        material = floor->data - (floor->kind == 4 ? 2 : 0xD);
         SysPlaySong(0, gSoundFootstep[*material & 0x1F] + 2, gobj, 0);
     } else {
         SysPlaySong(0, gSoundFootstep[0] + 2, gobj, 0);
@@ -944,9 +940,6 @@ void PlayerLandCASAnimCB(s16 id) {
         EGSDisplayRegisterFootprint(((PlayerAnimFrames *)gobj->anim)->frames[1], SpriteFootFxTextureGet(1), &pos);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", PlayerLandCASAnimCB);
-#endif
 
 /*
  * material = data - (kind == 4 ? 2 : 0xD) keeps material in v0; `r = right != 0` in its own
