@@ -2525,7 +2525,10 @@ static inline void iTrackStop(GameCamTrack *track, s32 dist, s32 d, s32 r) {
     VECTOR32 q;
     VECTOR32 p;
 
-    p.vx = EGSMathFIXDiv(track->vel.vx, dist);
+    {
+        s32 *pp = &p.vx;
+        *pp = EGSMathFIXDiv(track->vel.vx, dist);
+    }
     p.vy = EGSMathFIXDiv(track->vel.vy, dist);
     p.vz = EGSMathFIXDiv(track->vel.vz, dist);
     d = d - r;
@@ -2542,7 +2545,12 @@ static inline void iTrackStop(GameCamTrack *track, s32 dist, s32 d, s32 r) {
 }
 
 #ifdef NON_MATCHING
-/* else branch as an inline (track now in s1 as in the original); the original copies r into s3 for it and keeps d/dist in s0/s2, loading unk3C after the plane normal */
+/* 4 lines left: the original computes r into a1 (then-branch) and copies it to s3 for the else
+ * (copy in the bnez delay slot), and loads unk3C after the plane normal. Here the inline's r
+ * param copy is removed by CSE (make_regs_eqv: the copy only survives as canonical if it lives
+ * beyond the cse block, and the else block runs to the function end). Passing
+ * track->unk10 << 12, a block-local copy, or a separate var all get CSE'd. Fixed so far:
+ * `d = dist - d; d += r;` (d/dist in s0/s2) and the pointer-store for p.vx (sw in the jal slot). */
 void func_80020978(GameCamTrack *track) {
     VECTOR32 n;
     s32 r = track->unk10 << 12;
@@ -2554,7 +2562,8 @@ void func_80020978(GameCamTrack *track) {
         n.vx = normal->vx;
         n.vy = normal->vy;
         n.vz = normal->vz;
-        d = dist - d + r;
+        d = dist - d;
+        d += r;
         track->unk54.vx = EGSMathFIXMul(n.vx, d);
         track->unk54.vy = EGSMathFIXMul(n.vy, d);
         track->unk54.vz = EGSMathFIXMul(n.vz, d);

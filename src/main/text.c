@@ -250,7 +250,14 @@ void func_80082E70(TextString *text, s32 x, s32 y) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc of the width/room/arrow temps (a1/a0/a2 vs a2/a1/a3); the original loads line[0].tag after the colour stores and keeps &line[1] in s0; endTick < -1 compares against a register */
+/* Only the endTick test differs: cc1 emits `sltu $2,$3,-1` for every spelling tried
+ * ((u32)-1, 0xFFFFFFFFU, ~0U, <= 0xFFFFFFFE, ...) and maspsx --aspsx-version=2.77
+ * (sltu_at=False for >= 2.60) passes it to GNU as as sltiu, while the original has
+ * `li $at,-1; sltu $v0,$v1,$at` (aspsx expanding a negative sltu immediate). No other
+ * function in the game has a negative sltu/sltiu immediate, so this needs either
+ * maspsx's sltu_at for 2.77 or a check of what real aspsx 2.77 does (Psy-Q build).
+ * Fixed: room and x are one variable (x); `l1 = &line[1]` read through l1[-1].tag (s0 +
+ * tag load after the colour stores). */
 /*
  * Place marker string s (index-th marker) over the object it labels: project
  * the object (or the top of its model) to the screen, move the string there
@@ -268,7 +275,6 @@ void func_80082F20(TextString *s, s32 index) {
     HotboxModel *model;
     TextLine *line;
     s32 width;
-    s32 room;
     s32 arrow;
     s32 x;
     s32 t;
@@ -337,13 +343,13 @@ void func_80082F20(TextString *s, s32 index) {
         }
         if (head.vx + (t = width + 8) > 0x98) {
             /* off the right edge: right-justify and shorten the pointer */
-            room = 0xA0 - pos.vx;
-            arrow = room * 6 / (width + 16);
+            x = 0xA0 - pos.vx;
+            arrow = x * 6 / (width + 16);
             at.vx = 0x98;
             if (arrow < 0) {
                 arrow = 0;
             }
-            x = width * room / (width + 16);
+            x = width * x / (width + 16);
             if (x < 0) {
                 x = 0;
             }
@@ -377,9 +383,12 @@ void func_80082F20(TextString *s, s32 index) {
             color = ((chars[0].b << 16) + (chars[0].g << 8) + chars[0].r) | 0x40000000;
             line[1].color = color;
             line[0].color = color;
-            if (line[0].tag == 0) {
-                EGSDisplayAddPoly(gTextCamera, &line[0]);
-                EGSDisplayAddPoly(gTextCamera, &line[1]);
+            {
+                TextLine *l1 = &line[1];
+                if (l1[-1].tag == 0) {
+                    EGSDisplayAddPoly(gTextCamera, &line[0]);
+                    EGSDisplayAddPoly(gTextCamera, l1);
+                }
             }
         } else if (line[0].tag != 0) {
             EGSDisplayDeletePoly(gTextCamera, &line[0]);
