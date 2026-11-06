@@ -543,6 +543,9 @@ void ClearVABsResolvedFlag(SoundBlock *block) {
 
 #ifdef NON_MATCHING
 /* regalloc: s4/s5 swapped in loop 1; target copies type to a3 for the 7/9/10 tests */
+/* r2B: byID as its own statement / (u32)(type-7)<2, `s32 t = type` in the other!=NULL block, and the
+ * copy block as a static inline taking type (any param order) change nothing; the original also
+ * computes byID straight into a1 (sltiu a1) where ours copies v0 -> a1 in the delay slot. */
 void SetupAllLoaded(s16 revType, s16 revDepth) {
     s32 n;
     s32 i;

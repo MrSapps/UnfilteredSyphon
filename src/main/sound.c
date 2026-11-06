@@ -700,6 +700,9 @@ void SysUpdateMusicExciteLevel(s32 level) {
 }
 
 #ifdef NON_MATCHING
+/* r2B: a block-local `SoundFrame *f` for `them` ties frame and the vz load into v1 as the original does;
+ * `total = 0` before the excite chain flips excite/total to a0/t0 (correct) but moves the init out of
+ * the blez delay slot (17 lines with both). Decl order and an excite inline do nothing. */
 /* Register allocation only: the NPC frame/threat and excite/total pairs get swapped
  * registers ($a0/$v1, $a0/$t0). */
 /* Next active NPC id from npcList, -1 when done */

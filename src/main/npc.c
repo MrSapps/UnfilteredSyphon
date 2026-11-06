@@ -1998,6 +1998,7 @@ void NPCShoot(Gobj *obj) {
 
 #ifdef NON_MATCHING
 /* regalloc: target copies points to a2 and keeps v in a0; the vz store goes through v (a0) instead of a %lo symbol */
+/* r2B: `v = &D; v->vz = ..` still folds (cse1 knows v == &D, so (plus v 8) becomes D+8); all-through-v is worse (31). */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
     NPC *npc = NPC_OF(obj);

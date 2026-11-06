@@ -738,6 +738,10 @@ void LoadPlayerAnimations(u8 gabe) {
 
 #ifdef NON_MATCHING
 /* gObjPlayer store scheduled earlier; the constant 1 is CSE'd across the grenade loop into s2 */
+/* r2B: `gobj->anim = gobj->anim; display = *gCamera; gObjPlayer = gobj; AddAnim(display, ..)` sinks the
+ * gObjPlayer store below the *gCamera load (a plain deref conflicts with a scalar store), but the
+ * gCamera pointer load then lands after the anim store (19 lines). The 1: cse2 links the in-loop QImode
+ * reg (flags0 = 1) to the post-loop npcState/released stores; loop in a static inline, do-while: no help. */
 /* Create the player object: Gabe's model, collision, flashlight and the two grenade objects. */
 void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move) {
     GOBJ_MATRIX m;

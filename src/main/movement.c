@@ -1187,6 +1187,9 @@ static inline void MovementTurnTowards(Gobj *gobj, VECTOR32 *v, u8 mode) {
 
 #ifdef NON_MATCHING
 /* regalloc: original keeps the AngleInterpolate mode (0) in s1 across ratan2, shifting s-regs */
+/* r2B: the s1 pseudo can have no REG_EQUIV 0 in the original (set only in the ratan2 delay slot);
+ * u8/s16/s32/s8 param, (u8) cast, `mode = mode`, caller `u8 mode = 0` (top or at the call) and an
+ * inline-local copy all still fold to `move a3,zero`. The unk2C vx/vz/vy store order also differs. */
 s32 func_8004B058(Gobj *gobj) {
     MovementInfo *move = MOVE(gobj);
     u32 flags = move->edgeFlags;
