@@ -2358,21 +2358,18 @@ void EGSDisplayRegisterHMD(HMDHeader *hmd) {
     }
 }
 
-#ifdef NON_MATCHING
-/* gGabeCache is gp-relative now (SDATA_LOCAL); only the store/load order differs */
+/* gGabeCache/D_8011045C are really one HMDCacheList {count, entries}: the stores must be
+ * struct (MEM_IN_STRUCT) accesses so sched keeps them ahead of the ref->unk18 load. */
 void InitGabeDamage(void) {
     EGSAnim *ref;
 
-    gGabeCache = 1;
+    ((HMDCacheList *)&gGabeCache)->count = 1;
     ref = gCameraArray[0].refAnim;
-    D_8011045C = &gGabeCacheEntry;
+    ((HMDCacheList *)&D_8011045C)->count = (s32)&gGabeCacheEntry;
     gGabeCacheEntry.count = 0;
-    D_8011045C->obj = ref;
     gGabeCacheEntry.unk04 = ref->unk18;
+    D_8011045C->obj = ref;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", InitGabeDamage);
-#endif
 
 s32 EGSDisplayRegisterHMDDamage(EGSAnim *anim, s32 bone, VECTOR *in, VECTOR *out, u8 byVertex) {
     EGSSectorInfo *hmd = anim->model->info;
