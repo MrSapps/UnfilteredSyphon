@@ -663,7 +663,11 @@ void SoundPlayXACASAnimCB(s32 id, s32 event) {
 
 #ifdef NON_MATCHING
 /* cc1 folds the -1 into the note before adding rand() % 3; the original adds (rand() % 3 - 1)
- * to the sign-extended note. */
+ * to the sign-extended note. Best so far (1 line, no prototype change): `s32 note` (raw result
+ * kept across rand), `d = rand() % 3 - 1;` as its own statement, then pass `n = (s16)note + d`
+ * (s32 n) -- the ext then lands after rand like the original, but sched1 places the ext pair
+ * after the div's `sra a2,v0,31` (the original has it before). Narrowing forms ((s16)(x + d),
+ * s16 n += d) drop the ext entirely; `n = (s16)note` before rand puts the ext before the call. */
 void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 id = song + variant;
     s16 note;
