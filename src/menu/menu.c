@@ -2440,6 +2440,9 @@ void func_8013D04C(void) {
     }
 }
 
+/* Sized 12 (padding included): as a plain literal, ccpsx packs the next string with no word padding. */
+static const char D_mapFmt[12] = "MAP%d.TIM";
+
 /* Map screen: load the level maps and place the player arrow. */
 void func_8013D19C(void) {
     char name[24];
@@ -2483,7 +2486,7 @@ void func_8013D19C(void) {
         tex.tim = D_8013FE78;
         FlushAllStreamRequests();
         for (i = 0; i < 16; i++) {
-            sprintf(name, "MAP%d.TIM", i + 1);
+            sprintf(name, D_mapFmt, i + 1);
             D_8013F7CC = 8;
             if (StreamHogBlock(name, D_8013FE78, 0xF000, 0, NULL) == 0) {
                 StreamSynchronous();
