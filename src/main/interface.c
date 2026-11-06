@@ -2770,8 +2770,6 @@ void func_80040940(s32 weapon, s32 dir) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: scroll step and icon pointer swap s1/s2 */
 void InterfaceWeaponSelect(u8 held, s32 dir) {
     s32 i;
     s32 step;
@@ -2824,9 +2822,11 @@ void InterfaceWeaponSelect(u8 held, s32 dir) {
             }
             x = D_80118A34;
             if (x != 0) {
-                step = x >> 1;
+                step = x;
                 if ((u32)(x + 32) > 64) {
-                    step = x >> 2;
+                    step >>= 2;
+                } else {
+                    step >>= 1;
                 }
                 if (step == 0) {
                     step = -1;
@@ -2881,9 +2881,6 @@ done:
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceWeaponSelect);
-#endif
 
 u8 func_80040F08(u8 up, s32 *level) {
     if (up) {
