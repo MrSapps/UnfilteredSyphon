@@ -457,6 +457,9 @@ __asm__(".set D_8014289C, parkObjectives+4\n");
 /*
  * One instruction short: the original copies ObjectMatchToRefIDByCatID's result
  * into $v1 before the healthInfo load, and keeps `type` in $v1 rather than $a1.
+ * Also: in the COP branch ours compares GOBJ_TYPE(ref) against `type`'s reg (cse2 equivalence after
+ * type == 0x35) where the original uses the hoisted 0x35 in $s4. Reusing cop/rt for the
+ * ObjectMatchToRefIDByCatID result or refType for the inner type tests doesn't help.
  */
 void iParkInit(s32 mode) {
     int i;

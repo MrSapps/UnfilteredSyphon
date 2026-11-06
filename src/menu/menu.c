@@ -998,7 +998,9 @@ void func_80139150(MenuItem *item, s32 on, s32 enabled) {
 }
 
 #ifdef NON_MATCHING
-/* register allocation of the x/y invariants and the end-x register */
+/* register allocation of the x/y invariants and the end-x register. Original: half=s3, x1&0xFFFF=s4, quad=s5,
+ * top=s6 (priority half > x1 > quad > top); ours puts half last. `x1 = ...; x1 &= 0xFFFF;` + `x1 | top` removes
+ * our extra loop-2 copy (22 lines) but not the order; u16 x1 is worse. */
 void func_80139230(MenuBox *box, s32 y, s32 width, s32 value) {
     MenuQuad *quad = box->quads;
     MenuLine *line = box->lines;

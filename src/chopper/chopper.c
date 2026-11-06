@@ -513,7 +513,9 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_8014196C);
 #ifdef NON_MATCHING
 /* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758.
  * sched2 ties: both loads priority 1, luid order decides (ours has 282=D_8014574C before 249=pos.vy
- * after sched1). 60 random orders of the store statements, no-r, r-first and a y local: none better. */
+ * after sched1). 60 random orders of the store statements, no-r, r-first and a y local: none better.
+ * Not fixed by: moving any one statement of the block, 300 random statement orders, a twice-set h temp,
+ * reading D_8014574C directly instead of r, D_80145750 = D_80145754 - (r >> 3). */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;
@@ -1254,8 +1256,11 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_80143B88);
 
 #ifdef NON_MATCHING
 /*
- * Callee-saved registers for dmg/tgt are swapped, the losBlocker load is
- * scheduled later and the material is read with lhu instead of lh.
+ * 5 lines left (was 32): only `full` gets $a0 where the original has $a3
+ * (global-alloc conflict/preference; u32, function-scope and reorder variants
+ * don't move it). Fixed so far: losBlocker read into a block-local right after
+ * _LOSPoint2Point, material via an s32 temp (lh), `full` set in two statements
+ * (srl/andi into one reg), and the >>2 arm first via `(a >= x && b >= x) ? >>2 : >>1`.
  */
 /* Aim the chopper's gun at the player and fire a burst. */
 void ChopperTargeting(s32 *mode, u8 *active) {
@@ -1315,20 +1320,28 @@ void ChopperTargeting(s32 *mode, u8 *active) {
         los.unk2C = 0;
         los.unk30 = 0;
         _LOSPoint2Point(&los);
-        tgt->flags = (tgt->flags & ~2) | ((clear & 1) << 1);
-        tgt->hitPos = hitPos;
-        if (losBlocker != NULL) {
-            if (losBlocker->kind == 1) {
-                hitId = losBlocker->obj->id & 0x3FF;
-            } else {
-                hitId = -1;
+        {
+            LOSBlocker *blk = losBlocker;
+
+            tgt->flags = (tgt->flags & ~2) | ((clear & 1) << 1);
+            tgt->hitPos = hitPos;
+            if (blk != NULL) {
+                if (blk->kind == 1) {
+                    hitId = blk->obj->id & 0x3FF;
+                } else {
+                    hitId = -1;
+                }
+                {
+                    s32 m = losBlocker->poly->material;
+                    tgt->material = m & 0x3F;
+                }
             }
-            tgt->material = losBlocker->poly->material & 0x3F;
         }
         if (hitId >= 0) {
             hit = (ChopperGobj *)gameObjectsInfo[hitId].runtime;
             if (hit->unk22 != 2 || hit->healthInfo->health <= 0) {
-                dmg = (D_80106220 >> 6) & 0x3FF;
+                dmg = D_80106220 >> 6;
+                dmg &= 0x3FF;
             } else {
                 fire = 0;
             }
@@ -1337,16 +1350,12 @@ void ChopperTargeting(s32 *mode, u8 *active) {
             EGSGeometry_GetFuzzyDistancePoint2Point(&hitPos, &playerPos, &distPlayer);
             EGSGeometry_GetFuzzyDistancePoint2Point(&hitPos, &D_80145670, &distTarget);
             if (!D_80145570 && (distPlayer < 0x8C || distTarget < 0x8C)) {
-                s32 full = (D_80106220 >> 6) & 0x3FF;
+                s32 full = D_80106220 >> 6;
+
+                full &= 0x3FF;
 
                 hit = (ChopperGobj *)gObjPlayer;
-                if (distPlayer < 0x46) {
-                    dmg = full >> 1;
-                } else if (distTarget < 0x46) {
-                    dmg = full >> 1;
-                } else {
-                    dmg = full >> 2;
-                }
+                dmg = (distPlayer >= 0x46 && distTarget >= 0x46) ? full >> 2 : full >> 1;
             } else {
                 fire = 0;
                 if (distPlayer < 0x514 || distTarget < 0x514) {
