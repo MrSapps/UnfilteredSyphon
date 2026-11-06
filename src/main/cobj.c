@@ -272,7 +272,11 @@ static inline u8 CobjOverLimit2(s32 len, s32 limit) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc only: kinetic gets s5 and hits s7 (original: hits s6, staticSum s5, kinetic s7) */
+/* regalloc only: kinetic gets s5 and hits s7 (original: hits s6, staticSum s5, kinetic s7).
+ * kinetic (8 refs, live 194, pri 1237) must drop below hits (736). Reusing kinetic for prev
+ * (`kinetic = *kineticFlag; ... kinetic = kinetic == 0 ? CobjOverLimit2(..) : CobjOverLimit(..)`)
+ * gives the right s5/s6/s7 (8 lines) but the original keeps prev separate in s2 and sets
+ * kinetic directly in each branch; a dead `kinetic = 0` at the top is deleted (no effect). */
 s32 CollisionPhysicsGobj_DetectorMotion(Gobj *obj, Gobj *other, CobjPhysics *det, CobjContact **hits, s32 count,
                                         u8 *kineticFlag) {
     VECTOR32 a;
