@@ -1307,7 +1307,11 @@ void EFFECTS2ObjInit(InitRuntime *rt) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: flag bit computed straight into s1 instead of via v0 */
+/* regalloc: flag bit computed straight into s1 instead of via v0.
+ * Ours: the SI and-result is the multi-block pseudo (CSE folds the u8 hi copy into it).
+ * Tried: hi = flags1 &= 0x80, block-local u8/s32 temps, two-step hi = x; hi &= 0x80, goto layouts,
+ * bitfield struct, u8/s32 hi. `static inline u8 f(rt, u8 v){rt->flags1 = v; return v;}` gets
+ * the v0->s1 copy right but adds andi 0xFF and folds hi|1 to li 1 (3 diffs). */
 void ELEVATORObjInit(InitRuntime *rt, s32 type) {
     u8 hi;
 

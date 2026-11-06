@@ -511,7 +511,9 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_8014196C);
 #endif
 
 #ifdef NON_MATCHING
-/* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758 */
+/* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758.
+ * sched2 ties: both loads priority 1, luid order decides (ours has 282=D_8014574C before 249=pos.vy
+ * after sched1). 60 random orders of the store statements, no-r, r-first and a y local: none better. */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;

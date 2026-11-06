@@ -106,7 +106,9 @@ static void func_80141400(s16 id, s16 by) {
 }
 
 #ifdef NON_MATCHING
-/* Right length and logic; register allocation of the id copy differs. */
+/* Right length and logic; register allocation of the id copy differs.
+ * An `s16 id` parameter reproduces the entry (copy to a3, sext in place in a0) but then
+ * ObjectBombDeath(..., id) gets a sll/sra the original lacks (prototype casts don't help). */
 static void func_8014145C(s32 id, s16 by) {
     GameObjectRuntime *rt;
     s16 type;

@@ -620,7 +620,9 @@ static void func_801420D8(SubwayRuntime *rt, s16 by) {
 #define INFO_FLAGS(info) (*(u32 *)&(info)->flags24)
 
 #ifdef NON_MATCHING
-/* attacker id lands in $v0 (original $v1) computing its gameObjectsInfo entry; the weapon 6..7 range test is sltiu (original slti) */
+/* attacker id lands in $v0 (original $v1) computing its gameObjectsInfo entry; the weapon 6..7 range test is
+ * slti in ours, sltiu (with the andi 0xFFFF kept) in the original. `weapon == 6 || weapon == 7`, `< 2U`,
+ * `(u16)(weapon - 6) < 2U` all give sltiu but fold the mask away; s32/u32 weapon worse. */
 static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
     VECTOR32 pos;
     SubwayRuntime *rt;
