@@ -1226,8 +1226,6 @@ static void func_801482D4(InitRuntime *rt) {
     }
 }
 
-#ifdef NON_MATCHING
-/* flags0 &0xD0 value is CSE'd into the clear branch instead of reloaded; 0x3E andi scheduled late */
 void DOORObjInit(InitRuntime *rt, s32 type) {
     s32 hi;
 
@@ -1241,8 +1239,11 @@ void DOORObjInit(InitRuntime *rt, s32 type) {
     } else {
         rt->flags0 |= 0x40;
     }
-    rt->flags1 &= 0xF8;
-    rt->flags0 &= 0xD0;
+    {
+        u8 a = rt->flags1 & 0xF8;
+        rt->flags0 &= 0xD0;
+        rt->flags1 = a;
+    }
     if (type != 0xA && type != 0x60 && type != 0x61 && type != 0x54) {
         rt->flags0 &= ~0x10;
     } else {
@@ -1254,7 +1255,9 @@ void DOORObjInit(InitRuntime *rt, s32 type) {
     } else {
         rt->flags1 |= 0x80;
         if (type == 0x3E) {
-            rt->flags1 &= 0xF8;
+            u8 f = rt->flags1;
+            f &= 0xF8;
+            rt->flags1 = f;
             MovementGobjInit(rt, 0, 0, 0, 0);
             PhysicsGobjBasicInit(rt, 0x2000, 1);
             CollisionGobjBasicInit(rt, rt->move[1], 0x666, 0x800, 1, 0xC00);
@@ -1279,9 +1282,6 @@ void DOORObjInit(InitRuntime *rt, s32 type) {
         func_801482D4(rt);
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", DOORObjInit);
-#endif
 
 void EFFECTSObjInit(InitRuntime *rt, s32 type) {
     s32 n;
