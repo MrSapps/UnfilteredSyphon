@@ -1460,7 +1460,12 @@ void EGSDisplaySortFade(GsOT *ot) {
 }
 
 #ifdef NON_MATCHING
-/* gcc keeps &gCameraArray+4 in s0 across GsSetProjection; original rematerialises it */
+/* gcc keeps &gCameraArray+4 in s0 across GsSetProjection; original rematerialises it.
+ * Expand puts sym+4 in a pseudo for the projection load and CSE's use_related_value then
+ * builds &camera->view as that pseudo + 0x64. Reading the projection into a block temp
+ * fixes that part (6) but then `camera` (== gCameraArray) stays in s0 across GsSetView2,
+ * where the original reloads gCameraArray[0].frame from the constant address; writing
+ * gCameraArray[0] / a block-local camera there doesn't help (CSE reuses the pseudo). */
 void EGSDisplaySortFogScrim(GsOT *ot) {
     MATRIX m;
     VECTOR pos;
@@ -2042,7 +2047,10 @@ void EGSDisplayPacketAreaFree(void) {
 }
 
 #ifdef NON_MATCHING
-/* same length now; original stores gCameraID+1 before the camera index math (index copied from the loaded value) and assigns pos/dist/region/priority/otShift to s2-s6 in a different order */
+/* same length now; original stores gCameraID+1 before the camera index math (index copied from the loaded value) and assigns pos/dist/region/priority/otShift to s2-s6 in a different order.
+ * The original s2..s6 order is plain pseudo order (pos, dist, region, priority, otShift), i.e. those
+ * params tie in global-alloc priority there; here pos (4 refs, live 62) ranks last. u16/s16 index
+ * variants only reach 27. */
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
     s32 index = gCameraID++;
     EGSCamera *camera = &gCameraArray[(s16)index];

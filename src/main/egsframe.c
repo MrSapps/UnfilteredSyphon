@@ -182,7 +182,10 @@ int EGSFrameAddNode(EGSFrame *frame, EGSFrame *parent)
 }
 
 #ifdef NON_MATCHING
-/* loop entry not threaded past the cur!=frame test; prev in a2 not a1 */
+/* loop entry not threaded past the cur!=frame test; prev in a2 not a1.
+ * The loop shape (frame test on top, bnez cur at the bottom) already matches; only the entry
+ * differs. CSE folds the duplicated cur!=NULL entry test but not the frame one, in any operand
+ * order (cur == frame / frame != cur, 7-10); a do-while gives a different layout (9). */
 int EGSFrameRemoveNode(EGSFrame *frame)
 {
     EGSFrameNode *pnode;
