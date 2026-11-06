@@ -1285,13 +1285,15 @@ static inline void iStepColor(IfaceColor *cur, IfaceColor *want) {
         if (want->c[c] < cur->c[c]) {
             want->c[c] = (want->c[c] < cur->c[c] - 10) ? cur->c[c] - 10 : want->c[c];
         } else {
-            want->c[c] = (cur->c[c] + 10 < want->c[c]) ? cur->c[c] + 10 : want->c[c];
+            s32 v = want->c[c];
+            if (cur->c[c] + 10 < v) {
+                v = cur->c[c] + 10;
+            }
+            want->c[c] = v;
         }
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: the fade-step compare keeps want/cur bytes in a1/v1 (original v1/a1); stack slots and the pulse block now match */
 void func_8003C4F8(s32 slot, s32 level) {
     IfacePoly24 *blip;
     s32 k;
@@ -1343,9 +1345,6 @@ void func_8003C4F8(s32 slot, s32 level) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003C4F8);
-#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D3C);
 
