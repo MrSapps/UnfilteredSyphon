@@ -2210,7 +2210,8 @@ void ParticleUpdateGrenadeLauncher(ParticleGroup *g) {
 void EGSDisplaySetFlashTime(s32 ticks);
 
 #ifdef NON_MATCHING
-/* sched only: the original issues pos.vx += vel.vx >> 2 and the particleFireWaveFlag store before the m[1][2] load (6 insns) */
+/* sched only: the original issues pos.vx += vel.vx >> 2 and the particleFireWaveFlag store before the m[1][2] load (6 insns).
+ * Statement reorders of the vel loads/flag store make it much worse (30+); iCamDir/iCamPos inline helpers change nothing. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;

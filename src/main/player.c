@@ -919,27 +919,26 @@ s32 func_80025F18(Gobj *gobj) {
 }
 
 #ifdef NON_MATCHING
-/* Draft: floor material lookup and SysPlaySong argument setup are scheduled differently. */
+/* Per-arm SysPlaySong calls (cross-jumped; the original shares only a3/a1+2/jal) and per-arm
+ * material = floor->data - k took this from 12 to 8 lines. Left: the original keeps material in
+ * v0 and the kind constant 4 in a0 (ours a1/v0), and sets a0 = 0 in the bne delay slot. */
 void PlayerLandCASAnimCB(s16 id) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
     VECTOR32 pos = ((PlayerMoveInfo *)gobj->move)->groundPos;
     PlayerFloorFace *floor;
     u8 *material;
-    u8 sound;
 
     if (id == gPlayerOffset) {
         floor = ((PlayerMoveInfo *)gobj->move)->feet->floor;
-        material = floor->data;
         if (floor->kind == 4) {
-            material -= 2;
+            material = floor->data - 2;
         } else {
-            material -= 0xD;
+            material = floor->data - 0xD;
         }
-        sound = gSoundFootstep[*material & 0x1F];
+        SysPlaySong(0, gSoundFootstep[*material & 0x1F] + 2, gobj, 0);
     } else {
-        sound = gSoundFootstep[0];
+        SysPlaySong(0, gSoundFootstep[0] + 2, gobj, 0);
     }
-    SysPlaySong(0, sound + 2, gobj, 0);
     if (mFootFx == 2) {
         EGSDisplayRegisterFootprint(((PlayerAnimFrames *)gobj->anim)->frames[7], SpriteFootFxTextureGet(0), &pos);
         EGSDisplayRegisterFootprint(((PlayerAnimFrames *)gobj->anim)->frames[1], SpriteFootFxTextureGet(1), &pos);

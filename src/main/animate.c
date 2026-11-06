@@ -932,6 +932,8 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
 /*
  * Logically equivalent; cse folds the original's redundant third
  * "(sex == 0x1000)" test of the first class switch, so this is one insn short.
+ * The fold happens in cse (the test is still present after jump1); splitting the third test
+ * into its own if, a user label before it, or a switch on the sex bits do not stop it.
  */
 u8 func_8007D120(AnimSlot *slot) {
     AnimCharState *state;

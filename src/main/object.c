@@ -315,6 +315,8 @@ GameObjectRuntime *ObjectMatchToRefID(s16 id, s16 type) {
 
 #ifdef NON_MATCHING
 /* target hoists the gLevelGameObjCount reload out of the loop (cse2 then copies it, a3 = v1); our loop.c rates that move "not desirable" (44 insns) */
+/* loop.c: the count load (life 1, savings 1) is the last movable; each earlier move costs threshold 3,
+ * so it fails threshold*1*1 >= 44. `count > i`, do-while with `> ++i`, split ifs, continue forms: no change. */
 GameObjectRuntime *ObjectMatchToRefIDByCatID(s16 id, s16 category) {
     s32 i;
     Gobj *gobj;

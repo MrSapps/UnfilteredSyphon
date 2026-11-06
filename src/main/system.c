@@ -477,7 +477,9 @@ s32 SysLoadData(char *name, void **buf, s32 size) {
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
 
 #ifdef NON_MATCHING
-/* Returns the loaded size. Register allocation differs around the size clamp (the original builds the limit in v0 and copies it to a3). */
+/* Returns the loaded size. Register allocation differs around the size clamp (the original builds the limit in v0 and copies it to a3).
+ * Block-local lim + copy, an inline returning the difference, (u32) casts, ?: clamp: combine still
+ * folds the copy (subu straight into a3). */
 s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
     char path[56];
     s32 file;

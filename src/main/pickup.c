@@ -957,7 +957,9 @@ void func_8008C534(Gobj *obj, s32 type) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: the original loads the pickup byte into v0 and copies it to a2 */
+/* regalloc: the original loads the pickup byte into v0 and copies it to a2 (and info = off + base in v1).
+ * Offset-first info fixes the addu order but moves info to v0; a separate byte local (s32/u8, copy
+ * before or after the test, or an inline iPickupWeapon) always gets coalesced with data (a2). */
 s32 UseLevelSpecificObject(void) {
     s32 data;
     s32 i;
