@@ -763,15 +763,13 @@ void iMuseum2Init(void) {
 __asm__(".set D_80143F80, D_80143F80_s\n");
 #endif /* FIXME: aspsx has no equate here; under _PSYQ psylink resolves D_80143F80 */
 
-#ifdef NON_MATCHING
-/* Only the prologue differs: cc1 schedules the $ra save after the id sign extension. */
 #define HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
 
 /* Start the plane falling: it drops at the midpoint of the two anchor objects on either side. */
 void PlaneFallSetup(MuseumMover *m, s16 id) {
     VECTOR32 vel;
     VECTOR32 pos;
-    s16 ends[2];
+    s16 ends[2] = {-1, -1};
     int i;
     s16 tmp;
     GameObjectInfo *a;
@@ -779,8 +777,6 @@ void PlaneFallSetup(MuseumMover *m, s16 id) {
     s32 *ta;
     s32 *tb;
 
-    ends[0] = -1;
-    ends[1] = -1;
     if (m->id != id) {
         for (i = 0; i < gLevelGameObjCount; i++) {
             if (i != id && i != GOBJ_ID_666 &&
@@ -828,9 +824,6 @@ void PlaneFallSetup(MuseumMover *m, s16 id) {
     m->path->push.vz += vel.vz;
     m->sector = EGSDisplayGetAnimSector(m->anim);
 }
-#else
-INCLUDE_ASM("asm/museum/nonmatchings/museum", PlaneFallSetup);
-#endif
 
 /* Message handler of the falling plane. */
 void TGTMUSEUMObjDispatch(SysMsg *msg) {
