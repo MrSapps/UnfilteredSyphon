@@ -973,8 +973,21 @@ void iMovementUpdate5(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* the original copies move into a separate register for the stopped test; frozen/stillTicks branch layout */
+static inline s32 iMovementFrozen(Gobj *gobj, MovementInfo *move) {
+    s32 frozen = 0;
+    if (((gobj->anim->model->flags & GOBJ_MODEL_FLAG_400000) &&
+         ((gobj->anim->unk00[8] & 0x10) || gobj->move == NULL)) ||
+        move->frozen) {
+        frozen = 1;
+    }
+    return frozen;
+}
+
+/*
+ * GOBJ_MOVEMENT_FROZEN as an inline with a `frozen = 0; if (..) frozen = 1;` result (a3 + v0 copy).
+ * MovementIsStopped(MOVE(gobj)) (not `move`): the reloaded arg is CSE'd into a copy of move that
+ * the vel tests use after the first label (a2).
+ */
 void iMovementUpdate7(void) {
     Gobj *gobj;
     Gobj *next;
@@ -984,7 +997,7 @@ void iMovementUpdate7(void) {
         move = MOVE(gobj);
         next = move->next;
         if (move->stopTicks != 0) {
-            if (MovementIsStopped(move) && !(s16)GOBJ_MOVEMENT_FROZEN(gobj)) {
+            if (MovementIsStopped(MOVE(gobj)) && !(s16)iMovementFrozen(gobj, move)) {
                 move->stillTicks++;
             } else {
                 move->stillTicks = 0;
@@ -995,9 +1008,6 @@ void iMovementUpdate7(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/movement", iMovementUpdate7);
-#endif
 
 s32 MovementUpdateAfterDisplay(void) {
     SPAD_ENTER();
