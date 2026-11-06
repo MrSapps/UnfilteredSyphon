@@ -1522,8 +1522,16 @@ typedef struct JoyCharMove {
     /* 0x3C */ s32 type; /* 5, 8, 9: standing still */
 } JoyCharMove;
 
-#ifdef NON_MATCHING
-/* branch layout of the aim-height test and the still flag copy differ */
+/* The still test as an inline (its result is copied into `still`, which keeps its dead `= 0`). */
+static inline s32 iJoyAimStill(Gobj *gobj, s32 type) {
+    s32 ret = 0;
+
+    if ((gobj->cas->flags & 2) || type == 5 || (u32)(type - 8) < 2) {
+        ret = 1;
+    }
+    return ret;
+}
+
 /* Update the aim state machine from the aiming stick. */
 void func_80038720(JoyController *joy) {
     s32 still = 0;
@@ -1536,9 +1544,7 @@ void func_80038720(JoyController *joy) {
     s32 highY;
     u32 next;
 
-    if ((gobj->cas->flags & 2) || type == 5 || (u32)(type - 8) < 2) {
-        still = 1;
-    }
+    still = iJoyAimStill(gobj, type);
     lowY = -0x578;
     if (still) {
         lowY = -0xA49;
@@ -1555,9 +1561,16 @@ void func_80038720(JoyController *joy) {
                joy->unk030 != 0) {
         next = 0;
     } else if (v.vx != 0 || v.vy != 0 || v.vz != 0) {
-        if (state < 2 ? lowY < v.vz : highY < v.vz) {
+        if (state < 2) {
+            if (lowY < v.vz) {
+                next = 0;
+                goto out;
+            }
+        } else if (highY < v.vz) {
             next = 0;
-        } else if (state == 1) {
+            goto out;
+        }
+        if (state == 1) {
             aim->turn.vz = -1;
             next = 2;
         } else if (state == 2) {
@@ -1582,12 +1595,10 @@ void func_80038720(JoyController *joy) {
             next = 0;
         }
     }
+out:
     joy->prevAimState = state;
     joy->aimState = next;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/joystick", func_80038720);
-#endif
 
 /* Pick the camera action and the character's facing override from the sticks. */
 void func_800389E0(JoyController *joy) {
