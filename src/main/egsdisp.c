@@ -3255,8 +3255,14 @@ void EGSDisplayResetOTs(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* original reads dTicks with lui/lw (not gp: maybe this was its own TU, dTicks extern there) and vt/vb swap a3/t0 (4 insns) */
+#ifndef _PSYQ
+/*
+ * The original reads dTicks with lui/lw, not gp (maybe this was its own TU, dTicks extern
+ * there). maspsx gp-converts every symbol defined in this file's .sdata, so reach it through
+ * an asm name it doesn't recognise ("dTicks+0+0"; GNU as expands that to lui/lw). Under ccpsx
+ * this stays INCLUDE_ASM until aspsx's handling of that operand has been checked.
+ */
+extern s32 dTicksNoGp[] __asm__("dTicks+0+0");
 #define POLY_SH(p, o) (*(s16 *)((p) + (o)))
 void BillboardAnimate(EGSAnim *anim) {
     BillboardAnim *ba = anim->unk18;
@@ -3266,8 +3272,8 @@ void BillboardAnimate(EGSAnim *anim) {
     s32 vb;
     s32 vt;
 
-    if (ba->delay != 0 && dTicks >= ba->lastTick + ba->delay) {
-        ba->lastTick = dTicks;
+    if (ba->delay != 0 && dTicksNoGp[0] >= ba->lastTick + ba->delay) {
+        ba->lastTick = dTicksNoGp[0];
         poly = (u8 *)anim->model->info;
         xy = &ba->frames[(s16)ba->frame++ * 2];
         u = xy[0] * 2;
@@ -3275,8 +3281,8 @@ void BillboardAnimate(EGSAnim *anim) {
         vt = xy[1] << 8;
         POLY_W(poly, 0x28) = vb + u + 0x1F;
         POLY_W(poly, 0x44) = vt + u;
-        POLY_W(poly, 0x24) = (POLY_SH(poly, 0x26) << 16) + vt + u;
         POLY_W(poly, 0x20) = (POLY_SH(poly, 0x22) << 16) + vb + u;
+        POLY_W(poly, 0x24) = (POLY_SH(poly, 0x26) << 16) + vt + u;
         POLY_W(poly, 0x3C) = (POLY_SH(poly, 0x3E) << 16) + vt + u + 0x1F;
         POLY_W(poly, 0x40) = (POLY_SH(poly, 0x42) << 16) + vb + u + 0x1F;
         if ((s16)ba->frame == ba->numFrames) {
