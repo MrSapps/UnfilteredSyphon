@@ -254,8 +254,9 @@ void func_80082E70(TextString *text, s32 x, s32 y) {
  * ((u32)-1, 0xFFFFFFFFU, ~0U, <= 0xFFFFFFFE, ...) and maspsx --aspsx-version=2.77
  * (sltu_at=False for >= 2.60) passes it to GNU as as sltiu, while the original has
  * `li $at,-1; sltu $v0,$v1,$at` (aspsx expanding a negative sltu immediate). No other
- * function in the game has a negative sltu/sltiu immediate, so this needs either
- * maspsx's sltu_at for 2.77 or a check of what real aspsx 2.77 does (Psy-Q build).
+ * function in the game has a negative sltu/sltiu immediate. Checked 2026-11-06: real
+ * ccpsx+aspsx 2.77 also emits one insn here (Psy-Q exe 4 bytes short), so the original
+ * compare was not a constant -1: likely a variable/global holding ~0 or a different type.
  * Fixed: room and x are one variable (x); `l1 = &line[1]` read through l1[-1].tag (s0 +
  * tag load after the colour stores). */
 /*
