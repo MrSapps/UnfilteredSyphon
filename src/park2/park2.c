@@ -871,11 +871,6 @@ static void func_801422DC(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/*
- * Same length; only the register choice for D_801447C0->target vs. the
- * mFlamethrowerEnd base in the two branches below is swapped.
- */
 /* Fire the next flamethrower jet segment from Hans' weapon towards target. */
 static s32 func_80142BF4(Vec4 *target) {
     Vec4 tip;
@@ -913,7 +908,8 @@ static s32 func_80142BF4(Vec4 *target) {
         dir.z = target->z - tip.z;
         EGSGeometry_GetFuzzyXZDistancePoint2Point(target, &tip, &dist);
         if (D_801447C0->target->flags & 2) {
-            Vec4 *end = &mFlamethrowerEnd[D_801447AC];
+            Vec4 *base = mFlamethrowerEnd;
+            Vec4 *end = &base[D_801447AC];
 
             end->x = tip.x;
             end->y = tip.y;
@@ -922,7 +918,8 @@ static s32 func_80142BF4(Vec4 *target) {
             end->y -= dir.y;
             end->z -= dir.z;
         } else {
-            Vec4 *end = &mFlamethrowerEnd[D_801447AC];
+            Vec4 *base = mFlamethrowerEnd;
+            Vec4 *end = &base[D_801447AC];
 
             end->x = D_801447C0->target->aim[0];
             end->y = D_801447C0->target->aim[1];
@@ -1008,6 +1005,3 @@ static s32 func_80142BF4(Vec4 *target) {
     return -1;
 }
 
-#else
-INCLUDE_ASM("asm/park2/nonmatchings/park2", func_80142BF4);
-#endif
