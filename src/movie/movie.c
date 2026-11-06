@@ -114,8 +114,6 @@ s32 func_80137A50(void) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* hdr/y swap s3/s4, and the rect->w/h MIN/MAX nests branch and store differently */
 /* Work out the on-screen rect and carve the slice and decode buffers out of the work buffer. */
 s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDecode, s32 trueColor,
                   MovieRect *rect, MovieRect *slice, u8 **slices, s32 *sliceSize, u8 **decode, s32 *decodeSize) {
@@ -126,21 +124,31 @@ s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDeco
     EGSDeviceGraphicsGetDrawingEnvironment(&env);
     clip = env->clip;
     rect->w = MIN(hdr->width, MAX(0, clip.w - x));
-    if (trueColor == 1) {
-        rect->w = rect->w * 24 / 16;
-    } else {
-        rect->w = rect->w;
+    {
+        s32 w = rect->w;
+
+        if (trueColor == 1) {
+            rect->w = w * 24 / 16;
+        } else {
+            rect->w = w;
+        }
     }
     rect->h = MIN(hdr->height, MAX(0, clip.h - y));
     slice->w = 16;
     if (trueColor == 1) {
         slice->w = 24;
+    } else {
+        slice->w = slice->w;
     }
     slice->h = rect->h / 16 * 16;
-    if (trueColor == 1) {
-        *sliceSize = hdr->height * 12;
-    } else {
-        *sliceSize = hdr->height * 8;
+    {
+        s32 h = hdr->height;
+
+        if (trueColor == 1) {
+            *sliceSize = h * 12;
+        } else {
+            *sliceSize = h * 8;
+        }
     }
 #line 213
     ASSERT_MOVIE(buf != NULL);
@@ -165,9 +173,6 @@ s32 func_80137A98(StHeader *hdr, s32 x, s32 y, u8 *buf, s32 bufSize, s32 numDeco
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/movie/nonmatchings/movie", func_80137A98);
-#endif
 
 /* Wait for the next frame from the CD ring buffer and check it is in sequence. */
 s32 func_80137D80(u32 **addr, StHeader **hdr) {
