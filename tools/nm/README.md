@@ -9,6 +9,7 @@ Scratch tools for working on `#ifdef NON_MATCHING` functions. Outputs go to `bui
   optionally for variant `idx` of a variants file.
 - `vt.py src.c func variants.txt` — try source variants (`old\n----\nnew`, several per variant
   joined by `~~~~\n`, variants separated by `====\n`); prints a score per variant. Variants are compiled from a temp copy; `src/` is never written.
+- `vs.py src.c func [variants.txt]` — like `vt.py` but strict: prints (masked diff lines, immediate mismatches, total); immediates are compared except on relocated or `j`/`jal` lines, so it catches wrong offsets/masks that `score.py` hides.
 - `regswap.py [src.c ...]` — list functions whose diff is registers only.
 - `alloc.py src.c func [variants.txt idx]` — gcc 2.7.2 global-alloc priority table (`cc1 -dl -dg` dumps).
 
