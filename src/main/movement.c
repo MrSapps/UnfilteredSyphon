@@ -622,7 +622,6 @@ inline void func_800498A4(Gobj *gobj) {
     VECTOR32 *b;
     s32 t;
     s32 i;
-    MovementSVector *pts;
 
     if (gobj->npcState == 1 || gobj->npcState == 2) {
         func_8004966C(gobj);
@@ -632,7 +631,6 @@ inline void func_800498A4(Gobj *gobj) {
         return;
     }
     low = &lowest;
-    pts = bp.points;
     src = (GOBJ_MATRIX *)gobj->anim->frame;
     m.m[0][0] = src->m[0][0];
     m.m[0][1] = -src->m[0][1];
@@ -656,7 +654,7 @@ inline void func_800498A4(Gobj *gobj) {
     lowest.vy = bp.points[0].vy;
     lowest.vz = bp.points[0].vz;
     for (i = 1; i < 8; i++) {
-        if (pts[i].vy < low->vy) {
+        if ((bp.points + i)->vy < low->vy) {
             low->vx = bp.points[i].vx;
             low->vy = bp.points[i].vy;
             low->vz = bp.points[i].vz;
@@ -821,20 +819,75 @@ void iMovementUpdate1_1(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* inlines func_800498A4 (which matches); the original hoists &bp.points into s4 (pt giv = s4+8) and keeps the call arg as sp+0x40; pts set before the early returns gets within 2 insns but breaks func_800498A4 */
+/*
+ * Copy of func_800498A4 inlined only here: b = bp.box is set before the early returns, so
+ * integrate.c's constant-equivalence (killed at the first label) does not fold it into the
+ * call args; b stays a pseudo and loop.c hoists it (s2). The point compares go through
+ * (bp.points + i) (fp+64 based giv) instead of a user-variable pts.
+ */
+static inline void iMovementLowest(Gobj *gobj) {
+    MovementInfo *move = MOVE(gobj);
+    VECTOR32 lowest;
+    struct {
+        VECTOR32 box[2];
+        MovementSVector points[8];
+    } bp;
+    GOBJ_MATRIX m;
+    GOBJ_MATRIX *src;
+    VECTOR32 *low;
+    VECTOR32 *b;
+    s32 t;
+    s32 i;
+
+    b = bp.box;
+    if (gobj->npcState == 1 || gobj->npcState == 2) {
+        func_8004966C(gobj);
+        return;
+    }
+    if (move->collides != 3) {
+        return;
+    }
+    low = &lowest;
+    src = (GOBJ_MATRIX *)gobj->anim->frame;
+    m.m[0][0] = src->m[0][0];
+    m.m[0][1] = -src->m[0][1];
+    m.m[0][2] = src->m[0][2];
+    m.m[1][0] = -src->m[1][0];
+    m.m[1][1] = src->m[1][1];
+    m.m[1][2] = -src->m[1][2];
+    m.m[2][0] = src->m[2][0];
+    m.m[2][1] = -src->m[2][1];
+    m.m[2][2] = src->m[2][2];
+    m.t[0] = src->t[0];
+    m.t[1] = -src->t[1];
+    m.t[2] = src->t[2];
+    EGSAnimGetBox(gobj->anim, 0, b);
+    t = bp.box[0].vy;
+    bp.box[0].vy = -bp.box[1].vy;
+    bp.box[1].vy = -t;
+    EGSGeometry_GetBoxPoints(b, bp.points, &m);
+    lowest.vx = bp.points[0].vx;
+    lowest.vy = bp.points[0].vy;
+    lowest.vz = bp.points[0].vz;
+    for (i = 1; i < 8; i++) {
+        if ((bp.points + i)->vy < low->vy) {
+            low->vx = bp.points[i].vx;
+            low->vy = bp.points[i].vy;
+            low->vz = bp.points[i].vz;
+        }
+    }
+    move->lowest = lowest;
+}
+
 void iMovementUpdate1_2(void) {
     Gobj *gobj;
     MovementInfo *move;
 
     for (gobj = D_8010F93C; gobj != NULL; gobj = move->next) {
         move = MOVE(gobj);
-        func_800498A4(gobj);
+        iMovementLowest(gobj);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/movement", iMovementUpdate1_2);
-#endif
 
 void iMovementUpdate2(void) {
     Gobj *gobj;
