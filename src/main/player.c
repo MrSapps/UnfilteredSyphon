@@ -948,50 +948,38 @@ void PlayerLandCASAnimCB(s16 id) {
 INCLUDE_ASM("asm/main/nonmatchings/player", PlayerLandCASAnimCB);
 #endif
 
-#ifdef NON_MATCHING
-/* floor material regalloc (constant 4/a0, index t0) and right-test scheduling */
+/*
+ * material = data - (kind == 4 ? 2 : 0xD) keeps material in v0; `r = right != 0` in its own
+ * statement expands before the table load (sched tie -> LUID order), so kind lands in t0.
+ */
 void PlayerFootCB(s16 id, s32 arg1, s32 arg2, u8 right) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
     PlayerFloorFace *floor;
     u8 *material;
     s32 kind;
     VECTOR32 pos;
-    void **frame;
-    s32 tex;
     void *f;
 
     if (id == gPlayerOffset) {
         floor = ((PlayerMoveInfo *)gobj->move)->feet->floor;
-        material = floor->data;
-        if (floor->kind == 4) {
-            material -= 2;
-        } else {
-            material -= 0xD;
-        }
+        material = floor->data - (floor->kind == 4 ? 2 : 0xD);
         kind = *material & 0x1F;
         if (!(gobj->cas->flags & 0x100000)) {
-            SysPlaySong(0, (right != 0) + gSoundFootstep[kind], gobj, 0);
+            s32 r = right != 0;
+            SysPlaySong(0, gSoundFootstep[kind] + r, gobj, 0);
         }
         if (mFootFx == 1) {
             ParticleFootSplash(right);
         }
     } else if (!(gobj->cas->flags & 0x100000)) {
-        SysPlaySong(0, (right != 0) + gSoundFootstep[0], gobj, 0);
+        s32 r = right != 0;
+        SysPlaySong(0, gSoundFootstep[0] + r, gobj, 0);
     }
     if (mFootFx == 2) {
-        frame = ((PlayerAnimFrames *)gobj->anim)->frames;
-        if (right) {
-            frame += 7;
-        } else {
-            frame += 1;
-        }
-        f = *frame;
+        f = ((PlayerAnimFrames *)gobj->anim)->frames[right ? 7 : 1];
         EGSDisplayRegisterFootprint(f, SpriteFootFxTextureGet(right == 0), (pos = ((PlayerMoveInfo *)gobj->move)->groundPos, &pos));
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", PlayerFootCB);
-#endif
 
 void PlayerRightFootCASAnimCB(s16 id, s32 arg1, s32 arg2) {
     PlayerFootCB(id, arg1, arg2, 1);
