@@ -2576,8 +2576,8 @@ void InitPointSources(void *anim) {
     gPointSourceHMD = gPointSourceCount;
 }
 
-#ifdef NON_MATCHING
-/* volatile casts reproduce the frame reloads (real cause unknown); t[2] load still after the sum clears (a block temp fixes it but swaps t/f regs) */
+/* volatile casts reproduce the frame reloads (real cause unknown); the per-branch
+ * `ps->frame = f` (cross-jumped later) gives f the refs to outrank t in global-alloc */
 void FinalizePointSources(void) {
     VECTOR v;
     EGSPointSource *ps;
@@ -2598,20 +2598,21 @@ void FinalizePointSources(void) {
             t = ((volatile EGSAnim *)a)->frame->matrix.t;
             ((volatile EGSAnim *)a)->unk28 = 0;
             f = ((volatile EGSAnim *)a)->frame;
+            ps->frame = f;
         } else {
             t = ((volatile EGSAnim *)a2)->frame->matrix.t;
             f = ((volatile EGSAnim *)a2)->frame;
             ((volatile EGSAnim *)a2)->unk28 = 0;
+            ps->frame = f;
         }
-        ps->frame = f;
         ps->color = 0;
         ps->pos[0] = t[0];
         ps->pos[1] = t[1] + ((i != 0) ? 0x80 : 0x28);
+        ps->pos[2] = t[2];
         ps->count = 0;
         ps->sum[2] = 0;
         ps->sum[1] = 0;
         ps->sum[0] = 0;
-        ps->pos[2] = t[2];
         if (i != 1) {
             ps->radius = gCollideXZ;
             if (i != 0) {
@@ -2635,9 +2636,6 @@ void FinalizePointSources(void) {
     gPointSourceArray[gPointSourceCount].frame = NULL;
     EGSFastInitFaceList();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", FinalizePointSources);
-#endif
 
 void EGSFaceListInit(EGSFace *faces, s16 count) {
     s32 i;
