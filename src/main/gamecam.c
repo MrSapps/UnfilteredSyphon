@@ -2358,8 +2358,8 @@ s32 GameCameraToggleCollision(void) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* scheduling: the original loads track->unk10 before the second dot product finishes, and stores the first FIXDiv product in a call delay slot */
+/* t = unk10 << 12 as its own statement loads unk10 before b's mflo; the q.vx store through a
+ * pointer (a scalar store) slips into the next call's delay slot. */
 void func_8001FF08(GameCamTrack *track) {
     VECTOR32 n;
     VECTOR32 v;
@@ -2369,6 +2369,7 @@ void func_8001FF08(GameCamTrack *track) {
     s32 a;
     s32 b;
     s32 c;
+    s32 t;
 
     track->moving = 0;
     n.vx = track->plane->normal->vx;
@@ -2389,7 +2390,8 @@ void func_8001FF08(GameCamTrack *track) {
     d.vx <<= 12;
     d.vy <<= 12;
     d.vz <<= 12;
-    if (b - a - (track->unk10 << 12) > track->unk28 || b < -track->unk2C) {
+    t = track->unk10 << 12;
+    if (b - a - t > track->unk28 || b < -track->unk2C) {
         return;
     }
     track->moving = 1;
@@ -2404,7 +2406,10 @@ void func_8001FF08(GameCamTrack *track) {
         q.vz = track->vel.vz + m.vz;
     } else {
         iFixDiv(b, a, &c);
-        q.vx = EGSMathFIXMul(track->vel.vx, c);
+        {
+            s32 *qp = &q.vx;
+            *qp = EGSMathFIXMul(track->vel.vx, c);
+        }
         q.vy = EGSMathFIXMul(track->vel.vy, c);
         q.vz = EGSMathFIXMul(track->vel.vz, c);
     }
@@ -2412,9 +2417,6 @@ void func_8001FF08(GameCamTrack *track) {
     track->unk44.vy = d.vy + q.vy;
     track->unk44.vz = d.vz + q.vz;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001FF08);
-#endif
 
 u8 func_80020230(VECTOR32 *pos, GameCamOutline *outline, s32 radius) {
     VECTOR32 normal;
