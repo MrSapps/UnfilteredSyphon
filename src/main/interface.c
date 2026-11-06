@@ -1876,7 +1876,11 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003D76C);
 #endif
 
 #ifdef NON_MATCHING
-/* delay-slot/regalloc: the hide constant lands in the first branch's delay slot in the original */
+/* delay-slot/regalloc: the hide constant lands in the first branch's delay slot in the original.
+ * Leads (r2C): the original computes (idx+1)*24 from idx+1 (not idx*24+24), so idx+1 is its own
+ * statement (j = idx + 1 per branch gets the shape but shifts every register); the hide branch
+ * uses a base pointer for three stores and the lui/%lo form for the last ([idx].xy0); the grow
+ * path is `t = w + 8; if (t > 52) {w = 53; done = 1;} else {w = t; done = 0;}` (31 -> 27). */
 s32 func_8003DF74(s32 idx, u8 grow) {
     const IfacePoint *pt = &D_80011BE4[idx];
     s32 w;
@@ -4114,7 +4118,9 @@ u8 func_80044AC0(u8 active) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc (s-register order) and the line pointer init lands after the loop entry test */
+/* regalloc (s-register order) and the line pointer init lands after the loop entry test.
+ * Original: s0 = &line->color.c[3] giv, s1 = i, s2 = line, s3 = lvl, s4 = x, s5 = y.
+ * `line = &D_80118264[i * 2]` inside the loop gets 37 -> 25 (lvl still last). */
 u8 func_800451DC(u8 active) {
     s32 *level = &D_80105F30[5];
     s32 lvl;

@@ -1557,7 +1557,10 @@ void func_8001D89C(VECTOR32 *pos) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: the pitch dead-zone bound 'up' lands in a2 instead of v1 */
+/* regalloc: the pitch dead-zone bound 'up' lands in a2 instead of v1. The neg = -fov pseudo
+ * (refs 4, live 7, pri 11428) is allocated before up (refs 4, live 16, pri 5000) and takes v1;
+ * the original has neg in a0. Tried (r2C): up=0 inside the if, inverted if, neg as lim/fov/
+ * down/up/diff.vz/cur.vz, -fov repeated, cur.vx + (diff.vx - down) order: all 11-16. */
 /* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
  * scaled by the fov. The fov fetch copies a whole vector into one word (as the
  * original does, spilling over the saved registers above it). */
@@ -2023,7 +2026,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
     }
 
 #ifdef NON_MATCHING
-/* scheduling/regalloc in the distance-fade block (d.vx kept live in a1) */
+/* scheduling/regalloc in the distance-fade block (d.vx kept live in a1). The original's d.vx/
+ * d.vy and the negated src.vy stores sit in the block after abs(d.vy), and src.vz is loaded
+ * before that abs, so the source order there differs. The 0x38 rumble case is laid out last:
+ * `if (!inRange || r >= 0x39) { v = inRange ? r : 0xFF; } else { v = 0x38; }` fixes the
+ * layout (inRange is then computed into v0 and copied to a0, the original sets a0 directly). */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
@@ -3321,7 +3328,10 @@ typedef struct GameCamPathState {
 } GameCamPathState;
 
 #ifdef NON_MATCHING
-/* regalloc: case-10 ref/base in v1/a0 (a0/a1) */
+/* regalloc: case-10 ref/base in v1/a0 (a0/a1). In the original ref cannot take v1 (it must
+ * conflict with hard reg v1), so ref -> a0 and the gameObjectsInfo base -> a1. Tried (r2C): a
+ * fresh block-local ref, xa/behind for ref, no ref var, info = &gameObjectsInfo[id], a local
+ * copy of gameObjectsInfo: all 9. */
 /* Script camera object: 18 starts a scripted shot, 10 steps it along its path, 19 ends it,
  * 2 sets the object up. */
 void CAMERAObjDispatch(SysMsg *msg) {
