@@ -862,8 +862,6 @@ static void func_80142D5C(s32 yes) {
     }
 }
 
-#ifdef NON_MATCHING
-/* the original hoists the three black.r/g/b byte loads above the in-loop copy of D_80141704 (loop invariant motion) */
 /* Main menu: X pressed. */
 static void func_80142D8C(void) {
     s32 i;
@@ -874,8 +872,9 @@ static void func_80142D8C(void) {
     InterfaceSetMode(7);
     for (i = 0; i < 2; i++) {
         TitleColor black = D_80141704;
+        const u8 *c = &black.r; /* reads via const u8 * are RTX_UNCHANGING: loop hoists them above the copy */
 
-        SpriteSetRGB(&mTitleScreenSprite[i], black.r, black.g, black.b);
+        SpriteSetRGB(&mTitleScreenSprite[i], c[0], c[1], c[2]);
     }
     switch (mCurItem) {
     case 0: {
@@ -911,9 +910,6 @@ static void func_80142D8C(void) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", func_80142D8C);
-#endif
 
 /* Message box: X pressed. */
 static void func_80142F84(void) {
