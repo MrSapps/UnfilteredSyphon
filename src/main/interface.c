@@ -1671,23 +1671,28 @@ void InterfaceDeleteBomb(void) {
     mBombPosition.vz = 0;
 }
 
-#ifdef NON_MATCHING
-/* stack layout: the original keeps both points in memory (lw-passed), loads off before storing xy */
 void func_8003D53C(VECTOR32 *pos) {
-    IfacePoint pt[2];
+    IfacePointW pt;
+    IfacePointW center;
     u32 f;
     s32 c;
+    s32 col;
 
     if (pos != NULL) {
         if ((pos->vx < 0 ? -pos->vx : pos->vx) < 24 && (pos->vy < 0 ? -pos->vy : pos->vy) < 20) {
-            *(s32 *)&pt[1] = 0x0050FF67; /* x -153, y 80 */
+            center.w = 0x50FF67;
             f = ~gSystemTick & 7;
             c = f << 5;
-            mBombPoly.color.word = ((c | 0x1F) << 16) | ((c & 0xFF) << 8) | (c & 0xFF) | 0x28000000;
-            *(s32 *)&pt[0] = (u16)pos->vx | ((u16)pos->vy << 16);
-            pt[0].vx += pt[1].vx;
-            pt[0].vy += pt[1].vy;
-            InterfacePlaceQuad(&mBombPoly, pt[0], f >> 1, f >> 1);
+            col = ((c | 0x1F) << 16) | ((c & 0xFF) << 8) | (c & 0xFF);
+            mBombPoly.color.word = col | 0x28000000;
+            pt.w = (u16)pos->vx | ((u16)pos->vy << 16);
+            iPointAdd(&pt, &center);
+            {
+                u8 unused[8]; /* frame is 0x28: 8 bytes beyond pt/center (cf. iRadarXY) */
+            }
+            /* passed as the word-aligned union (one lw from the stack); with the IfacePoint
+             * prototype the struct goes in as two halves. menu.c declares the parameter s32. */
+            ((void (*)(IfacePoly4 *, IfacePointW, s32, s32))InterfacePlaceQuad)(&mBombPoly, pt, f >> 1, f >> 1);
             mBombPoly.color.c[3] |= 2;
             return;
         }
@@ -1696,9 +1701,6 @@ void func_8003D53C(VECTOR32 *pos) {
     mBombPoly.xy[1] = 0x04000400;
     mBombPoly.xy[2] = 0x04000400;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003D53C);
-#endif
 
 void InterfaceAddNPC(s32 id) {
     D_80117B2C[((IfaceNpc *)gameObjectsInfo[id].runtime->npc)->radarSlot] = id;
