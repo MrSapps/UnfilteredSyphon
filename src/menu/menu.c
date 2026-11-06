@@ -2438,8 +2438,7 @@ void func_8013D04C(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* player arrow: angle +0x100/+0x1000 get combined, and the marker quad load is ordered differently */
+/* Map screen: load the level maps and place the player arrow. */
 void func_8013D19C(void) {
     char name[24];
     EGSTexture tex;
@@ -2484,21 +2483,22 @@ void func_8013D19C(void) {
         for (i = 0; i < 16; i++) {
             sprintf(name, "MAP%d.TIM", i + 1);
             D_8013F7CC = 8;
-            if (StreamHogBlock(name, D_8013FE78, 0xF000, 0, NULL) != 0) {
+            if (StreamHogBlock(name, D_8013FE78, 0xF000, 0, NULL) == 0) {
+                StreamSynchronous();
+                EGSTextureCreate(&tex);
+                EGSTextureCreateSprite(&tex, &mMap[i], POSITION.x - 0x39, POSITION.y - 5, 0, 0);
+                if (i == 0) {
+                    func_80139590(&tex);
+                } else {
+                    tex.image.cx = tex.image.cy = tex.image.cw = tex.image.ch = 0;
+                }
+                DrawSync(0);
+                EGSTextureLoad(&tex);
+                mMap[i].unk24 = 3;
+            } else {
                 maps = i;
                 break;
             }
-            StreamSynchronous();
-            EGSTextureCreate(&tex);
-            EGSTextureCreateSprite(&tex, &mMap[i], POSITION.x - 0x39, POSITION.y - 5, 0, 0);
-            if (i == 0) {
-                func_80139590(&tex);
-            } else {
-                tex.image.cx = tex.image.cy = tex.image.cw = tex.image.ch = 0;
-            }
-            DrawSync(0);
-            EGSTextureLoad(&tex);
-            mMap[i].unk24 = 3;
         }
         D_8013F7CC = 8;
         if (maps > 0 && D_8013FB4C[gSysInfo.level] != NULL) {
@@ -2513,7 +2513,8 @@ void func_8013D19C(void) {
                     D_8013FB4C[gSysInfo.level](i, &pos, &pt[1]);
                     pos.vy = pt[1].y - pt[0].y;
                     pos.vx = pt[1].x - pt[0].x;
-                    angle = ratan2(pos.vy, pos.vx) + 0x100;
+                    angle = ratan2(pos.vy, pos.vx);
+                    angle += 0x100;
                     if (angle < 0) {
                         angle += 0x1000;
                     }
@@ -2521,11 +2522,11 @@ void func_8013D19C(void) {
                     for (k = 0; k < 6; k++) {
                         arrow[k] = D_8013FAD0[angle][k];
                     }
-                    for (k = 0; k < 2; k++, quad++) {
-                        *(s32 *)&quad->x0 = MAP_XY(pt[0].x + arrow[2] - 0x39, pt[0].y + arrow[3] - 5);
-                        *(s32 *)&quad->x1 = MAP_XY(pt[0].x + arrow[0] - 0x39, pt[0].y + arrow[1] - 5);
-                        *(s32 *)&quad->x2 = MAP_XY(pt[0].x - 0x39, pt[0].y - 5);
-                        *(s32 *)&quad->x3 = MAP_XY(pt[0].x + arrow[4] - 0x39, pt[0].y + arrow[5] - 5);
+                    for (k = 0; k < 2; k++) {
+                        *(s32 *)&quad[k].x0 = MAP_XY(pt[0].x + arrow[2] - 0x39, pt[0].y + arrow[3] - 5);
+                        *(s32 *)&quad[k].x1 = MAP_XY(pt[0].x + arrow[0] - 0x39, pt[0].y + arrow[1] - 5);
+                        *(s32 *)&quad[k].x2 = MAP_XY(pt[0].x - 0x39, pt[0].y - 5);
+                        *(s32 *)&quad[k].x3 = MAP_XY(pt[0].x + arrow[4] - 0x39, pt[0].y + arrow[5] - 5);
                         for (j = 0; j < 6; j++) {
                             if (arrow[j] > 0) {
                                 arrow[j]++;
@@ -2570,9 +2571,6 @@ void func_8013D19C(void) {
     D_8013F7C4 = cursor;
     D_80138044[D_8013FCB4](cursor);
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013D19C);
-#endif
 
 void func_8013D95C(void) {
     MenuItem *item = D_8013F7D0;
