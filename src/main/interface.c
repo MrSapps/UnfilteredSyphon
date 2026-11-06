@@ -2592,20 +2592,17 @@ void InterfaceCountdownPause(s32 pause) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc in the minute/second split (sec computed in v1, then moved to a3) */
 void InterfaceCountdownDisplay(void) {
     char buf[9];
     s32 min;
     s32 sec;
-    s32 rem;
     s32 tick;
 
     if (D_80110008 > 0) {
         min = D_80110008 / 1200;
-        rem = D_80110008 % 1200;
-        sec = rem / 20;
-        tick = rem % 20 / 3;
+        sec = D_80110008 % 1200;
+        tick = sec % 20 / 3;
+        sec /= 20;
         if (tick == 0 && sec == 0) {
             D_8010F8E0 = 0;
         } else {
@@ -2644,9 +2641,6 @@ void InterfaceCountdownDisplay(void) {
         TextSetStringIntensity(D_8010F892, 0xC0, 0x50, 0x60);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceCountdownDisplay);
-#endif
 
 void InterfaceCountdownUpdate(void) {
     if (D_8010F898) {
