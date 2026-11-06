@@ -486,8 +486,8 @@ void LosTransformFaceToWorld(LOSAnimFace *face, MATRIX *mtx) {
     face->v[2]->vz = v.vz;
 }
 
-#ifdef NON_MATCHING
-/* loop keeps a separate &hit->z pointer register next to hit */
+/* hit = &losHitArray[i] per iteration and the sorted store re-takes &losHitArray[i]
+ * (one giv for both; a hit++ pointer left a separate &hit->z register) */
 void LOSSortHits(void) {
     LOSHit *hit;
     GameObjectRuntime *runtime;
@@ -500,8 +500,8 @@ void LOSSortHits(void) {
 
     losSortedCount = 0;
     LOSSetupGTE(&gEGSIdentityMatrix);
-    hit = losHitArray;
     for (i = 0; i < losHitCount; i++) {
+        hit = &losHitArray[i];
         isGobj = hit->type == 1;
         hit->z = LOSCalculateZ(hit->point.vx, hit->point.vy, hit->point.vz);
         if (isGobj) {
@@ -515,9 +515,8 @@ void LOSSortHits(void) {
             hit->z -= 32;
         }
         if (hit->z != 0) {
-            losHitsSorted[losSortedCount++] = hit;
+            losHitsSorted[losSortedCount++] = &losHitArray[i];
         }
-        hit++;
     }
     if (losSortedCount < 2) {
         return;
@@ -536,9 +535,6 @@ void LOSSortHits(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gtegeo", LOSSortHits);
-#endif
 
 void LOSVerifyHits(LOSQuery *query) {
     u32 i;
