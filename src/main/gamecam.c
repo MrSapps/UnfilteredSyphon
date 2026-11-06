@@ -2817,8 +2817,8 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
 INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
 #endif
 
-#ifdef NON_MATCHING
-/* per-arm calls (cross-jumped); ours still loads gCamera in each arm, the original once in the shared tail (2 insns) */
+/* The rotation is iAngleDir (its locals share the inline slot area with scale);
+ * frame/which are assigned per arm so gCamera loads once in the shared call tail. */
 s32 func_80021BA4(void) {
     VECTOR32 cur;
     VECTOR32 pos;
@@ -2834,16 +2834,17 @@ s32 func_80021BA4(void) {
     D_80113B2C.unk085 = 0;
     if (D_80113B2C.collision && D_80113B2C.mode != 10 && D_80113B2C.mode != 13 && D_80113B2C.mode != 19 &&
         D_80113B2C.unk05C != 3) {
-        GOBJ_MATRIX m;
-        GameCamSVec rot;
         s32 which;
+        s32 frame;
 
         if (D_80113B2C.mode == 13 || D_80113B2C.mode == 18 || D_80113B2C.unk05C == 2) {
-            CameraAccessFrameInfo(gCamera, 0, 2, 1);
+            frame = 0;
+            which = 2;
         } else {
+            frame = 0;
             which = 1;
-            CameraAccessFrameInfo(gCamera, 0, which, 1);
         }
+        CameraAccessFrameInfo(gCamera, frame, which, 1);
         cur = CAM->unkD1C;
         d.vx = pos.vx - cur.vx;
         d.vy = pos.vy - cur.vy;
@@ -2853,17 +2854,7 @@ s32 func_80021BA4(void) {
         } else {
             angle = CAM->angle.target;
         }
-        rot.vx = -angle.vx;
-        rot.vy = angle.vy;
-        rot.vz = -angle.vz;
-        RotMatrixYXZ(&rot, &m);
-        m.m[0][1] = -m.m[0][1];
-        m.m[1][2] = -m.m[1][2];
-        m.m[1][0] = -m.m[1][0];
-        m.m[2][1] = -m.m[2][1];
-        dir.vx = m.m[0][2];
-        dir.vy = m.m[1][2];
-        dir.vz = m.m[2][2];
+        iAngleDir(&angle, &dir);
         if (func_80021230(&cur, &d, &dir, &pos)) {
             D_80113B2C.unk085 = 1;
         }
@@ -2881,9 +2872,6 @@ s32 func_80021BA4(void) {
     CameraAccessMoveInfo(gCamera, 1, 3, 1);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021BA4);
-#endif
 
 void GameCameraModeGetDefaultLeadOffset(s32 mode, VECTOR32 *out) {
     *out = D_80113B2C.views[D_80113B2C.modes[mode].view].lead;
