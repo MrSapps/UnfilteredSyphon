@@ -649,7 +649,15 @@ void CASRequestDelay(s16 id, s32 ticks) {
  * started=1 store lands right before the HAStart3 jal; in the events[idx] copy the
  * original loads rt->id into a0 first (ours v0, which blocks hoisting it) and keeps
  * source store order; the deferred[] copy stores req0 before sub/set. Not tried yet:
- * struct-member views for the spilled params, as in initPointAction. */
+ * struct-member views for the spilled params, as in initPointAction.
+ * r4C (18 -> 3): the else-chain tail as `else if (upper != lower) layer = 0x4000; else
+ * layer = -1;`, the deferred[] copy as id/req0/mode/sub/set, the events[] copy as
+ * id/action/set/req0/mode/sub, and `started = 0; keep = 0;` moved to the end of the init
+ * run (sched1 places those const sets by source position) fix three of the four spots.
+ * Left: `started = 1` (spilled, sb 0x50(sp)) must land after the `lw a0, rt->anim` arg
+ * load, in the HAStart3 jal slot; QImode stores conflict with that load in sched2, so the
+ * order comes from sched1, where ours keeps the const set before the arg load.  Tried:
+ * comma forms in each argument, a block-local `anim = rt->anim` first, started++ and |= 1. */
 /* Start anim set `set`'s sequence on each body layer (full body 0, upper 0x4000, lower
  * 0x8000), taking the CAS action slots and hooking up the event handler. */
 static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
@@ -673,15 +681,15 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
 
     idx = 0;
     lower = 0xFF;
-    keep = 0;
     table = rt->cas->actionTable;
     queue = rt->cas->queue;
     frame = 0;
-    started = 0;
     r[0] = req[0];
     action = 0xFF;
     r[1] = req[1];
     upper = 0xFF;
+    started = 0;
+    keep = 0;
     seq = CASGetAnimSequence(set, req[1], sub);
     t = &queue->slots;
     if (seq->unk0D != 0) {
@@ -696,9 +704,9 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
             i = queue->slots.numDeferred;
             t->deferred[i].id = rt->id;
             t->deferred[i].req0 = r[0];
+            t->deferred[i].mode = r[1];
             t->deferred[i].sub = sub;
             t->deferred[i].set = set;
-            t->deferred[i].mode = r[1];
             queue->slots.numDeferred++;
         }
     } else if (table != NULL && func_80029794(rt, set, r, sub)
@@ -791,12 +799,12 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
                         }
                         mask |= 0x80000000;
                         if (!keep) {
-                            t->events[idx].action = action;
                             t->events[idx].id = rt->id;
+                            t->events[idx].action = action;
                             t->events[idx].set = set;
                             t->events[idx].req0 = r[0];
-                            t->events[idx].sub = sub;
                             t->events[idx].mode = r[1];
+                            t->events[idx].sub = sub;
                         }
                         ha = EGSDisplayGetHAWithType(rt->anim, layer);
                         ha->handler = func_80029298;
@@ -811,10 +819,10 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
                 layer = 0x4000;
             } else if (layer == 0x4000 || lower != 0xFF) {
                 layer = 0x8000;
-            } else if (upper == lower) {
-                layer = -1;
-            } else {
+            } else if (upper != lower) {
                 layer = 0x4000;
+            } else {
+                layer = -1;
             }
         } while (layer != -1);
         if (started && (rt->anim->unk00[8] & 0x10)) {

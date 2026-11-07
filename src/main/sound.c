@@ -667,7 +667,13 @@ void SoundPlayXACASAnimCB(s32 id, s32 event) {
  * kept across rand), `d = rand() % 3 - 1;` as its own statement, then pass `n = (s16)note + d`
  * (s32 n) -- the ext then lands after rand like the original, but sched1 places the ext pair
  * after the div's `sra a2,v0,31` (the original has it before). Narrowing forms ((s16)(x + d),
- * s16 n += d) drop the ext entirely; `n = (s16)note` before rand puts the ext before the call. */
+ * s16 n += d) drop the ext entirely; `n = (s16)note` before rand puts the ext before the call.
+ * r4C (sched1 -dS): the ext pair's dest is set once, so birthing_insn_p boosts it to max
+ * priority and the backward scheduler puts it last (after the div); with n set twice
+ * (`n = (s16)note; n += d;`) it drops to priority 2 and ties with the a1/a3 arg moves,
+ * which win on LUID, so it lands before them.  The original needs the ext between the arg
+ * moves and the div: unboosted but with priority > 2 (i.e. depending on something after
+ * the rand call). */
 void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 id = song + variant;
     s16 note;

@@ -90,6 +90,10 @@ static struct {
 #define mSysMsgQueue D_80110560.queue
 #define mSysMsgQueueNext D_80110560.next
 #define D_80111B48 D_80110560.textSprites /* text sprite buffer */
+/* SysExecute addresses the three parts by their own names (config/main.syms.ld) */
+extern SysMsgQueue sSysMsgQueueSym __asm__("mSysMsgQueue");
+extern SysMsgQueue sSysMsgQueueNextSym __asm__("mSysMsgQueueNext");
+extern u8 sSysTextSpritesSym[] __asm__("D_80111B48");
 
 /* commons this TU reaches through $gp */
 EGSListNode *exeTickTimerList;
@@ -220,7 +224,15 @@ void CopyMsgToSysQueue(SysMsg *msg) {
  * r3A: the main blocker is data: mSysMsgQueue/Next are one static object here, so cc1
  * addresses mSysMsgQueue as &mSysMsgQueueNext - 0xAF4 (the original uses a separate
  * lui/addiu per symbol) and the queue/table registers follow from that.
- */
+ * r4C (39 -> 35): the queue symbols are now reached through asm-named externs
+ * (sSysMsgQueueSym etc. -> the config/main.syms.ld names), which gives the separate
+ * lui/addiu and the s1 text-sprite base.  Left: the dispatch loop.  The original keeps
+ * queue (s0) only for the call and n, then s4 = queue + 4 and the count test is
+ * `lw -4(s4)` (msgs[-1]): CSE's use_related_value turns mem(SYM) into mem(reg - 4) when a
+ * reg holds SYM + 4, so the count test probably named the symbol directly
+ * (sSysMsgQueueNextSym.count) -- but cse stops at the loop-top label, so the reg holding
+ * SYM+4 must be visible inside the body (strength-reduced msg giv?).  Also `i = 0` is
+ * scheduled into the first SPAD block's jal slot in the original (set much earlier). */
 void SysExecute(void) {
     char *noDmgText[2];
     s16 loadA;
@@ -254,12 +266,13 @@ void SysExecute(void) {
     CASProcess();
     func_800164D0();
 
-    queue = &mSysMsgQueueNext;
-    func_800153BC(&mSysMsgQueue, queue);
+    queue = &sSysMsgQueueNextSym;
+    func_800153BC(&sSysMsgQueueSym, queue);
     n = queue->count;
     table = gDispatchFunctions;
-    for (i = 0, msg = queue->msgs; i < n; i++, msg++) {
-        if (queue->count == 0) {
+    for (i = 0; i < n; i++) {
+        msg = &sSysMsgQueueNextSym.msgs[i];
+        if (sSysMsgQueueNextSym.count == 0) {
             break;
         }
         if (msg->to == SYS_MSG_GLOBAL) {
@@ -288,12 +301,12 @@ void SysExecute(void) {
                 D_8010F624 = 1;
                 D_8010F622 = TextAddWindow(70, -85, 92, 75);
                 TextSetWindowJustification(D_8010F622, 1);
-                TextSpriteInitialize(D_80111B48, 20);
-                D_8010FF6C = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48);
-                TextAddStringMulti(D_8010F622, 2, noDmgText, -1, D_80111B48 + 0x2C0, &D_8010FF68);
+                TextSpriteInitialize(sSysTextSpritesSym, 20);
+                D_8010FF6C = TextAddString(D_8010F622, D_8010F630, -1, sSysTextSpritesSym);
+                TextAddStringMulti(D_8010F622, 2, noDmgText, -1, sSysTextSpritesSym + 0x2C0, &D_8010FF68);
                 TextSetStringIntensity(D_8010FF6C, 0xA0, 0x60, 0xA0);
                 TextSetStringIntensity(D_8010FF6A, 0x30, 0x60, 0xA0);
-                D_8010FF70[0] = TextAddString(D_8010F622, D_8010F630, -1, D_80111B48 + 0x39C);
+                D_8010FF70[0] = TextAddString(D_8010F622, D_8010F630, -1, sSysTextSpritesSym + 0x39C);
                 D_8010FF68 = TextReplaceString(D_8010FF68, D_8010F608);
                 TextSetStringIntensity(D_8010FF70[0], 0xA0, 0x50, 0x30);
             }
