@@ -123,10 +123,10 @@ void WindowLOSLoop(LOSContext *ctx);
 #define HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
 
 #ifdef NON_MATCHING
-/* 15 lines left (r4D; ctx.ignore/ctx.target right after ctx.mid as in _LOSPoint2PointCollide).
+/* 11 lines left (r4H: hitInfo tail stores duplicated per arm as in _LOSPoint2PointCollide).
  * Open: the original has a dead 'addiu s0,sp,0x10' in the HALF(length) branch (bltz + j layout;
- * `length < 0 ? .. : ..` and an if/else don't change it) and sets the GTELOSLoop args after the
- * hitInfo stores (see _LOSPoint2PointCollide). */
+ * `length < 0 ? .. : ..` and an if/else don't change it); cam.vx goes through a1 not v0 and
+ * the cam.vy/vz stores sit before the gGabeSector load; ctx.length's 0x188 load is earlier. */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
@@ -172,16 +172,22 @@ u8 _LOSPoint2Point(LOSRequest *req) {
     if (req->toObj != NULL) {
         ctx.hitInfo.obj = req->toObj;
         ctx.hitInfo.kind = 2;
+        ctx.hitInfo.unk05 = 0;
+        ctx.hitInfo.unk06 = 0;
+        ctx.hitInfo.unk07 = 0;
+        ctx.hitInfo.unk0C = 0;
+        ctx.hitInfo.unk08 = 0;
+        ctx.hitInfo.unk10 = 0;
     } else {
         ctx.hitInfo.obj = NULL;
         ctx.hitInfo.kind = 0;
+        ctx.hitInfo.unk05 = 0;
+        ctx.hitInfo.unk06 = 0;
+        ctx.hitInfo.unk07 = 0;
+        ctx.hitInfo.unk0C = 0;
+        ctx.hitInfo.unk08 = 0;
+        ctx.hitInfo.unk10 = 0;
     }
-    ctx.hitInfo.unk05 = 0;
-    ctx.hitInfo.unk06 = 0;
-    ctx.hitInfo.unk07 = 0;
-    ctx.hitInfo.unk0C = 0;
-    ctx.hitInfo.unk08 = 0;
-    ctx.hitInfo.unk10 = 0;
     GTELOSLoop(&ctx, 0, 0);
     if (req->noHit != NULL) {
         *req->noHit = ctx.hit != 1;

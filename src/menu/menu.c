@@ -2883,7 +2883,12 @@ INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E5B0);
  * `chars = p` (flow makes the LOG_LINK from the first following use, so combine never sees
  * the copy): `D_8013FE68 = (TextChar *)p; chars = D_8013FE68;` reproduces the copy, but then
  * the D_8013FE68 store is early (original: late, from s5). The mMap store is moved by sched1
- * below `mem += 0xF000` (insn order 34,40,43,45,37). */
+ * below `mem += 0xF000` (insn order 34,40,43,45,37).
+ * r4H: 2 lines left. `base = mem + 0xF000` (a once-set pseudo is "birthing", so sched1 takes it
+ * before the mMap store) fixed the mMap order. The copy: cse_insn's (set REG0 REG1) swap rewrites
+ * `p = mem+0x3390; chars = p;` into `chars = mem+0x3390; p = chars` (dead) whenever chars outlives
+ * p (make_regs_eqv makes it qty_first_reg); giving p a use after the loop stops the swap, but
+ * then combine merges the copy because p dies there. */
 void func_8013E98C(void) {
     char path[32];
     u8 *mem;
@@ -2896,6 +2901,7 @@ void func_8013E98C(void) {
     s32 bottom;
     s32 a, b;
     u8 *p;
+    u8 *base;
 
     mem = EGSDisplayPacketAreaMalloc(0x15058);
     p = mem + 0x3390;
@@ -2907,15 +2913,15 @@ void func_8013E98C(void) {
     mem += 0x40F8;
     mMap = (TextChar *)p;
     D_8013FE78 = mem;
-    mem += 0xF000;
-    D_8013FEC4 = (MenuQuad *)(mem + 0x200);
-    D_8013FEBC = (MenuQuad *)(mem + 0x41C);
-    gMenuPolys = (MenuQuad *)(mem + 0x464);
-    D_8013FEC0 = (MenuQuadPair *)(mem + 0x8C0);
+    base = mem + 0xF000;
+    D_8013FEC4 = (MenuQuad *)(base + 0x200);
+    D_8013FEBC = (MenuQuad *)(base + 0x41C);
+    gMenuPolys = (MenuQuad *)(base + 0x464);
+    D_8013FEC0 = (MenuQuadPair *)(base + 0x8C0);
     D_8013FE68 = chars;
-    D_8013FE84 = (u32 *)mem;
-    gMenuLines = (MenuLine *)(mem + 0xB00);
-    lines = (MenuLine *)(mem + 0x1580);
+    D_8013FE84 = (u32 *)base;
+    gMenuLines = (MenuLine *)(base + 0xB00);
+    lines = (MenuLine *)(base + 0x1580);
     D_8013FE88 = LevelGetMenuHogHeader();
     InterfaceBuildMenuBackgroundPolys(D_8013FEC4);
     TextSpriteInitialize(D_8013FE68, 37);
