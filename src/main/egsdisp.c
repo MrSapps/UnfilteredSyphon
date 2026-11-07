@@ -1459,13 +1459,9 @@ void EGSDisplaySortFade(GsOT *ot) {
     *otp = (*otp & 0xFF000000) | ((u32)mode & 0xFFFFFF);
 }
 
-#ifdef NON_MATCHING
-/* gcc keeps &gCameraArray+4 in s0 across GsSetProjection; original rematerialises it.
- * Expand puts sym+4 in a pseudo for the projection load and CSE's use_related_value then
- * builds &camera->view as that pseudo + 0x64. Reading the projection into a block temp
- * fixes that part (6) but then `camera` (== gCameraArray) stays in s0 across GsSetView2,
- * where the original reloads gCameraArray[0].frame from the constant address; writing
- * gCameraArray[0] / a block-local camera there doesn't help (CSE reuses the pseudo). */
+/* `gCameraArray->projection` (not `gCameraArray[0].projection`) keeps the projection load a plain
+ * constant address, so cse has no sym+4 pseudo to derive &camera->view from; the position is then
+ * re-read through gCameraArray[0] after GsSetView2. */
 void EGSDisplaySortFogScrim(GsOT *ot) {
     MATRIX m;
     VECTOR pos;
@@ -1476,14 +1472,14 @@ void EGSDisplaySortFogScrim(GsOT *ot) {
     EGSCamera *camera;
 
     m = gEGSIdentityMatrix;
-    GsSetProjection(gCameraArray[0].projection);
+    GsSetProjection(gCameraArray->projection);
     camera = gCameraArray;
     camera->coord.flg = 0;
     camera->coord.coord = camera->frame->matrix;
     GsSetView2(&camera->view);
-    pos.vx = camera->frame->matrix.t[0];
-    pos.vy = camera->frame->matrix.t[1];
-    pos.vz = camera->frame->matrix.t[2];
+    pos.vx = gCameraArray[0].frame->matrix.t[0];
+    pos.vy = gCameraArray[0].frame->matrix.t[1];
+    pos.vz = gCameraArray[0].frame->matrix.t[2];
     pos.vy = -pos.vy;
     m.t[0] = pos.vx;
     m.t[1] = pos.vy;
@@ -1516,9 +1512,6 @@ void EGSDisplaySortFogScrim(GsOT *ot) {
     }
     GsOUT_PACKET_P = pkt;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortFogScrim);
-#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
 
