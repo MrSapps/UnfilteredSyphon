@@ -460,6 +460,11 @@ __asm__(".set D_8014289C, parkObjectives+4\n");
  * Also: in the COP branch ours compares GOBJ_TYPE(ref) against `type`'s reg (cse2 equivalence after
  * type == 0x35) where the original uses the hoisted 0x35 in $s4. Reusing cop/rt for the
  * ObjectMatchToRefIDByCatID result or refType for the inner type tests doesn't help.
+ * r4H: the cse2 equivalence comes from make_regs_eqv: `type` becomes the canonical reg for the
+ * hoisted 0x35 because its last use (bomb branch `type = GOBJ_TYPE(cop->id)`) is later. Using
+ * refType in BOTH the hostage do-loop and the bomb branch puts type in v1 and the COP compare on
+ * the hoisted reg (as the original), but then 0x35 and 0x29A tie on refs (12 each) and 0x29A's
+ * longer live range (348 vs 344) gives it s4 instead of s3 (still 14 lines).
  */
 void iParkInit(s32 mode) {
     int i;

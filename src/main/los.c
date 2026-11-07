@@ -126,7 +126,10 @@ void WindowLOSLoop(LOSContext *ctx);
 /* 11 lines left (r4H: hitInfo tail stores duplicated per arm as in _LOSPoint2PointCollide).
  * Open: the original has a dead 'addiu s0,sp,0x10' in the HALF(length) branch (bltz + j layout;
  * `length < 0 ? .. : ..` and an if/else don't change it); cam.vx goes through a1 not v0 and
- * the cam.vy/vz stores sit before the gGabeSector load; ctx.length's 0x188 load is earlier. */
+ * the cam.vy/vz stores sit before the gGabeSector load; ctx.length's 0x188 load is earlier.
+ * The dead s0 = sp+0x10 is &from: `LOSVector *f = &from; ... ctx.from = *f;` reproduces it in the
+ * bltz slot (bltz+j layout then matches), but the ctx.from copy then reads through s0 where the
+ * original reads sp+0x10 directly (12 lines); *f = *req->from variants don't keep the set. */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
