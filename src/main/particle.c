@@ -2215,7 +2215,11 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * Statement reorders of the vel loads/flag store make it much worse (30+); iCamDir/iCamPos inline helpers change nothing.
  * r4B: the sb must precede the `lw *D_8011008C` reload for m[2][2] (two non-struct accesses: sched keeps
  * their order), so the flag store comes before `vel.vz = ...` in the source; doing only that gets the sb
- * right but the vz pointer reload then lands in $v0 instead of reusing $a2 (5 lines). */
+ * right but the vz pointer reload then lands in $v0 instead of reusing $a2 (5 lines).
+ * r4E: in that variant the D_8011008C pseudo (79, block-local, REG_EQUIV mem) dies in the vz
+ * `*D` load (insn 78) but local-alloc does not tie the load's dest (102) to it; the remaining
+ * diff there is that tie plus the `vel.vx >> 2` sra placement. Seven other orders of the
+ * vel/pos.vx/flag statements are all 29+ lines. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
