@@ -1799,30 +1799,23 @@ s32 NPCDebugGetNoDamageFlag(void) {
     return D_8010F958 == 0;
 }
 
-#ifdef NON_MATCHING
-/* flags CSE'd into the awareness branch (target reloads npc->flags there).
- * r4C: the layout around the 0x40000/0xB tests is already identical, so the reload is
- * a CSE extended-block question (the awareness label has one use; follow_jumps needs a
- * BARRIER before it).  `*(volatile s32 *)&npc->flags` gives the reload, and then
- * `if (unk28 < 800) { if (...) mode = 6; else mode = 7; } else mode = 7;` is needed for
- * the delay-slot mode = 7 -- still 8 because volatile changes scheduling.  The nested
- * `if (flags & 0x40000) { mode = 6; if (...) goto done; }` form changes nothing. */
-/* r4F: why the else-branch flags load is CSE'd: cse1's path is start -> jump around the
- * `mode = 6; targetId` block (skip_blocks AROUND: no label inside it) -> test2 -> TAKEN into
- * the awareness block (one use, BARRIER before it), so mem(npc+0x20) stays known.  A local
- * `flags = npc->flags` for the first two tests does not help (same path).  The original must
- * break that path (a label inside the skipped block, a second use of the awareness label, or
- * memory invalidated in the skipped block). */
+/* The awareness branch reloads npc->flags: the early `npc->unk46 = mode` store sits in the
+ * block cse1 skips (AROUND) on its way to the awareness block, and invalidate_skipped_block
+ * drops all memory equivalences for it (QImode store).  The 0x40000/0xB tests use the
+ * `flags` local, and jump2 cross-jumps the early store into the shared `done` tail. */
 u8 NPCGetMoveMode(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     u8 mode;
     s32 dist;
     s32 f;
+    s32 flags;
 
-    if ((npc->flags & 0x40000) && (mode = 6, obj->target->targetId >= 0)) {
-        goto done;
+    flags = npc->flags;
+    if ((flags & 0x40000) && (mode = 6, obj->target->targetId >= 0)) {
+        npc->unk46 = mode;
+        goto ret;
     }
-    if (npc->flags & 0xB) {
+    if (flags & 0xB) {
         mode = 7;
         if (gSysInfo.level != 13) {
             goto done;
@@ -1891,11 +1884,9 @@ u8 NPCGetMoveMode(Gobj *obj) {
     }
 done:
     npc->unk46 = mode;
+ret:
     return mode;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCGetMoveMode);
-#endif
 
 void NPCSetChaseStopFlag(s32 id, s32 stop) {
     Gobj *obj = gameObjectsInfo[id].runtime;
