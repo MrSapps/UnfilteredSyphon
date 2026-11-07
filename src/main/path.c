@@ -34,7 +34,6 @@ typedef struct PathMoveInfo {
 #define PATH_STALL_COUNT(m) (((PathMoveInfo *)(m))->stallCount)
 
 #define ABS_DIFF(a, b) ({ s32 _d = (b) > (a) ? (b) - (a) : (a) - (b); _d; })
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 s32 PathSetupEX(Gobj *gobj, u8 force) {
     MoveInfo *move;
@@ -143,9 +142,6 @@ u8 PathObjectIsAtClosestPoint(Gobj *gobj, Gobj *target, s16 indexA, s16 indexB, 
     return (distA < distB) == (targetDistA < targetDistB);
 }
 
-#ifdef NON_MATCHING
-/* CSE keeps the constant 1 of the second ASSERT alive (in $s6) for the
- * unk17C = 1 store, which shifts the whole register allocation. */
 u8 PathHandleEx(Gobj *gobj, s32 unused, s32 orient, u8 pingPong, s16 first, s16 last, u8 *reachedEnd) {
     VECTOR32 cur;
     VECTOR32 target;
@@ -174,10 +170,13 @@ u8 PathHandleEx(Gobj *gobj, s32 unused, s32 orient, u8 pingPong, s16 first, s16 
     target.vz = path->points[move->unk174].z;
     EGSGeometryINT_GetDistancePointToPoint(&cur, &target, &dist);
     lo = (first != -1) ? first : 0;
-    hi = last;
     *reachedEnd = 0;
-    if (hi == -1) {
+    /* if/else (not `hi = last; if (hi == -1)`): the join label ends cse2's
+     * extended block, so the ASSERT's constant 1 is not reused for unk17C = 1 */
+    if (last == -1) {
         hi = path->numPoints - 1;
+    } else {
+        hi = last;
     }
     if (dist <= velocity) {
         if (pingPong) {
@@ -226,9 +225,9 @@ u8 PathHandleEx(Gobj *gobj, s32 unused, s32 orient, u8 pingPong, s16 first, s16 
         dir.vy = target.vy - cur.vy;
         dir.vz = target.vz - cur.vz;
         GTEMath_VectorNormal(&dir, &dir);
-        move->pendingMove.vx = EGSMathFIXMul(dir.vx, MIN(velocity, dist));
-        move->pendingMove.vy = EGSMathFIXMul(dir.vy, MIN(velocity, dist));
-        move->pendingMove.vz = EGSMathFIXMul(dir.vz, MIN(velocity, dist));
+        move->pendingMove.vx = EGSMathFIXMul(dir.vx, (velocity >= dist ? dist : velocity));
+        move->pendingMove.vy = EGSMathFIXMul(dir.vy, (velocity >= dist ? dist : velocity));
+        move->pendingMove.vz = EGSMathFIXMul(dir.vz, (velocity >= dist ? dist : velocity));
     }
     if (move->pendingMove.vx != 0 || move->pendingMove.vy != 0 || move->pendingMove.vz != 0) {
         if (orient == 2) {
@@ -238,9 +237,6 @@ u8 PathHandleEx(Gobj *gobj, s32 unused, s32 orient, u8 pingPong, s16 first, s16 
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/path", PathHandleEx);
-#endif
 
 /* Register allocation only: the original gives done/reachedEnd $s2/$s3 and
  * arg1/orient $s4/$s5. */
