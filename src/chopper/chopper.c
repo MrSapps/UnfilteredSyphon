@@ -1259,14 +1259,9 @@ static void func_80143B88(u8 visible) {
 INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_80143B88);
 #endif
 
-#ifdef NON_MATCHING
-/*
- * 5 lines left (was 32): only `full` gets $a0 where the original has $a3
- * (global-alloc conflict/preference; u32, function-scope and reorder variants
- * don't move it). Fixed so far: losBlocker read into a block-local right after
- * _LOSPoint2Point, material via an s32 temp (lh), `full` set in two statements
- * (srl/andi into one reg), and the >>2 arm first via `(a >= x && b >= x) ? >>2 : >>1`.
- */
+/* `full` gets a3 through global.c expand_preferences: dmg = full >> k shares dmg's a3 preference
+ * (from the DamageGOBJ arg). The terrain path's id must be its own variable, or dmg also
+ * prefers a0 (DamageTerrain arg copy) and full takes a0 first in allocation order. */
 /* Aim the chopper's gun at the player and fire a burst. */
 void ChopperTargeting(s32 *mode, u8 *active) {
     Vec4 ofs;
@@ -1380,15 +1375,16 @@ void ChopperTargeting(s32 *mode, u8 *active) {
                 s32 tex;
                 Vec4 *normal;
                 s32 weapon;
+                s32 id;
 
-                dmg = D_8014561C->id;
+                id = D_8014561C->id;
                 tex = BulletTextureGet(9);
                 normal = &tgt->normal;
                 weapon = 9;
                 if (tex) {
                     EGSDisplayRegisterDamage(&hitPos, normal, &D_80145680, tex, 0);
                 }
-                DamageTerrain(dmg, &hitPos, normal, &D_80145680, weapon);
+                DamageTerrain(id, &hitPos, normal, &D_80145680, weapon);
             }
             SysPlaySong(1, 9, 0, 0);
             WeaponSubRound(D_8014561C);
@@ -1397,9 +1393,6 @@ void ChopperTargeting(s32 *mode, u8 *active) {
         D_8014561C->target->unk58 = 0;
     }
 }
-#else
-INCLUDE_ASM("asm/chopper/nonmatchings/chopper", ChopperTargeting);
-#endif
 
 /* Pick the chopper's next attack pattern. */
 static void func_801447EC(void) {
