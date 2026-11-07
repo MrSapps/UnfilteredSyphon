@@ -718,8 +718,9 @@ s32 Fooble(s32 a, s32 b)
     return a;
 }
 
-#ifdef NON_MATCHING
-/* regalloc/scheduling in the delta-decode branches; vz store not tail-merged */
+/* s32 temps (and an s32 b3) keep the halfword sums out of HImode narrowing; otherwise the
+ * add/or ties its result to the zero-extended byte operand and the vz stores of the four
+ * delta-decode branches are not cross-jumped into one tail. */
 void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
 {
     MATRIX mat;
@@ -827,7 +828,7 @@ void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
                 } else if (b & 0x40) {
                     u8 b1 = data[1];
                     u8 b2 = data[2];
-                    u8 b3 = data[3];
+                    s32 b3 = data[3];
                     data += 4;
                     rot->vx += (s32)((b << 26) | ((b1 & 0xF0) << 18)) >> 22;
                     rot->vy += (s32)((b1 << 28) | ((b2 & 0xFC) << 20)) >> 22;
@@ -845,9 +846,9 @@ void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
                     } else {
                         b &= 0x1F;
                     }
-                    rot->vx = ((u8)b << 8) + data[1];
-                    rot->vy = (data[2] << 8) + data[3];
-                    rot->vz = (data[4] << 8) + data[5];
+                    { s32 t = ((u8)b << 8) + data[1]; rot->vx = t; }
+                    { s32 t = (data[2] << 8) + data[3]; rot->vy = t; }
+                    { s32 t = (data[4] << 8) + data[5]; rot->vz = t; }
                     data += 6;
                 }
                 if (code == 1) {
@@ -883,9 +884,6 @@ void EGSDisplayHAnimate(EGSHMD *hmd, HMDAnimObj *obj, u8 apply)
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egshmd", EGSDisplayHAnimate);
-#endif
 
 /* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
 SDATA_LOCAL(gInfraredColor)
