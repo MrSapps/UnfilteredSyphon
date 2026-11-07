@@ -217,6 +217,9 @@ void CopyMsgToSysQueue(SysMsg *msg) {
  * reproduce the original exactly); remaining differences are register allocation in the
  * dispatch loop (original: s0 = queue then msg, s3 = table, s4 = msgs) and which delay
  * slot the loop counter's zeroing lands in.
+ * r3A: the main blocker is data: mSysMsgQueue/Next are one static object here, so cc1
+ * addresses mSysMsgQueue as &mSysMsgQueueNext - 0xAF4 (the original uses a separate
+ * lui/addiu per symbol) and the queue/table registers follow from that.
  */
 void SysExecute(void) {
     char *noDmgText[2];

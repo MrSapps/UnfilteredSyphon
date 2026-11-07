@@ -644,7 +644,12 @@ void CASRequestDelay(s16 id, s32 ticks) {
 }
 
 #ifdef NON_MATCHING
-/* scheduling of spill-slot reloads (keep/started/sub/set) differs */
+/* scheduling of spill-slot reloads (keep/started/sub/set) differs.
+ * r3A: four separate sched2 spots: keep=0/started=0 stores sink later in the original; the
+ * started=1 store lands right before the HAStart3 jal; in the events[idx] copy the
+ * original loads rt->id into a0 first (ours v0, which blocks hoisting it) and keeps
+ * source store order; the deferred[] copy stores req0 before sub/set. Not tried yet:
+ * struct-member views for the spilled params, as in initPointAction. */
 /* Start anim set `set`'s sequence on each body layer (full body 0, upper 0x4000, lower
  * 0x8000), taking the CAS action slots and hooking up the event handler. */
 static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {

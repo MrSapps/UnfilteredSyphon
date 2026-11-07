@@ -1025,6 +1025,10 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_8007D120);
  * Control flow matches; differs in register allocation ("paused & 0xFF" is not
  * hoisted out of the loop) and the original leaves the jal delay slots of the
  * scratchpad calls empty.
+ * r3A: `s32 p = paused;` before the loop (tests use p, the unk00 stores use paused)
+ * gives the original's prologue andi and drops the score 41 -> 30, but loop.c then
+ * still hoists the constant 1 of the two `== 1` compares (-dL: life 16, savings 1,
+ * moved) where the original sets s1 = 1 inside the loop; the jal delay slots stay.
  */
 void AnimateProcess(u8 paused) {
     s32 i;
