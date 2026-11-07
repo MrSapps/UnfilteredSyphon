@@ -167,15 +167,15 @@ void GTEMath_VectorNormal(ShadowVec *in, ShadowVec *out);
 /* Mirror a footprint corner through the centre (y kept) */
 #define SHADOW_MIRROR(dst, src) ((dst)->vx = -(src)->vx, (dst)->vy = (src)->vy, (dst)->vz = -(src)->vz)
 
-#ifdef NON_MATCHING
-/* the original reloads v from the stack in each copy of the falloff macro but computes each ABS once */
+/* The MAX of the two abs values must stay a COND_EXPR (fold then distributes the multiply and the
+ * FIX test into both arms, and v is reloaded per copy); SHADOW_MIN(SHADOW_MAX(a, 0), 31) keeps
+ * the clamp as a MAX_EXPR inside an unfolded COND_EXPR. */
 void ShadowInit(void) {
     ShadowVec v;
     s32 len;
     s32 i;
     s32 j;
     s32 a;
-    s32 c;
 
     mShadowRequestList = NULL;
     for (i = 0; i < SHADOW_POOL_SIZE; i++) {
@@ -190,15 +190,13 @@ void ShadowInit(void) {
             v.vz = 0;
             EGSMath_VectorModulus(&v, &len);
             a = SHADOW_FIX((0x1000 - len) * 155 / 4);
-            c = SHADOW_FIX(a * (0x1000 - SHADOW_MAX(SHADOW_ABS(v.vy), SHADOW_ABS(v.vx)) / 4));
-            c = SHADOW_MIN(SHADOW_MAX2(c, 0), 31);
-            mShadowTexture[i][j] = c << 10 | c << 5 | 0x8000 | c;
+            a = SHADOW_FIX(a * (0x1000 - (__builtin_abs(v.vx) < __builtin_abs(v.vy) ? (s32)__builtin_abs(v.vy)
+                                                                                     : (s32)__builtin_abs(v.vx)) / 4));
+            a = SHADOW_MIN(SHADOW_MAX(a, 0), 31);
+            mShadowTexture[i][j] = 0x8000 | a << 10 | a << 5 | a;
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/shadow", ShadowInit);
-#endif
 
 u8 func_800915DC(ShadowObj *obj, u8 *rgb) {
     ShadowBox *box;
