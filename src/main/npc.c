@@ -2022,7 +2022,11 @@ void NPCShoot(Gobj *obj) {
  * through p->vx/vy and `v = p; v->vz` keeps the vz store on v.  Left: v must get a0 and points a2.
  * global.c: v (pri 4909) is allocated before points (4852) but pass 0 skips a0 because points
  * copy-prefers it (regs_someone_prefers), so v takes a2.  The original's v either prefers a0 too
- * or points lost its a0 preference (a0 conflict); renaming points via a copy changes nothing. */
+ * or points lost its a0 preference (a0 conflict); renaming points via a copy changes nothing.
+ * r4J: reusing the param itself as v (`PathPoint *points = pts; ... pts = NULL`) just moves the
+ * a0 copy preference to `points` (cse turns the copies into points = a0) -> same 19.
+ * prune_preferences only leaves a0 in v's regs_someone_prefers if v does not prefer a0 itself,
+ * so the original's v must carry an a0 (full) preference, or points conflict with hard a0. */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
     VECTOR32 *p = &D_8011D1F0;

@@ -939,6 +939,10 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
  * `!= 0x2000` fall-through (x == 0x2000) and folds the third test from either; (u16)/(s16)/u32
  * casts, a do-while(0) around the first two tests, a `sex` local with `else sex = sex;` and a
  * volatile local do not keep it.
+ * r4J: `if (==0x1000) goto third; if (!=0x2000) goto two; third: if (==0x1000) goto two;`
+ * does not help either: cse's follow_jumps path takes the first jump to `third`, folds the test
+ * and rethreads the jump straight to two_handed.  (x ^ 0x2000) != 0 / (x - 0x1000) == 0 forms
+ * fold too (cse knows x != 0x1000 from the first test's fall-through).
  */
 u8 func_8007D120(AnimSlot *slot) {
     AnimCharState *state;
@@ -1383,6 +1387,11 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
  * aimType s3, aiming s1 -- i.e. slot allocated before bone and the two conflict.  `bone = NULL`
  * before `ang = slot->aimAngle` gives the conflict (gobj/aimType then land in s2/s3, 71 lines)
  * but bone still outranks slot; one function-scope bone for both branches is worse.
+ * r4J: using the AnimRotMatrix/AnimMatrixToArm inlines for the else branch scores the same (77;
+ * the stack layout still matches) and an inline for the world==NULL stores does not lower bone's
+ * refs: integrate.c maps a user-variable pseudo argument straight onto the parameter, only
+ * expressions / non-user regs get a fresh pseudo.  bone needs live > ~137 insns (now 103) or
+ * fewer refs for slot (3063) to outrank it.
  */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
