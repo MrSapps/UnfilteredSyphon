@@ -1769,7 +1769,8 @@ static inline s32 iXYAdd(s32 xy, s32 d) {
 }
 
 #ifdef NON_MATCHING
-/* loop: the box/colour addresses get hoisted into s4-s6; a self-copy of m.t before func_8003E894 is missing */
+/* loop: the box/colour addresses get hoisted into s4-s6; a self-copy of m.t before func_8003E894 is missing
+ * (r4A: `box = &D_80117A30[i]` inside the loop instead of box++ makes it worse, 52 -> 67) */
 /* Radar update: NPC boxes and blips (with the danger level they add), the target box and
  * the bomb pointer, all in the player's frame scaled to the radar. */
 void func_8003D76C(void) {
@@ -2314,7 +2315,11 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc (lines base in t2 instead of t1), same code otherwise; sibling of func_8003EF48 */
+/* regalloc (lines base in t2 instead of t1), same code otherwise; sibling of func_8003EF48.
+ * r4A: in the original len lives in a2 and a copy of it (a0) is made right after q/h2, then used
+ * for lines[9].xy1 and the len / 8; D_8010FFEC is loaded into a0 and the len * D product lands
+ * in a0 too. Moving q = prod / 4 before the lines[0] stores or adding a `prod = len` copy for the
+ * tail did not change the allocation. */
 void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
