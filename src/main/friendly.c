@@ -488,9 +488,11 @@ static s32 func_80086FAC(VECTOR32 *pt, FriendlyPoly *poly, u8 *inside) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* the original hoists &poly.v (spilled, 8-byte larger frame) and keeps &poly in s0; regalloc follows */
 /*
+ * `pp = &poly` (a user variable set inside the loop, so loop.c leaves it there) keeps
+ * &poly in s0 for the two calls; `(&poly.v[i])->vx` makes the copy loop's giv base
+ * &poly.v (hoisted and spilled), not &poly + 4.
+ *
  * Find the highest face of gobj's face list under its feet (within 0x40 above
  * them); *face, *floorY and *dist (feet - floor) describe it.
  */
@@ -507,6 +509,7 @@ static s32 func_80087088(Gobj *gobj, u8 *found, GroundFace **face, s32 *floorY, 
     s32 top;
     s32 d;
     s32 i;
+    FriendlyPoly *pp;
 
     f = ((FriendlyAnim *)gobj->anim)->faceList;
     pos = ((FriendlyMove *)gobj->move)->unk10C;
@@ -517,10 +520,10 @@ static s32 func_80087088(Gobj *gobj, u8 *found, GroundFace **face, s32 *floorY, 
     pos.vz += ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->offset.vz;
     pos.vy -= ((FriendlyRide *)((FriendlyMove *)gobj->move)->ride)->box->height;
     ((FriendlyMove *)gobj->move)->floorY = 0x80000001;
+    top = pos.vy + 0x40;
     *found = 0;
     *face = NULL;
     *dist = 0x7FFFFFFF;
-    top = pos.vy + 0x40;
     for (; f != NULL; f = f->next) {
         cf = &f->face;
         BITS_WORD(&f->face.pad, 0, words, bit);
@@ -554,13 +557,14 @@ static s32 func_80087088(Gobj *gobj, u8 *found, GroundFace **face, s32 *floorY, 
         if (near) {
             poly.count = cf->count;
             for (i = 0; i < poly.count; i++) {
-                poly.v[i].vx = cf->verts[i]->x;
-                poly.v[i].vy = cf->verts[i]->y;
-                poly.v[i].vz = cf->verts[i]->z;
+                (&poly.v[i])->vx = cf->verts[i]->x;
+                (&poly.v[i])->vy = cf->verts[i]->y;
+                (&poly.v[i])->vz = cf->verts[i]->z;
             }
-            func_80086FAC(&pos, &poly, &near);
+            pp = &poly;
+            func_80086FAC(&pos, pp, &near);
             if (near) {
-                EGSGeometryINT_PointProjectOnFacePlaneAlongY(&pos, &poly, &hit, &y);
+                EGSGeometryINT_PointProjectOnFacePlaneAlongY(&pos, pp, &hit, &y);
                 d = pos.vy - y;
                 if (hit && d >= -0x3F && d < *dist) {
                     ((FriendlyMove *)gobj->move)->floorY = y;
@@ -574,9 +578,6 @@ static s32 func_80087088(Gobj *gobj, u8 *found, GroundFace **face, s32 *floorY, 
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80087088);
-#endif
 
 static void func_800874C0(Gobj *gobj) {
     u8 found;
