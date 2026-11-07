@@ -736,18 +736,19 @@ void LoadPlayerAnimations(u8 gabe) {
     }
 }
 
-#ifdef NON_MATCHING
-/* gObjPlayer store scheduled earlier; the constant 1 is CSE'd across the grenade loop into s2 */
-/* r2B: `gobj->anim = gobj->anim; display = *gCamera; gObjPlayer = gobj; AddAnim(display, ..)` sinks the
- * gObjPlayer store below the *gCamera load (a plain deref conflicts with a scalar store), but the
- * gCamera pointer load then lands after the anim store (19 lines). The 1: cse2 links the in-loop QImode
- * reg (flags0 = 1) to the post-loop npcState/released stores; loop in a static inline, do-while: no help. */
+/* *gCamera read as a struct field: a struct access at a varying address is independent of the
+ * scalar gObjPlayer store for sched, so that store sinks below the AddAnim argument loads */
+typedef struct PlayerCamHolder {
+    void *display;
+} PlayerCamHolder;
+
 /* Create the player object: Gabe's model, collision, flashlight and the two grenade objects. */
 void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move) {
     GOBJ_MATRIX m;
     VECTOR32 pos;
     void *model;
     s32 i;
+    u8 v;
 
     LevelGetHMDModel("GABE.HMD", &mGabeAnim);
     EGSAnimHMDCreate(mGabeAnim, iAnimationArray, 0, 0x1E, &gobj->anim, 0);
@@ -755,7 +756,7 @@ void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move) {
     EGSAnimSetReferenceAnim(gobj->anim);
     gobj->anim = gobj->anim;
     gObjPlayer = gobj;
-    EGSDisplayAddAnim(*gCamera, gobj->anim);
+    EGSDisplayAddAnim(((PlayerCamHolder *)gCamera)->display, gobj->anim);
     *(s16 *)&gobj->anim->unk14[2] = -1;
     CobjAddBulletCollisionBoxGobj(gobj, 1, 0, 0);
     EGSDisplayPointSourceInit(mPlayerFlashlightPS);
@@ -790,11 +791,19 @@ void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move) {
         CollisionGobjBasicInit(mGrenadeGobj[i], 0x80000001, 0x400, 0x800, -1, -1);
         mGrenadeGobj[i]->cas = NULL;
         mGrenadeGobj[i]->id = GOBJ_ID_666;
-        mGrenadeGobj[i]->flags0 = 1;
-        mGrenadeGobj[i]->unk04 = 0x13;
+        /* one u8 v for both constants: after the loop cse2 knows v = 0x13, so the later
+         * npcState/released 1 is a new constant (s1) rather than the in-loop QImode 1 */
+        v = 1;
+        mGrenadeGobj[i]->flags0 = v;
+        v = 0x13;
+        mGrenadeGobj[i]->unk04 = v;
     }
     gobj->flags23 = 0;
     gobj->healthInfo = (GameObjectHealth *)gameObjectsInfo[gobj->id].unk38;
+    /* empty do-while(0): its loop notes are a sched barrier, keeping the npcState store after
+     * the healthInfo computation (it ends up in the jal delay slot) */
+    do {
+    } while (0);
     gobj->npcState = 1;
     EGSDisplayFlashlightInit(&gPlayerFlashlight);
     EGSDisplayFlashlightFrame(&gPlayerFlashlight, gobj->anim->frames[0], 1);
@@ -816,9 +825,6 @@ void func_80025A98(Gobj *gobj, struct EGSFrame **frameOut, MoveInfo *move) {
     D_801103BE = -1;
     gPlayerOnFireFlag = 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", func_80025A98);
-#endif
 
 void func_80025EA8(u8 on) {
     if (on) {
