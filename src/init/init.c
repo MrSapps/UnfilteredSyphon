@@ -1294,14 +1294,11 @@ void EFFECTS2ObjInit(InitRuntime *rt) {
     rt->unk04 = gExeTick;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: flag bit computed straight into s1 instead of via v0.
- * Ours: the SI and-result is the multi-block pseudo (CSE folds the u8 hi copy into it).
- * Tried: hi = flags1 &= 0x80, block-local u8/s32 temps, two-step hi = x; hi &= 0x80, goto layouts,
- * bitfield struct, u8/s32 hi. `static inline u8 f(rt, u8 v){rt->flags1 = v; return v;}` gets
- * the v0->s1 copy right but adds andi 0xFF and folds hi|1 to li 1 (3 diffs). */
+/* The flag bit goes through an s32 temp (tested and stored) and an s16 copy that the arms
+ * use: the narrower copy is a different mode, so cse neither swaps it nor folds hi | 1. */
 void ELEVATORObjInit(InitRuntime *rt, s32 type) {
-    u8 hi;
+    s16 hi;
+    s32 t;
 
     rt->npcState = 0xD;
     LevelCreateGOBJ(rt->id, 0);
@@ -1316,9 +1313,10 @@ void ELEVATORObjInit(InitRuntime *rt, s32 type) {
             rt->move[0x174 / 4] = 0;
             rt->move[0x17C / 4] = 1;
         }
-        hi = rt->flags1 & 0x80;
-        rt->flags1 = hi;
-        if (hi) {
+        t = rt->flags1 & 0x80;
+        hi = t;
+        rt->flags1 = t;
+        if (t) {
             rt->flags1 = hi | (PathGetNumPoints(rt) & 0x7F);
         } else {
             rt->flags1 = hi | 1;
@@ -1340,9 +1338,6 @@ void ELEVATORObjInit(InitRuntime *rt, s32 type) {
     rt->unk04 = 0;
     rt->flags23 |= 4;
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", ELEVATORObjInit);
-#endif
 
 void FIREObjInit(InitRuntime *rt, s32 type) {
     rt->npcState = 0;
