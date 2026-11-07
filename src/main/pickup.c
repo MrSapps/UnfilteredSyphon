@@ -2073,8 +2073,6 @@ void PICKUPObjDispatch(SysMsg *msg) {
     }
 }
 
-#ifdef NON_MATCHING
-/* 8 insns: result = 1 scheduled first instead of after the SysPlaySong args; case 42 loop's other==NULL branch fills its delay slot from the fallthrough */
 void SWITCHObjDispatch(SysMsg *msg) {
     VECTOR32 pos;
     Gobj *sw = gameObjectsInfo[msg->to].runtime;
@@ -2199,8 +2197,8 @@ void SWITCHObjDispatch(SysMsg *msg) {
                 pos.vy = sw->anim->frame->pos.vy;
                 pos.vz = sw->anim->frame->pos.vz;
                 pos.vy = -pos.vy;
-                result = 1;
                 SysPlaySong(0, 0x14, 0, (s32)&pos);
+                result = 1;
                 if (type != 0x1D && type != 0x6A) {
                     result = 3;
                 }
@@ -2254,7 +2252,7 @@ void SWITCHObjDispatch(SysMsg *msg) {
             if (type == 0x3A) {
                 ref = sw->id;
                 linked = 1;
-                do {
+                while (linked) {
                     ref = gameObjectsInfo[ref].refId;
                     if (ref != -1) {
                         other = gameObjectsInfo[ref].runtime;
@@ -2268,7 +2266,7 @@ void SWITCHObjDispatch(SysMsg *msg) {
                     } else {
                         linked = 0;
                     }
-                } while (linked);
+                }
             }
         }
         break;
@@ -2277,9 +2275,6 @@ void SWITCHObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", SWITCHObjDispatch);
-#endif
 
 /* $gp commons: let maspsx use $gp for them (kept after the last function, in .text) */
 SDATA_LOCAL(gDeviceDetonated)
