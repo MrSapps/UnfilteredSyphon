@@ -337,11 +337,8 @@ u8 _LOSGobjAlongAngleDirectionYXZ(LOSRequest *req) {
     return _LOSPoint2Point(req);
 }
 
-#ifdef NON_MATCHING
-/* 4 lines left (r4D): ctx.ignore/ctx.target right after ctx.mid fixed the req loads (they
- * must precede the ctx.unkA8/ctx.hit sb's: QImode stores conflict with every load). Still open:
- * sched1 hoists the a0/a1 GTELOSLoop arg sets above the hitInfo stores (sched2 then keeps that
- * LUID order), the original has them after the stores with a2 in the jal slot. */
+/* The hitInfo tail stores are written in both arms: cross-jumping merges them after sched1,
+ * so sched1 sees the GTELOSLoop arg sets alone in the join block and keeps them by the call. */
 u8 _LOSPoint2PointCollide(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
@@ -382,16 +379,22 @@ u8 _LOSPoint2PointCollide(LOSRequest *req) {
     if (req->toObj != NULL) {
         ctx.hitInfo.obj = req->toObj;
         ctx.hitInfo.kind = 2;
+        ctx.hitInfo.unk05 = 0;
+        ctx.hitInfo.unk06 = 0;
+        ctx.hitInfo.unk07 = 0;
+        ctx.hitInfo.unk0C = 0;
+        ctx.hitInfo.unk08 = 0;
+        ctx.hitInfo.unk10 = 0;
     } else {
         ctx.hitInfo.obj = NULL;
         ctx.hitInfo.kind = 0;
+        ctx.hitInfo.unk05 = 0;
+        ctx.hitInfo.unk06 = 0;
+        ctx.hitInfo.unk07 = 0;
+        ctx.hitInfo.unk0C = 0;
+        ctx.hitInfo.unk08 = 0;
+        ctx.hitInfo.unk10 = 0;
     }
-    ctx.hitInfo.unk05 = 0;
-    ctx.hitInfo.unk06 = 0;
-    ctx.hitInfo.unk07 = 0;
-    ctx.hitInfo.unk0C = 0;
-    ctx.hitInfo.unk08 = 0;
-    ctx.hitInfo.unk10 = 0;
     GTELOSLoop(&ctx, 1, 0);
     if (req->noHit != NULL) {
         *req->noHit = ctx.hit != 1;
@@ -407,6 +410,3 @@ u8 _LOSPoint2PointCollide(LOSRequest *req) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/los", _LOSPoint2PointCollide);
-#endif
