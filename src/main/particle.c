@@ -2697,36 +2697,31 @@ typedef struct GlassPoly {
     /* 0x24 */ GlassUV uv2;
 } GlassPoly;
 
-#ifdef NON_MATCHING
-/* register allocation/scheduling of the six divisions differs */
 void particleGlassTexture(GlassPoly *poly, s32 x0, s32 y0, s32 x1, s32 y1, s32 x2, s32 y2) {
     GlassUV *uv;
     s32 page;
     s32 u;
     s32 v;
 
-    u = (x0 - D_80110108) * D_80110100 / D_80110110;
-    v = (y0 - D_8011010C) * D_80110104 / D_80110114;
+    u = D_801100F8 + (x0 - D_80110108) * D_80110100 / D_80110110;
+    v = D_801100FC + D_80110104 - (y0 - D_8011010C) * D_80110104 / D_80110114;
     uv = &poly->uv0;
     page = D_801100F0 & 0x1F;
-    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
-    uv->v = D_801100FC + D_80110104 - v;
+    uv->u = (u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = v;
     uv->attr = D_801100F4;
-    u = (x1 - D_80110108) * D_80110100 / D_80110110;
-    v = (y1 - D_8011010C) * D_80110104 / D_80110114;
+    u = D_801100F8 + (x1 - D_80110108) * D_80110100 / D_80110110;
+    v = D_801100FC + D_80110104 - (y1 - D_8011010C) * D_80110104 / D_80110114;
     uv = &poly->uv1;
-    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
-    uv->v = D_801100FC + D_80110104 - v;
+    uv->u = (u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = v;
     uv->attr = D_801100F0;
-    u = (x2 - D_80110108) * D_80110100 / D_80110110;
-    v = (y2 - D_8011010C) * D_80110104 / D_80110114;
+    u = D_801100F8 + (x2 - D_80110108) * D_80110100 / D_80110110;
+    v = D_801100FC + D_80110104 - (y2 - D_8011010C) * D_80110104 / D_80110114;
     uv = &poly->uv2;
-    uv->u = (D_801100F8 + u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
-    uv->v = D_801100FC + D_80110104 - v;
+    uv->u = (u - (page < 16 ? page << 6 : (page - 16) << 6)) * 2;
+    uv->v = v;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", particleGlassTexture);
-#endif
 
 /* View of a Particle used as a glass shard */
 typedef struct GlassShard {
