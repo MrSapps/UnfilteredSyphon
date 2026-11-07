@@ -4394,32 +4394,36 @@ s32 getShift(s32 n) {
 }
 
 #ifdef NON_MATCHING
-/* loop.c does not hoist 0x20000000 into fp, so next is not spilled and registers differ */
+/* Register allocation only (26 lines). loop.c does hoist 0x20000000 (and 12), but global.c
+ * ranks them: ours 12 (1607) > prev (1136) > next (634) > 0x20000000 (496, no reg -> remade per
+ * use); the original gives prev s6 > 12 s7 > 0x20000000 fp and leaves next on the stack (0x40).
+ * Tried: a code variable (set before / inside the loop), the flag colour stored in both arms,
+ * a second ParticleFree call instead of goto free (raises prev and next alike). */
 /* Spinning flat triangles (debris), scaled by the projected size of the group's first particle */
 void ParticleDisplayPolyFlat(ParticleGroup *g) {
     VECTOR32 top;
     VECTOR32 screen;
     VECTOR32 center;
     s32 i = g->head;
-    s32 height = g->unk23;
     s32 prev;
     s32 next;
-    s32 size;
+    s32 size = g->unk23;
     s32 depth;
     s32 bias;
     s32 color;
     s32 angle;
     s32 x;
     s32 y;
-    Particle *p = &D_80119040[i];
+    Particle *p;
+    Particle *first = &D_80119040[i];
     ParticlePolyF3 *poly;
 
-    EGSDisplayTransformWorldToScreen(&p->pos, &screen);
-    top.vx = p->pos.vx;
+    EGSDisplayTransformWorldToScreen(&first->pos, &screen);
+    top.vx = first->pos.vx;
     prev = 0;
-    top.vy = p->pos.vy + height;
+    top.vy = first->pos.vy + size;
     size = screen.vy;
-    top.vz = p->pos.vz;
+    top.vz = first->pos.vz;
     EGSDisplayTransformWorldToScreen(&top, &screen);
     size = screen.vy - size;
     if (g->unk24 < size) {
