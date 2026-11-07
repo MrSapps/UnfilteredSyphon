@@ -876,11 +876,17 @@ void NPCShootHostage(s32 id) {
     NPC_OF(obj)->flags &= ~0x80000;
 }
 
-#ifdef NON_MATCHING
-/* draft: right shape; regalloc of the 0x7FFFFFF bests (original spills copBest, keeps &D_8011D1D0 in s6) and the NPC scan id copies differ.
- * r4C: the NPCGetFirstID() sites load straight into s1 in the original (ours: v1 then a
- * copy); renaming id per region (three separate variables) changes nothing. */
+/* xz dot product; the inline keeps &D_8011D1D0 a constant, so the loop in NPCPickNPCTarget
+ * has no address pseudo to hoist */
+static inline s32 VecDotXZ(VECTOR32 *a, VECTOR32 *b) {
+    return a->vx * b->vx + a->vz * b->vz;
+}
+
+/* The first NPC scans are open-coded (NPC_SCAN_IDS with their own counter j) so they load
+ * straight into id; `best` is addressable and initialised first; the D_8011015x stores come
+ * before the best reloads; the early cop return shares the gPlayerOffset tail (goto player). */
 s32 NPCPickNPCTarget(s32 self) {
+    s32 best = 0x7FFFFFF;
     s32 copBest = 0x7FFFFFF;
     Gobj *obj = gameObjectsInfo[self].runtime;
     NPC *npc = NPC_OF(obj);
@@ -888,13 +894,12 @@ s32 NPCPickNPCTarget(s32 self) {
     s32 cop2Best = 0x7FFFFFF;
     VECTOR32 pos;
     s32 dist;
-    VECTOR32 other;
-    s32 best = 0x7FFFFFF;
     s32 dist2;
     s32 d3;
     s32 d4;
     s32 id;
     s32 i;
+    s32 j;
     Gobj *o;
 
     if (gSysInfo.level == 14) {
@@ -911,7 +916,9 @@ s32 NPCPickNPCTarget(s32 self) {
                 }
             } else {
                 pos = obj->move->pos;
-                id = NPCGetFirstID();
+                getNPCIndex = 0;
+                j = 0;
+                NPC_SCAN_IDS(id, j)
                 D_80110158 = 0;
                 D_8011015C = 0;
                 target = -1;
@@ -927,7 +934,7 @@ s32 NPCPickNPCTarget(s32 self) {
                         } else {
                             D_8011015C++;
                         }
-                        if (((NPC_OF(obj)->nameMsgId ^ 1) & 1) != ((NPC_OF(o)->nameMsgId ^ 1) & 1)) {
+                        if ((u8)!(NPC_OF(obj)->nameMsgId & 1) != (u8)!(NPC_OF(o)->nameMsgId & 1)) {
                             EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &o->move->pos, &dist);
                             if (dist < best) {
                                 target = id;
@@ -946,9 +953,13 @@ s32 NPCPickNPCTarget(s32 self) {
     } else if (gSysInfo.level == 13) {
         target = -1;
         if (obj->healthInfo->health > 0) {
+            VECTOR32 other;
+
             D_80110138 = obj->id;
             pos = obj->move->pos;
-            id = NPCGetFirstID();
+            getNPCIndex = 0;
+            j = 0;
+            NPC_SCAN_IDS(id, j)
             while (id >= 0) {
                 if (id != obj->id) {
                     o = gameObjectsInfo[id].runtime;
@@ -956,7 +967,7 @@ s32 NPCPickNPCTarget(s32 self) {
                     EGSGeometry_GetFuzzyDistancePoint2Point(&pos, &other, &dist2);
                     if (o->healthInfo->health != -1) {
                         VecDiffFlatNorm(&D_8011D1D0, &pos, &other);
-                        if ((D_8011D1D0.vx * npc->dir.vx + D_8011D1D8 * npc->dir.vz < 0 || dist2 < 0x1E0) && dist2 < best) {
+                        if ((VecDotXZ(&D_8011D1D0, &npc->dir) < 0 || dist2 < 0x1E0) && dist2 < best) {
                             target = id;
                             best = dist2;
                         }
@@ -975,70 +986,73 @@ s32 NPCPickNPCTarget(s32 self) {
     } else if (npc->flags & 0x10) {
         target = NPCPickHostageTarget(self, 1);
     } else if (obj->healthInfo->health > 0) {
+        VECTOR32 other;
+
         npc->unk32 = 100;
         if (!(NPC_OF(obj)->nameMsgId & 1) && D_80110154 == self && copKilledByPCFlag) {
-            return gPlayerOffset;
-        }
-        other = obj->move->pos;
-        id = NPCGetFirstID();
-        D_80110158 = 0;
-        if (NPC_OF(obj)->nameMsgId & 1) {
-            if (gSysInfo.level != 3 || (obj->id & 1)) {
-                target = gPlayerOffset;
-                EGSGeometry_GetFuzzyDistancePoint2Point(&other, &gObjPlayer->move->pos, &best);
+        player:
+            target = gPlayerOffset;
+        } else {
+            other = obj->move->pos;
+            getNPCIndex = 0;
+            j = 0;
+            NPC_SCAN_IDS(id, j)
+            D_80110158 = 0;
+            if (NPC_OF(obj)->nameMsgId & 1) {
+                if (gSysInfo.level != 3 || (obj->id & 1)) {
+                    target = gPlayerOffset;
+                    EGSGeometry_GetFuzzyDistancePoint2Point(&other, &gObjPlayer->move->pos, &best);
+                } else {
+                    target = -1;
+                }
             } else {
                 target = -1;
             }
-        } else {
-            target = -1;
-        }
-        while (id >= 0) {
-            o = gameObjectsInfo[id].runtime;
-            if (o->healthInfo->health > 0 && (NPC_OF(o)->flags & 1)) {
-                if (!(NPC_OF(o)->nameMsgId & 1)) {
-                    D_80110158++;
-                    if (NPC_OF(o)->unk28 < copBest) {
-                        copBest = NPC_OF(o)->unk28;
-                        D_80110154 = o->id;
-                    }
-                    if (NPC_OF(obj)->nameMsgId & 1) {
-                        EGSGeometry_GetFuzzyDistancePoint2Point(&other, &o->move->pos, &d3);
-                        if (d3 < best) {
-                            target = id;
-                            best = d3;
+            while (id >= 0) {
+                o = gameObjectsInfo[id].runtime;
+                if (o->healthInfo->health > 0 && (NPC_OF(o)->flags & 1)) {
+                    if (!(NPC_OF(o)->nameMsgId & 1)) {
+                        D_80110158++;
+                        if (NPC_OF(o)->unk28 < copBest) {
+                            D_80110154 = o->id;
+                            copBest = NPC_OF(o)->unk28;
                         }
-                    }
-                } else {
-                    if (NPC_OF(o)->unk28 < cop2Best) {
-                        cop2Best = NPC_OF(o)->unk28;
-                        D_80110150 = o->id;
-                    }
-                    if (!(NPC_OF(obj)->nameMsgId & 1)) {
-                        EGSGeometry_GetFuzzyDistancePoint2Point(&other, &o->move->pos, &d4);
-                        if (d4 < best) {
-                            target = id;
-                            best = d4;
+                        if (NPC_OF(obj)->nameMsgId & 1) {
+                            EGSGeometry_GetFuzzyDistancePoint2Point(&other, &o->move->pos, &d3);
+                            if (d3 < best) {
+                                target = id;
+                                best = d3;
+                            }
+                        }
+                    } else {
+                        if (NPC_OF(o)->unk28 < cop2Best) {
+                            D_80110150 = o->id;
+                            cop2Best = NPC_OF(o)->unk28;
+                        }
+                        if (!(NPC_OF(obj)->nameMsgId & 1)) {
+                            EGSGeometry_GetFuzzyDistancePoint2Point(&other, &o->move->pos, &d4);
+                            if (d4 < best) {
+                                target = id;
+                                best = d4;
+                            }
                         }
                     }
                 }
+                NPC_NEXT_ID(id, i);
             }
-            NPC_NEXT_ID(id, i);
-        }
-        if (target < 0) {
-            if ((NPC_OF(obj)->nameMsgId & 1) || !copKilledByPCFlag) {
-                npcRequestKneelRelease(obj);
-                npc->unk41 = 0;
-                npc->unk45 = 0;
-            } else {
-                return gPlayerOffset;
+            if (target < 0) {
+                if ((NPC_OF(obj)->nameMsgId & 1) || !copKilledByPCFlag) {
+                    npcRequestKneelRelease(obj);
+                    npc->unk41 = 0;
+                    npc->unk45 = 0;
+                } else {
+                    goto player;
+                }
             }
         }
     }
     return target;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCPickNPCTarget);
-#endif
 
 void NPCDamaged(s32 id, s32 by) {
     Gobj *obj;
