@@ -1769,8 +1769,12 @@ static inline s32 iXYAdd(s32 xy, s32 d) {
 }
 
 #ifdef NON_MATCHING
-/* loop: the box/colour addresses get hoisted into s4-s6; a self-copy of m.t before func_8003E894 is missing
- * (r4A: `box = &D_80117A30[i]` inside the loop instead of box++ makes it worse, 52 -> 67) */
+/* loop: (r4G) the fade path is iStepColor on block-local cur/want through a copy p = box (52 -> 32;
+ * the original's t3 copy of s2). Left: the box->xy/color dest-address givs (0xC..0x1C) get
+ * combined and strength-reduced into an extra s-reg (orig keeps only s2 = box, s3 = i: 4 s-regs);
+ * and the original has a self-copy of m.t (3 lw + 3 sw at sp+0x34) between TransposeMatrix and
+ * func_8003E894 that store_expr/cse delete in every form tried (direct, via inline, VECTOR32 cast,
+ * volatile; a block temp goes through memory). box = &D_80117A30[i] is worse. */
 /* Radar update: NPC boxes and blips (with the danger level they add), the target box and
  * the bomb pointer, all in the player's frame scaled to the radar. */
 void func_8003D76C(void) {
@@ -1812,7 +1816,14 @@ void func_8003D76C(void) {
         if (id == -1) {
             if (box->link != 0) {
                 if (box->color.word != 0x28503028) {
-                    box->color.word = iFadeColor(box->color.word, 0x503028) | 0x28000000;
+                    IfaceColor cur;
+                    IfaceColor want;
+                    IfacePoly4 *p = box;
+
+                    cur.w = p->color.word;
+                    want.w = 0x503028;
+                    iStepColor(&cur, &want);
+                    p->color.word = want.w | 0x28000000;
                 } else {
                     EGSDisplayDeletePoly(gInterfaceWindow, box);
                 }
