@@ -1712,20 +1712,14 @@ extern u8 D_8010FA94[]; /* " */
 extern u8 D_8010FA98[]; /* , */
 extern u8 D_8010FA9C[]; /* - */
 
-#ifdef NON_MATCHING
-/* regalloc: the original keeps glyph in a3 and u/v/w in v1/a0/v0 (r4A: glyph gets a0 because it
- * never overlaps the c param pseudo; it needs a conflict with c. `u8 *glyph = NULL;` with the two
- * `default:` arms removed gives a3 and drops to 9 diff lines, but then the default blocks
- * (`addu a3,0,0; j; li v0,h`) vanish, so the real source has explicit defaults plus something
- * else keeping glyph live over the dispatch. The tail wants w masked again (`andi v1,w,0xff`
- * before the +1/+2), e.g. `ch->w = glyph[2]; w = ch->w;`.) */
 /*
  * Set up ch for character c in the normal or mini font; returns its advance
  * (0 if the font has no glyph for c).
+ * ch->h is stored per branch (cross-jumping merges the two sh after regalloc), so the 6/8 is a
+ * block-local v0 and glyph (global) is pushed to a3; r = w widens w (andi) before the +1/+2.
  */
 u8 func_80086474(u8 c, TextChar *ch, u8 mini) {
     u8 *glyph;
-    s16 h;
     u8 u;
     u8 v;
     u8 w;
@@ -1769,7 +1763,7 @@ u8 func_80086474(u8 c, TextChar *ch, u8 mini) {
                 glyph = NULL;
                 break;
         }
-        h = 6;
+        ch->h = 6;
     } else {
         switch (c) {
             case 'a' ... 'z':
@@ -1818,27 +1812,25 @@ u8 func_80086474(u8 c, TextChar *ch, u8 mini) {
                 glyph = NULL;
                 break;
         }
-        h = 8;
+        ch->h = 8;
     }
-    ch->h = h;
     if (glyph != NULL) {
+        s32 r;
         u = glyph[0];
         v = glyph[1];
         w = glyph[2];
         ch->u = u;
         ch->w = w;
         ch->v = v;
+        r = w;
         if (mini) {
-            return w + 1;
+            return r + 1;
         }
-        return w + 2;
+        return r + 2;
     }
     ch->w = 0;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", func_80086474);
-#endif
 
 /* Glyphs (u, v, width) of the special characters, in the font rodata above. */
 #define D_800124FE ((u8 *)D_800124F8 + 6)
