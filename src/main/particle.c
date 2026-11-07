@@ -4407,22 +4407,6 @@ s32 getShift(s32 n) {
     return shift - 1;
 }
 
-#ifdef NON_MATCHING
-/* Register allocation only (26 lines). loop.c does hoist 0x20000000 (and 12), but global.c
- * ranks them: ours 12 (1607) > prev (1136) > next (634) > 0x20000000 (496, no reg -> remade per
- * use); the original gives prev s6 > 12 s7 > 0x20000000 fp and leaves next on the stack (0x40).
- * Tried: a code variable (set before / inside the loop), the flag colour stored in both arms,
- * a second ParticleFree call instead of goto free (raises prev and next alike).
- * r4B: `-(y << 16) + (u16)x` (as in the matched line drawers) fixes the sll/andi order (26 -> 23).
- * The original's next is a spilled pseudo (loaded into $t0, stored to 0x40), not an addressable
- * local: a volatile/address-taken next gives the right frame (0x70) and fp = 0x20000000 but
- * still swaps prev/12 (s7/s6). Moving prev = i, goto/else-free layouts: no change.
- * r4E (23 -> 12): a second ParticleFree call for the ParticleUpdateMovement failure (prev refs 5 -> 7)
- * plus prev = i after the 0x200 test (live 94 -> 89) puts prev (1573) above 12 (1541): prev s6, 12 s7.
- * Left: next (refs 4, live 132: 606) still outranks 0x20000000 (refs 7, but its REG_EQUIV doubles
- * live to 294: 476), so 0x20000000 is the one spilled. Needs next < 476 (refs 3, i.e. one ref outside
- * the loop notes, or live > 168) or a 4th RTL use of the constant (refs 9 -> 918). A `code` variable
- * set before the loop is also REG_EQUIV-doubled (a dead first set is deleted before counting). */
 /* Spinning flat triangles (debris), scaled by the projected size of the group's first particle */
 void ParticleDisplayPolyFlat(ParticleGroup *g) {
     VECTOR32 top;
@@ -4466,7 +4450,11 @@ void ParticleDisplayPolyFlat(ParticleGroup *g) {
         if (p->color & 0xFF000000) {
             poly->rgbc0.word = (p->color & 0xFFFFFF) | 0x20000000;
         } else {
-            poly->rgbc0.word = p->color | 0x20000000;
+            /* do-while(0) keeps its loop notes, so flow.c weights refs inside it by loop
+             * depth 2: 0x20000000 refs 7 -> 8 outranks next, which is spilled as in the original */
+            do {
+                poly->rgbc0.word = p->color | 0x20000000;
+            } while (0);
         }
         if ((g->flags & 2) && !((gSystemTick + i) & 0xF)) {
             color = 0xFFFFFF;
@@ -4507,9 +4495,6 @@ void ParticleDisplayPolyFlat(ParticleGroup *g) {
         D_80110080++;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyFlat);
-#endif
 
 void ParticleUpdateTracer(ParticleGroup *g) {
     s32 prev = 0;
