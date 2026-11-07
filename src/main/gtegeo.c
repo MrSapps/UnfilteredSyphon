@@ -186,23 +186,25 @@ void InitBxv2(LOSBox *box, LOSModel *model, s32 id);
 /* Octagonal approximation of sqrt(x^2 + z^2), into len */
 #define LOS_FUZZY_LENGTH_2D(len, x, z)                 \
     {                                                  \
-        s32 _x = ABS(x);                               \
-        s32 _z = ABS(z);                               \
+        s32 _x = (x) >= 0 ? (x) : -(x);                \
+        s32 _z = (z) >= 0 ? (z) : -(z);                \
+        s32 _len;                                      \
         s32 _diff;                                     \
         s32 _half;                                     \
         s32 _quarter;                                  \
-        len = _x + _z;                                 \
+        _len = _x + _z;                                \
         _diff = _x - _z;                               \
-        _half = len >> 1;                              \
-        _quarter = len >> 2;                           \
+        _half = _len >> 1;                             \
+        _quarter = _len >> 2;                          \
         if (_diff < 0) {                               \
             _diff = _z - _x;                           \
         }                                              \
         if (_diff < _half) {                           \
-            len -= _quarter;                           \
+            _len -= _quarter;                          \
         } else if (_diff <= _half + _quarter) {        \
-            len -= len >> 3;                           \
+            _len -= _len >> 3;                         \
         }                                              \
+        len = _len;                                    \
     }
 
 void WindowLOSLoop(LOSQuery *query) {
@@ -270,8 +272,6 @@ void GobjLOSLoop(LOSQuery *query, s32 type, u8 forcedOnly) {
     }
 }
 
-#ifdef NON_MATCHING
-/* frame is 8 bytes larger and registers differ in the edge loop */
 u8 iLOSGeometry_IsIntersectPoint2CoplanarAnimFace(VECTOR *point, LOSAnimFace *face, s32 tolerance) {
     VECTOR p; /* the point projected onto the face's dominant plane (vx, vz) */
     VECTOR pts[4]; /* the face vertices, projected the same way */
@@ -291,9 +291,9 @@ u8 iLOSGeometry_IsIntersectPoint2CoplanarAnimFace(VECTOR *point, LOSAnimFace *fa
 
     n = face->normal;
     count = face->count;
-    ax = ABS(n->vx);
-    az = ABS(n->vz);
-    ay = ABS(n->vy);
+    ax = n->vx >= 0 ? n->vx : -n->vx;
+    ay = n->vy >= 0 ? n->vy : -n->vy;
+    az = n->vz >= 0 ? n->vz : -n->vz;
     v = face->v;
     max = MAX(ax, MAX(ay, az));
     if (max == ax) {
@@ -345,7 +345,8 @@ u8 iLOSGeometry_IsIntersectPoint2CoplanarAnimFace(VECTOR *point, LOSAnimFace *fa
             }
         }
     }
-    for (i = 0; i < count; i++) {
+    i = 0;
+    if (count > 0) do {
         next = i + 1;
         if (next == count) {
             next = 0;
@@ -364,12 +365,9 @@ u8 iLOSGeometry_IsIntersectPoint2CoplanarAnimFace(VECTOR *point, LOSAnimFace *fa
         if (dot.vx > tolerance * len) {
             return 0;
         }
-    }
+    } while (++i < count);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gtegeo", iLOSGeometry_IsIntersectPoint2CoplanarAnimFace);
-#endif
 
 s32 LOSGeometry_GetIntersectLine2AnimFacePlane(LOSRay *ray, LOSAnimFace *face, VECTOR *out, VECTOR *normal) {
     VECTOR edge1;
