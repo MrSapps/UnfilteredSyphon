@@ -4406,7 +4406,13 @@ s32 getShift(s32 n) {
  * r4B: `-(y << 16) + (u16)x` (as in the matched line drawers) fixes the sll/andi order (26 -> 23).
  * The original's next is a spilled pseudo (loaded into $t0, stored to 0x40), not an addressable
  * local: a volatile/address-taken next gives the right frame (0x70) and fp = 0x20000000 but
- * still swaps prev/12 (s7/s6). Moving prev = i, goto/else-free layouts: no change. */
+ * still swaps prev/12 (s7/s6). Moving prev = i, goto/else-free layouts: no change.
+ * r4E (23 -> 12): a second ParticleFree call for the ParticleUpdateMovement failure (prev refs 5 -> 7)
+ * plus prev = i after the 0x200 test (live 94 -> 89) puts prev (1573) above 12 (1541): prev s6, 12 s7.
+ * Left: next (refs 4, live 132: 606) still outranks 0x20000000 (refs 7, but its REG_EQUIV doubles
+ * live to 294: 476), so 0x20000000 is the one spilled. Needs next < 476 (refs 3, i.e. one ref outside
+ * the loop notes, or live > 168) or a 4th RTL use of the constant (refs 9 -> 918). A `code` variable
+ * set before the loop is also REG_EQUIV-doubled (a dead first set is deleted before counting). */
 /* Spinning flat triangles (debris), scaled by the projected size of the group's first particle */
 void ParticleDisplayPolyFlat(ParticleGroup *g) {
     VECTOR32 top;
@@ -4443,7 +4449,8 @@ void ParticleDisplayPolyFlat(ParticleGroup *g) {
         angle = p->unk62;
         next = p->next;
         if (g->updateType == PARTICLE_UPDATE_NONE && !ParticleUpdateMovement(g, p)) {
-            goto free;
+            ParticleFree(g, p, prev, i);
+            goto cont;
         }
         poly = (ParticlePolyF3 *)p->prim;
         if (p->color & 0xFF000000) {
@@ -4480,11 +4487,12 @@ void ParticleDisplayPolyFlat(ParticleGroup *g) {
             x = center.vx + (rcos(angle + p->unk5C) >> (12 - D_80110054));
             y = center.vy + (rsin(angle + p->unk5C) >> (12 - D_80110054));
             poly->xy2 = -(y << 16) + (u16)x;
-            prev = i;
             if (g->flags & 0x200) {
                 poly->rgbc0.c.code |= 2;
             }
+            prev = i;
         }
+    cont:
         i = next;
         D_80110080++;
     }
