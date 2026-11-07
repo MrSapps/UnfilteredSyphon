@@ -3163,8 +3163,14 @@ s32 NPCGenerate(s32 genIdx) {
     return ret;
 }
 
-#ifdef NON_MATCHING
-/* sector-count loop keeps the inline's NULL return path (target threads it away) */
+/* count-- done on the raw halfword: the bitfield form computes the new count before masking
+ * out the other bits */
+#define GEN_COUNT_DEC(gen)                                          \
+    {                                                               \
+        u16 v = *(u16 *)(gen);                                      \
+        *(u16 *)(gen) = (v & 0xF800) | (((v & 0x7FF) - 1) & 0x7FF); \
+    }
+
 s32 NPCCheckGenerators(void) {
     s32 tried;
     s32 n;
@@ -3176,7 +3182,7 @@ s32 NPCCheckGenerators(void) {
     s32 sectorId;
     NPCGenActivation *act;
     s32 j;
-    u8 g;
+    s32 g;
     s32 bit;
     NPCGenBits *gen;
 
@@ -3186,7 +3192,13 @@ s32 NPCCheckGenerators(void) {
     tried = 0;
     i = 0;
     adj = gLevData->sectorAdj[gGabeSector];
-    while (TerrGetSector(adj[i]) != NULL) {
+    /* open-coded TerrGetSector: each failed test jumps straight out (no NULL join) */
+    for (;;) {
+        s32 id = adj[i];
+
+        if (id >= gTerrSectorCount || id < 0 || (u8 *)gTerrSector + id * 0x3C == NULL) {
+            break;
+        }
         i++;
     }
     if (!(D_80110118 & 1)) {
@@ -3223,24 +3235,24 @@ s32 NPCCheckGenerators(void) {
                 tried |= bit;
                 if (gen->perm) {
                     if (gen->enabled && NPCGenerate(g)) {
-                        gen->count--;
+                        GEN_COUNT_DEC(gen);
                         if (gen->count == 0) {
-                            if (gen->perm) {
-                                NPCDisableGenerator(g);
-                            } else {
+                            if (!gen->perm) {
                                 gen->enabled = 0;
+                            } else {
+                                NPCDisableGenerator(g);
                             }
                         }
                         D_80110118++;
                         return 1;
                     }
                 } else if (gNPCLevelAlertFlag && gen->count && (u32)gExeTick > 100 && NPCGenerate(g)) {
-                    gen->count--;
+                    GEN_COUNT_DEC(gen);
                     if (gen->count == 0) {
-                        if (gen->perm) {
-                            NPCDisableGenerator(g);
-                        } else {
+                        if (!gen->perm) {
                             gen->enabled = 0;
+                        } else {
+                            NPCDisableGenerator(g);
                         }
                     }
                     D_80110118++;
@@ -3251,9 +3263,6 @@ s32 NPCCheckGenerators(void) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCCheckGenerators);
-#endif
 
 void NPCDeactivateGenerated(Gobj *obj) {
     void *disp;
