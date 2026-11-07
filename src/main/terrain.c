@@ -331,15 +331,6 @@ void TerrainStreamCallback(StreamReq *req);
 u32 strlen(const char *s);
 char *strchr(const char *s, int c);
 
-#ifdef NON_MATCHING
-/* 5 lines left (end declared before start fixed the s1/s2 swap; `ids++, i++` the increment
- * order; id/originalId stored after numParts and FreeBlocks-- after the map store fixed the
- * local-alloc of size and sector<<4). Left: (1) the original computes lh->preload into a
- * temp and copies it to ids (a loop.c giv init? `lh->preload[i]` indexing is much worse);
- * (2) neighbour loop: original `addu base, off` for gSectorMap[*neighbor], ours off+base
- * (address MEM is canonicalised (plus (mult) base); `&gSectorMap[x]`, a local copy of
- * gSectorMap, and (u32) casts all keep off+base); (3) the 0x58($sp) reload of
- * sectorsPerBlock scheduled one slot earlier. */
 /* Build the sector map from the level's WLDEMD.HOG and set up the stream cache. */
 void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
     TerrCdlFILE file;
@@ -430,7 +421,8 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
         blocks = gSectorMap[i].numParts / gSectorsPerBlock;
         for (j = 0; *neighbor != 0xFF && j < 14; j++, neighbor++) {
             if (*neighbor != 0xFE) {
-                blocks += gSectorMap[*neighbor].numParts / gSectorsPerBlock;
+                SectorMapEntry *m = &gSectorMap[*neighbor];
+                blocks += m->numParts / gSectorsPerBlock;
             }
         }
         if (maxBlocks < blocks) {
@@ -445,11 +437,11 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
     cache = gCache;
     for (i = 0; i < maxBlocks; i++) {
         gTerrainCache[i].data = cache;
-        cache += sectorsPerBlock << 11;
         gTerrainCache[i].owner = NULL;
         gTerrainCache[i].map = NULL;
         gTerrainCache[i].sector = -1;
         gTerrainCache[i].state = 1;
+        cache += sectorsPerBlock << 11;
     }
     if (preload) {
         StreamReq req;
@@ -458,11 +450,11 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
         part = 0;
         lh = levelLoadHeader;
         ids = lh->preload;
-        for (i = 0; i < lh->preloadCount; ids++, i++) {
-            sector = *ids;
+        for (i = 0; i < lh->preloadCount; i++) {
             entry = &gTerrainCache[i];
-            entry->state = -1;
+            sector = ids[i];
             entry->sector = sector;
+            entry->state = -1;
             entry->map = &gSectorMap[sector];
             gTerrainCacheFreeBlocks--;
             entry->owner = gTerrSector[sector].anim;
@@ -485,9 +477,6 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
     }
     SysLoadTextureCacheOverlay(0, 0);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", SetupTerrain);
-#endif
 
 /* Cheap 3D distance: largest axis plus a quarter of the other two. */
 s32 GameSysFuzzyDistPt2Pt(Vec3 *a, Vec3 *b) {
