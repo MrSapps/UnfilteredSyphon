@@ -4117,10 +4117,6 @@ u8 func_80044AC0(u8 active) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* regalloc (s-register order) and the line pointer init lands after the loop entry test.
- * Original: s0 = &line->color.c[3] giv, s1 = i, s2 = line, s3 = lvl, s4 = x, s5 = y.
- * `line = &D_80118264[i * 2]` inside the loop gets 37 -> 25 (lvl still last). */
 u8 func_800451DC(u8 active) {
     s32 *level = &D_80105F30[5];
     s32 lvl;
@@ -4138,9 +4134,7 @@ u8 func_800451DC(u8 active) {
     lvl = *level;
     if (lvl == 0 && active) {
         line = D_80118264;
-        y = 0;
-        x = 0;
-        for (i = 0; i < 18; i++) {
+        for (i = 0, y = 0, x = 0; i < 18; i++) {
             cx = POSITION - 10;
             EGSDisplayBuildLineF(line, 0x503028, ((x - cx) & 0xFFFF) | 0xFF6A0000, ((x - cx) & 0xFFFF) | 0x00960000);
             line->color.c[3] |= 2;
@@ -4155,7 +4149,8 @@ u8 func_800451DC(u8 active) {
     }
     if (active) {
         n = lvl * 3;
-        for (i = 0, line = D_80118264; i < n; i++, line++) {
+        for (i = 0; i < n; i++) {
+            line = &D_80118264[i];
             if (line->link == 0) {
                 EGSDisplayAddPoly(gTextCamera, line);
             }
@@ -4166,20 +4161,19 @@ u8 func_800451DC(u8 active) {
         TextRemoveWindowNow(gSpareTextWindow);
         gSpareTextWindow = 0xFF;
     }
-    n = (12 - lvl) * 3;
+    lvl = 12 - lvl;
+    n = lvl * 3;
     if (n > 36) {
         n = 36;
     }
-    for (i = 0, line = D_80118264; i < n; i++, line++) {
+    for (i = 0; i < n; i++) {
+        line = &D_80118264[i];
         if (line->link != 0) {
             EGSDisplayDeletePoly(gTextCamera, line);
         }
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_800451DC);
-#endif
 
 u8 func_800453F8(u8 on) {
     s32 *level = &D_80105F30[6];
