@@ -2082,7 +2082,12 @@ s32 CollisionGobjUpdate(Gobj *obj) {
 /* r4B: v (refs 23, live 224, pri 4107) outranks axis (refs 25, live 252, pri 3968) in global.c;
  * the original needs axis first (one fewer in-loop v ref or v live > 232 would do it). The ratio
  * reload differs only before hits[0]->push.vx (later pushes match); dropping (void)&ratio (ratio
- * then spills anyway) changes nothing. */
+ * then spills anyway) changes nothing.
+ * r4E (45 -> 11): the v/axis swap is fixed by writing the zero-axis block out in case 1 instead of
+ * `goto zero` (extra axis refs; jump2 cross-jumps the copies back into one). Left (sched2 only):
+ * (1) b.vy = FIXMul(axis->vy, *lenOut): the original loads axis->vy before the lenOut reload and
+ * the b.vx store; (2) the ratio reload for each hits[k]->push.vy call comes after the D_8011EB40[k].vy
+ * load in the original (ours hoists it next to the hits reload); the push.vz ones already match. */
 /* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
 s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, CollHit **hits, s32 *count) {
     VECTOR32 a;
@@ -2195,12 +2200,14 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
                 axis->vz = EGSMathFIXDiv(b.vz, *lenOut);
                 break;
             }
-            goto zero;
+            axis->vx = 0;
+            axis->vy = 0;
+            axis->vz = 0;
+            break;
         case 2:
             break;
         case 3:
             *lenOut = 0;
-        zero:
             axis->vx = 0;
             axis->vy = 0;
             axis->vz = 0;
