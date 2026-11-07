@@ -877,7 +877,9 @@ void NPCShootHostage(s32 id) {
 }
 
 #ifdef NON_MATCHING
-/* draft: right shape; regalloc of the 0x7FFFFFF bests (original spills copBest, keeps &D_8011D1D0 in s6) and the NPC scan id copies differ */
+/* draft: right shape; regalloc of the 0x7FFFFFF bests (original spills copBest, keeps &D_8011D1D0 in s6) and the NPC scan id copies differ.
+ * r4C: the NPCGetFirstID() sites load straight into s1 in the original (ours: v1 then a
+ * copy); renaming id per region (three separate variables) changes nothing. */
 s32 NPCPickNPCTarget(s32 self) {
     s32 copBest = 0x7FFFFFF;
     Gobj *obj = gameObjectsInfo[self].runtime;
@@ -1784,7 +1786,13 @@ s32 NPCDebugGetNoDamageFlag(void) {
 }
 
 #ifdef NON_MATCHING
-/* flags CSE'd into the awareness branch (target reloads npc->flags there) */
+/* flags CSE'd into the awareness branch (target reloads npc->flags there).
+ * r4C: the layout around the 0x40000/0xB tests is already identical, so the reload is
+ * a CSE extended-block question (the awareness label has one use; follow_jumps needs a
+ * BARRIER before it).  `*(volatile s32 *)&npc->flags` gives the reload, and then
+ * `if (unk28 < 800) { if (...) mode = 6; else mode = 7; } else mode = 7;` is needed for
+ * the delay-slot mode = 7 -- still 8 because volatile changes scheduling.  The nested
+ * `if (flags & 0x40000) { mode = 6; if (...) goto done; }` form changes nothing. */
 u8 NPCGetMoveMode(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     u8 mode;
