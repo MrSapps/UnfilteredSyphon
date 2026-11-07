@@ -545,7 +545,11 @@ void ClearVABsResolvedFlag(SoundBlock *block) {
 /* regalloc: s4/s5 swapped in loop 1; target copies type to a3 for the 7/9/10 tests */
 /* r2B: byID as its own statement / (u32)(type-7)<2, `s32 t = type` in the other!=NULL block, and the
  * copy block as a static inline taking type (any param order) change nothing; the original also
- * computes byID straight into a1 (sltiu a1) where ours copies v0 -> a1 in the delay slot. */
+ * computes byID straight into a1 (sltiu a1) where ours copies v0 -> a1 in the delay slot.
+ * r4J (19 -> 10): loop 2 reuses `n` (u8 via cast) for the sound count; that fixed the s4/s5 swap.
+ * `s32 t = type` in the other!=NULL block survives cse1 but cse2 canonicalises it back to type
+ * (make_regs_eqv: t only becomes the class head if it lives past the cse block end, and cse2's
+ * path follows the `t == 10` label).  The original's a3 copy needs t to outlive that path. */
 void SetupAllLoaded(s16 revType, s16 revDepth) {
     s32 n;
     s32 i;
@@ -574,8 +578,8 @@ void SetupAllLoaded(s16 revType, s16 revDepth) {
     }
     for (i = 0; i < 16; i++) {
         if (gVabBlock[i] != NULL) {
-            count = gVabBlock[i]->numSounds;
-            for (j = 0; j < count; j++) {
+            n = (u8)gVabBlock[i]->numSounds;
+            for (j = 0; j < n; j++) {
                 type = gVabBlock[i]->sounds[j].flags & 0x1F;
                 if ((s32)gVabBlock[i]->numSounds < 0 && ((s16)gVabBlock[i]->sounds[j].flags >> 5) != 0) {
                     type = 9;
