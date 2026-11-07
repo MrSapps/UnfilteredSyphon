@@ -332,7 +332,10 @@ u32 strlen(const char *s);
 char *strchr(const char *s, int c);
 
 #ifdef NON_MATCHING
-/* regalloc: start/end swap s1/s2; struct stores scheduled differently (71 insns) */
+/* 19 lines left (end declared before start fixed the s1/s2 swap; `ids++, i++` the increment
+ * order). The original computes lh->preload into a temp and copies it to ids, and loads
+ * gTerrSector only after the gTerrainCacheFreeBlocks-- store; size = start + 1 lands in $3
+ * (ours $4) with the id/originalId stores after it. */
 /* Build the sector map from the level's WLDEMD.HOG and set up the stream cache. */
 void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
     TerrCdlFILE file;
@@ -347,8 +350,8 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
     s32 count;
     SectorMapEntry *map;
     s32 i;
-    s32 start;
     s32 end;
+    s32 start;
     s32 size;
     u8 c;
     char *dot;
@@ -451,7 +454,7 @@ void SetupTerrain(s32 sectorsPerBlock, u8 preload) {
         part = 0;
         lh = levelLoadHeader;
         ids = lh->preload;
-        for (i = 0; i < lh->preloadCount; i++, ids++) {
+        for (i = 0; i < lh->preloadCount; ids++, i++) {
             sector = *ids;
             entry = &gTerrainCache[i];
             entry->state = -1;
