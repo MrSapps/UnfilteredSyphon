@@ -710,12 +710,8 @@ void SysUpdateMusicExciteLevel(s32 level) {
     SetGlobalExcite(cur);
 }
 
-#ifdef NON_MATCHING
-/* r2B: a block-local `SoundFrame *f` for `them` ties frame and the vz load into v1 as the original does;
- * `total = 0` before the excite chain flips excite/total to a0/t0 (correct) but moves the init out of
- * the blez delay slot (17 lines with both). Decl order and an excite inline do nothing. */
-/* Register allocation only: the NPC frame/threat and excite/total pairs get swapped
- * registers ($a0/$v1, $a0/$t0). */
+/* `threat` is reused for the excite base level (one pseudo across the loop and the excite
+ * chain: that alone fixed both a0 swaps), plus a block-local frame pointer for `them`. */
 /* Next active NPC id from npcList, -1 when done */
 #define SOUND_NEXT_NPC(id)                          \
     for ((id) = -1, n = getNPCIndex; n < 6; n++) {  \
@@ -738,7 +734,6 @@ void SoundProcessThreat(GameObjectRuntime *player) {
     s32 n;
     s32 m;
     s32 threat;
-    s32 excite;
     s32 level;
     s32 total;
     s32 i;
@@ -761,10 +756,12 @@ void SoundProcessThreat(GameObjectRuntime *player) {
     }
     while (id >= 0) {
         rt = gameObjectsInfo[id].runtime;
-        frame = ((SoundAnim *)rt->anim)->frame;
-        them.vx = frame->t[0];
-        them.vy = frame->t[1];
-        them.vz = frame->t[2];
+        {
+            SoundFrame *f = ((SoundAnim *)rt->anim)->frame;
+            them.vx = f->t[0];
+            them.vy = f->t[1];
+            them.vz = f->t[2];
+        }
         them.vy = -them.vy;
         threat = ((SoundTarget *)rt->target)->threat;
         if (maxThreat < threat) {
@@ -785,17 +782,17 @@ void SoundProcessThreat(GameObjectRuntime *player) {
         }
         SOUND_NEXT_NPC(id);
     }
-    excite = 0;
+    threat = 0;
     if (maxThreat == 0) {
-        excite = D_80106AD1;
+        threat = D_80106AD1;
     } else if (maxThreat == 1) {
-        excite = D_80106AD2;
+        threat = D_80106AD2;
     } else if (maxThreat >= 0x547 && maxThreat < 0xAB8) {
-        excite = D_80106AD3;
+        threat = D_80106AD3;
     } else if (maxThreat >= 0xAB8 && maxThreat < 0x1000) {
-        excite = D_80106AD4;
+        threat = D_80106AD4;
     } else if (maxThreat == 0x1000) {
-        excite = D_80106AD5;
+        threat = D_80106AD5;
     }
     total = 0;
     for (i = 0; i < count; i++) {
@@ -805,7 +802,7 @@ void SoundProcessThreat(GameObjectRuntime *player) {
         }
         total += mExciteLevelModTable[i] * v / D_80106AD0;
     }
-    level = excite + total;
+    level = threat + total;
     if (D_80110194) {
         level += D_80106AD6;
     }
@@ -823,9 +820,6 @@ void SoundProcessThreat(GameObjectRuntime *player) {
     }
     SysUpdateMusicExciteLevel(level);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/sound", SoundProcessThreat);
-#endif
 
 void iSndExciteShootCB(void) {
     D_80110194 = 0;
