@@ -1196,40 +1196,32 @@ static void func_80088EE4(Gobj *gobj) {
 INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
 #endif
 
-#ifdef NON_MATCHING
-/*
- * Logic matches; the original never CSEs the D_80106AEC field addresses (each store is
- * lui/sw, and c is rematerialised after the call), and its pos block copy moves 3+1 words.
- * r4F: explow.c memory_address forces every constant field address into a pseudo; cse1's
- * use_related_value then rewrites D+0x234 etc. as (D+0x1F4 reg) + k off the first block copy's
- * dest, so that reg lives on (s0) and the copy gets a 4th scratch.  The original's 3+1 / 2+2
- * copies mean both address regs die at each copy (output_block_move drops a temp that coincides
- * with a dying address reg), so no relation was made: the copies/stores were probably in
- * separate cse blocks (labels) or not constant-related in the original source.
- */
+/* All accesses go through c, set at the top: cse folds (plus c k) to constant addresses at
+ * use time, so expand never forces a D+k address into a pseudo and use_related_value has no
+ * D+0x1F4 register to tie the later addresses to. */
 static void func_80089544(Gobj *gobj) {
     FaceCollect *c;
     int i;
 
-    D_80106AEC.pos = *(VECTOR32 *)gobj->move;
-    D_80106AEC.unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
-    D_80106AEC.unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
-    D_80106AEC.unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
-    D_80106AEC.unk234.vy = -D_80106AEC.unk234.vy;
-    D_80106AEC.unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
-    D_80106AEC.unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
-    D_80106AEC.unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
-    D_80106AEC.unk244.vy = -D_80106AEC.unk244.vy;
-    D_80106AEC.ref = D_80106AEC.pos;
-    D_80106AEC.ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
-    D_80106AEC.dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
-    D_80106AEC.dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
-    D_80106AEC.dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
-    D_80106AEC.dir[1] = -D_80106AEC.dir[1];
-    D_80106AEC.vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
-    D_80106AEC.vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
-    D_80106AEC.vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
     c = &D_80106AEC;
+    c->pos = *(VECTOR32 *)gobj->move;
+    c->unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+    c->unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+    c->unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+    c->unk234.vy = -c->unk234.vy;
+    c->unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
+    c->unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
+    c->unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
+    c->unk244.vy = -c->unk244.vy;
+    c->ref = c->pos;
+    c->ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
+    c->dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
+    c->dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
+    c->dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
+    c->dir[1] = -c->dir[1];
+    c->vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
+    c->vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
+    c->vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
     c->vel[0] = FIX_TO_INT(c->vel[0]);
     c->vel[1] = FIX_TO_INT(c->vel[1]);
     c->vel[2] = FIX_TO_INT(c->vel[2]);
@@ -1247,9 +1239,6 @@ static void func_80089544(Gobj *gobj) {
     func_80088EA4(gobj, c);
     func_80088EC4(gobj, c);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80089544);
-#endif
 
 s32 FriendlyGobjGetFoundEdge(Gobj *gobj, s32 kind) {
     FaceGroup *slots;
