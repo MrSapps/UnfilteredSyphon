@@ -2996,8 +2996,6 @@ static inline s32 iLevelScale(s32 n, s32 lvl) {
     return n * lvl / 12;
 }
 
-#ifdef NON_MATCHING
-/* the D_80117D24 line pointer stays in s0 from the line-0 stores to the loop (original reloads the base just before it), which shifts w/h/lvl registers */
 /* Radar view (mode 1): one zoom step of the radar frame, weapon icons and text. */
 u8 func_8004146C(u8 active) {
     s32 *level;
@@ -3024,7 +3022,8 @@ u8 func_8004146C(u8 active) {
             if (D_8010F887) {
                 iInterfaceRadarRemove();
             }
-            for (i = 0, line = D_80117D9C; i < 4; i++, line++) {
+            for (i = 0; i < 4; i++) {
+                line = &D_80117D9C[i];
                 if (line->link) {
                     EGSDisplayDeletePoly(gInterfaceWindow, line);
                 }
@@ -3063,26 +3062,28 @@ u8 func_8004146C(u8 active) {
         h = 0;
     }
     w = h ? 9 : 0;
-    for (i = 1, line++; i < 5; i++, line++) {
-        line->xy0 = iRadarXY(XY((i & 1) ? w : -w, (i & 1) ? h : -h));
-        line->xy1 = iRadarXY(XY((i & 2) ? w : -w, (i & 2) ? -h : h));
+    for (i = 1; i < 5; i++) {
+        line[i].xy0 = iRadarXY(XY((i & 1) ? w : -w, (i & 1) ? h : -h));
+        line[i].xy1 = iRadarXY(XY((i & 2) ? w : -w, (i & 2) ? -h : h));
     }
 
     line = D_80117D9C;
     line->xy0 = XY(-182, -94);
     line->xy1 = XY(-182, lvl * 30 / 12 - 94);
-    for (i = 1, line++; i < 4; i++, line++) {
-        len = D_80011BE0[i].vx + 178;
+    for (i = 1; i < 4; i++) {
+        len = D_80011BE0[i].vx;
+        len += 178;
         len = len * lvl / 12 * 4 - len * 3;
         if (len > 0) {
-            line->xy0 = XY(-181, D_80011BE0[i].vy);
-            line->xy1 = XY(len - 182, D_80011BE0[i].vy);
+            line[i].xy0 = XY(-181, D_80011BE0[i].vy);
+            line[i].xy1 = XY(len - 182, D_80011BE0[i].vy);
         } else {
-            line->xy0 = line->xy1 = 0x04000400;
+            line[i].xy0 = line[i].xy1 = 0x04000400;
         }
     }
 
-    x = 404 - iLevelScale(271, lvl);
+    x = 404;
+    x -= iLevelScale(271, lvl);
     y = 91;
     for (i = 0; i < 23; i++) {
         SpriteSetMultiXY(&D_80117514[i], x, y);
@@ -3093,9 +3094,6 @@ u8 func_8004146C(u8 active) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8004146C);
-#endif
 
 extern s32 D_8010F8B4;
 extern s16 gSniperView, D_8010F7FE, D_8010F800, D_8010F802; /* sniper view rectangle x, y, w, h */
