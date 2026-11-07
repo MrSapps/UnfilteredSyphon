@@ -1076,8 +1076,10 @@ static void func_80088EC4(void *arg0, u8 *arg1) {
 #define FIX_TO_INT(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
 void GTEMath_VectorNormal(VECTOR32 *in, VECTOR32 *out);
 
-#ifdef NON_MATCHING
-/* the original keeps &f->face in a register and never folds D_80106AEC.foundCount into c (cf. func_80089544); regalloc follows */
+/* As func_80089544, everything goes through c = &D_80106AEC.  The edgeFlags choice is a real
+ * if/else: its join label ends cse's path, so cf (&f->face) is opaque afterwards (count,
+ * normalPtr and verts are read through cf, and flags is re-masked).  k (the second vertex)
+ * is its own variable, not the dedupe loop's j. */
 /*
  * Fill D_80106AEC for gobj: position, probes, direction and velocity, then
  * collect the flagged edges of its face list as found faces (deduplicated)
@@ -1096,27 +1098,28 @@ static void func_80088EE4(Gobj *gobj) {
     s32 n;
     s32 i;
     s32 j;
+    s32 k;
 
-    D_80106AEC.foundCount = 0;
-    D_80106AEC.pos = *(VECTOR32 *)gobj->move;
-    D_80106AEC.unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
-    D_80106AEC.unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
-    D_80106AEC.unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
-    D_80106AEC.unk234.vy = -D_80106AEC.unk234.vy;
-    D_80106AEC.unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
-    D_80106AEC.unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
-    D_80106AEC.unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
-    D_80106AEC.unk244.vy = -D_80106AEC.unk244.vy;
-    D_80106AEC.ref = D_80106AEC.pos;
-    D_80106AEC.ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
-    D_80106AEC.dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
-    D_80106AEC.dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
-    D_80106AEC.dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
-    D_80106AEC.dir[1] = -D_80106AEC.dir[1];
-    D_80106AEC.vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
-    D_80106AEC.vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
-    D_80106AEC.vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
     c = &D_80106AEC;
+    c->foundCount = 0;
+    c->pos = *(VECTOR32 *)gobj->move;
+    c->unk234.vx = ((FriendlyAnim *)gobj->anim)->frames[8]->t[0];
+    c->unk234.vy = ((FriendlyAnim *)gobj->anim)->frames[8]->t[1];
+    c->unk234.vz = ((FriendlyAnim *)gobj->anim)->frames[8]->t[2];
+    c->unk234.vy = -c->unk234.vy;
+    c->unk244.vx = ((FriendlyAnim *)gobj->anim)->frames[2]->t[0];
+    c->unk244.vy = ((FriendlyAnim *)gobj->anim)->frames[2]->t[1];
+    c->unk244.vz = ((FriendlyAnim *)gobj->anim)->frames[2]->t[2];
+    c->unk244.vy = -c->unk244.vy;
+    c->ref = c->pos;
+    c->ref.vy = FriendlyGobjGetReferenceY(gobj, 0);
+    c->dir[0] = ((FriendlyAnim *)gobj->anim)->frame->m[0][2];
+    c->dir[1] = ((FriendlyAnim *)gobj->anim)->frame->m[1][2];
+    c->dir[2] = ((FriendlyAnim *)gobj->anim)->frame->m[2][2];
+    c->dir[1] = -c->dir[1];
+    c->vel[0] = ((FriendlyMove *)gobj->move)->unk60.vx + ((FriendlyMove *)gobj->move)->unk70.vx;
+    c->vel[1] = ((FriendlyMove *)gobj->move)->unk60.vy + ((FriendlyMove *)gobj->move)->unk70.vy;
+    c->vel[2] = ((FriendlyMove *)gobj->move)->unk60.vz + ((FriendlyMove *)gobj->move)->unk70.vz;
     c->vel[0] = FIX_TO_INT(c->vel[0]);
     c->vel[1] = FIX_TO_INT(c->vel[1]);
     c->vel[2] = FIX_TO_INT(c->vel[2]);
@@ -1126,9 +1129,10 @@ static void func_80088EE4(Gobj *gobj) {
         if (flags == 0) {
             continue;
         }
-        edgeFlags = f->face.flags - 12;
         if (f->face.count == 4) {
             edgeFlags = f->face.flags - 1;
+        } else {
+            edgeFlags = f->face.flags - 12;
         }
         if (*edgeFlags & 8) {
             continue;
@@ -1146,21 +1150,21 @@ static void func_80088EE4(Gobj *gobj) {
                 return;
             }
             found = &c->found[c->foundCount];
-            j = i + 1;
-            if (j == n) {
-                j = 0;
+            k = i + 1;
+            if (k == n) {
+                k = 0;
             }
             if (normal.vy > 0x800) {
                 found->p0.vx = verts[i]->x;
                 found->p0.vy = verts[i]->y;
                 found->p0.vz = verts[i]->z;
-                found->p1.vx = verts[j]->x;
-                found->p1.vy = verts[j]->y;
-                found->p1.vz = verts[j]->z;
+                found->p1.vx = verts[k]->x;
+                found->p1.vy = verts[k]->y;
+                found->p1.vz = verts[k]->z;
             } else {
-                found->p0.vx = verts[j]->x;
-                found->p0.vy = verts[j]->y;
-                found->p0.vz = verts[j]->z;
+                found->p0.vx = verts[k]->x;
+                found->p0.vy = verts[k]->y;
+                found->p0.vz = verts[k]->z;
                 found->p1.vx = verts[i]->x;
                 found->p1.vy = verts[i]->y;
                 found->p1.vz = verts[i]->z;
@@ -1192,9 +1196,6 @@ static void func_80088EE4(Gobj *gobj) {
     }
     func_80088BAC(gobj, c);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
-#endif
 
 /* All accesses go through c, set at the top: cse folds (plus c k) to constant addresses at
  * use time, so expand never forces a D+k address into a pseudo and use_related_value has no
