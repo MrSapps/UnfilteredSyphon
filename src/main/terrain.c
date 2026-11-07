@@ -754,7 +754,9 @@ void EGSFrameSetRotationMatrix(TerrFrame *frame, s32 ref, TerrMatrix *m);
 #define TERR_CAM_FRAME (**(TerrFrame ***)gCamera)
 #define ANIM_IN_DISPLAY(anim, cam) (((void **)(anim))[(cam)->index] != NULL)
 
-static inline u8 TerrInBox(TerrainModel *model, s32 x, s32 z) {
+/* s32 return: the u8 `in` is then extended once into the return value, and the caller's u8
+ * in1/in2 are re-extended at each use (a u8 return let CSE reuse in2's extension at its def) */
+static inline s32 TerrInBox(TerrainModel *model, s32 x, s32 z) {
     u8 in = x >= model->box[0] && x < model->box[4] && z >= model->box[2] && z < model->box[6];
 
     return in;
@@ -773,8 +775,6 @@ static inline void TerrAxesToMatrix(VECTOR32 *x, VECTOR32 *y, VECTOR32 *z, TerrM
 }
 
 /* Track the player's sector, (de)activate terrain and objects, face billboards to the camera. */
-#ifdef NON_MATCHING
-/* regalloc: force/list vs secondCount swap s2/s4; in2 zero-extend placement (22 insns) */
 void TerrainUpdateActivation(force)
 u8 force;
 {
@@ -926,7 +926,9 @@ nextNeighbor:
         cur = sector;
     }
     list = &objActivationList[cur];
-    if (gTerrSector[cur].anim->unk00 != 0) {
+    /* do-while(0): its loop notes weight list's refs (6 -> 8), so list outranks secondCount and
+     * takes s2 first; secondCount then lands in s4 and force (pri 202) gets s2 as in the original */
+    if (gTerrSector[cur].anim->unk00 != 0) do {
         for (j = 0; j < list->count; j++) {
             Gobj *obj = list->infos[j]->runtime;
 
@@ -958,7 +960,7 @@ nextNeighbor:
                 }
             }
         }
-    }
+    } while (0);
     if (done) {
         TerrAnimNode *node = display->anims;
 
@@ -1001,11 +1003,11 @@ nextNeighbor:
                 x.vy = 0;
                 GTEMath_VectorNormal(&x, &x);
             }
+            z.vy = 0;
             y.vx = 0;
             y.vy = 0x1000;
             y.vz = 0;
             z.vx = -x.vz;
-            z.vy = 0;
             z.vz = x.vx;
             TerrAxesToMatrix(&x, &y, &z, &upright);
             for (; node != NULL; node = node->next) {
@@ -1093,9 +1095,6 @@ nextNeighbor:
         CheckStreamRequests(0);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/terrain", TerrainUpdateActivation);
-#endif
 
 void SHReq(s32 id, u8 activate) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
