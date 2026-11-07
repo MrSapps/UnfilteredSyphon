@@ -643,21 +643,8 @@ void CASRequestDelay(s16 id, s32 ticks) {
     D_8010FF90 = gSystemTick;
 }
 
-#ifdef NON_MATCHING
-/* scheduling of spill-slot reloads (keep/started/sub/set) differs.
- * r3A: four separate sched2 spots: keep=0/started=0 stores sink later in the original; the
- * started=1 store lands right before the HAStart3 jal; in the events[idx] copy the
- * original loads rt->id into a0 first (ours v0, which blocks hoisting it) and keeps
- * source store order; the deferred[] copy stores req0 before sub/set. Not tried yet:
- * struct-member views for the spilled params, as in initPointAction.
- * r4C (18 -> 3): the else-chain tail as `else if (upper != lower) layer = 0x4000; else
- * layer = -1;`, the deferred[] copy as id/req0/mode/sub/set, the events[] copy as
- * id/action/set/req0/mode/sub, and `started = 0; keep = 0;` moved to the end of the init
- * run (sched1 places those const sets by source position) fix three of the four spots.
- * Left: `started = 1` (spilled, sb 0x50(sp)) must land after the `lw a0, rt->anim` arg
- * load, in the HAStart3 jal slot; QImode stores conflict with that load in sched2, so the
- * order comes from sched1, where ours keeps the const set before the arg load.  Tried:
- * comma forms in each argument, a block-local `anim = rt->anim` first, started++ and |= 1. */
+/* started = 1 goes after the HAStart3 call: sched1 hoists it (started already crosses calls)
+ * right in front of the jal, after the arg loads, so reorg puts its spill store in the slot. */
 /* Start anim set `set`'s sequence on each body layer (full body 0, upper 0x4000, lower
  * 0x8000), taking the CAS action slots and hooking up the event handler. */
 static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 sub) {
@@ -688,8 +675,8 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
     action = 0xFF;
     r[1] = req[1];
     upper = 0xFF;
-    started = 0;
     keep = 0;
+    started = 0;
     seq = CASGetAnimSequence(set, req[1], sub);
     t = &queue->slots;
     if (seq->unk0D != 0) {
@@ -755,8 +742,8 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
                         EGSDisplayHAStop(rt->anim, ha->anim);
                     }
                     if (frame != -2) {
-                        started = 1;
                         EGSDisplayHAStart3(rt->anim, action, frame, layer, 20);
+                        started = 1;
                         if (layer == 0x8000 && lower == 0xFF) {
                             if (seq->actions[1] == 0xFF) {
                                 ha = EGSDisplayGetHAWithType(rt->anim, 0x4000);
@@ -833,9 +820,6 @@ static void func_8002A4A0(GameObjectRuntime *rt, CASAnimSet *set, u8 *req, s32 s
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cas", func_8002A4A0);
-#endif
 
 /* Finish every slot whose action completed: run its callback/message and free it. */
 static void func_8002AC1C(GameObjectRuntime *rt, CASQueue *queue) {
