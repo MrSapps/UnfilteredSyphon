@@ -967,17 +967,23 @@ void func_8008C534(Gobj *obj, s32 type) {
  * data's a2 (the PlayerUseCAS arg). The original's byte stays v0 = it is live after the copy (the
  * copy precedes the bnez on the byte: copy-before-test), which needs cse not to make data canonical
  * (make_regs_eqv: data wins whenever it outlives the byte past the cse block). `if (INFO_PICKUP(info)
- * == 0) {..} else data = INFO_PICKUP(info);` with info as array-ref or offset-first: still 4-5 lines. */
+ * == 0) {..} else data = INFO_PICKUP(info);` with info as array-ref or offset-first: still 4-5 lines.
+ * r4I (4 -> 1): offset-first info + `s32 b = byte; data = (u8)b; if (b == 0)` - the and is not a
+ * reg copy, so cse keeps b (v0) for the test and data gets a2: the only diff left is `andi a2,v0,0xFF`
+ * vs the original's `move a2,v0` in the bnez slot. A plain copy needs make_regs_eqv (cse.c) to
+ * keep b canonical, i.e. b's last use at or after data's; `? 0x14 : b` (b known 0 there) and
+ * u8/u32 casts don't do it. */
 s32 UseLevelSpecificObject(void) {
     s32 data;
     s32 i;
     s32 type;
 
     if (gObjPlayer->id != gPlayerOffset) {
-        GameObjectInfo *info = &gameObjectsInfo[gObjPlayer->id];
+        GameObjectInfo *info = (GameObjectInfo *)(gObjPlayer->id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
+        s32 b = INFO_PICKUP(info);
 
-        data = INFO_PICKUP(info);
-        if (data == 0) {
+        data = (u8)b;
+        if (b == 0) {
             s32 kind = INFO_WORD24(info) & 0x3000;
             if (kind != 0x1000) {
                 data = (kind == 0x2000) ? 0x14 : 0;
