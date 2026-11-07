@@ -1160,8 +1160,6 @@ found_hit:
 INCLUDE_ASM("asm/main/nonmatchings/egsgeom", EGSGeometry_GetIntersectRaySegment2UnrotBox);
 #endif
 
-#ifdef NON_MATCHING
-/* regalloc: t/divisor/quotient regs swapped in the three hit-point blocks; rest matches */
 int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box, s32 margin, u8 *hit)
 {
     EGSSegment seg;
@@ -1171,6 +1169,8 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
     EGSBox bb;
     VECTOR hp;
     u8 found;
+    s32 t;
+    s32 d;
 
     seg = *segment;
     b = *box;
@@ -1209,9 +1209,10 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        s32 t = hp.vx - seg.p0.vx;
-        hp.vy = seg.p1.vy * t / seg.p1.vx + seg.p0.vy;
-        hp.vz = seg.p1.vz * t / seg.p1.vx + seg.p0.vz;
+        t = hp.vx - seg.p0.vx;
+        d = seg.p1.vx;
+        hp.vy = seg.p0.vy + seg.p1.vy * t / d;
+        hp.vz = seg.p0.vz + seg.p1.vz * t / d;
         if (hp.vy >= b.min.vy - margin && b.max.vy + margin >= hp.vy &&
             hp.vz >= b.min.vz - margin && b.max.vz + margin >= hp.vz) {
             *hit = 1;
@@ -1233,9 +1234,10 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        s32 t = hp.vy - seg.p0.vy;
-        hp.vx = seg.p1.vx * t / seg.p1.vy + seg.p0.vx;
-        hp.vz = seg.p1.vz * t / seg.p1.vy + seg.p0.vz;
+        t = hp.vy - seg.p0.vy;
+        d = seg.p1.vy;
+        hp.vx = seg.p0.vx + seg.p1.vx * t / d;
+        hp.vz = seg.p0.vz + seg.p1.vz * t / d;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
             hp.vz >= b.min.vz - margin && b.max.vz + margin >= hp.vz) {
             *hit = 1;
@@ -1257,9 +1259,10 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
         found = 0;
     }
     if (found == 1) {
-        s32 t = hp.vz - seg.p0.vz;
-        hp.vx = seg.p1.vx * t / seg.p1.vz + seg.p0.vx;
-        hp.vy = seg.p1.vy * t / seg.p1.vz + seg.p0.vy;
+        t = hp.vz - seg.p0.vz;
+        d = seg.p1.vz;
+        hp.vx = seg.p0.vx + seg.p1.vx * t / d;
+        hp.vy = seg.p0.vy + seg.p1.vy * t / d;
         if (hp.vx >= b.min.vx - margin && b.max.vx + margin >= hp.vx &&
             hp.vy >= b.min.vy - margin && b.max.vy + margin >= hp.vy) {
             *hit = 1;
@@ -1268,6 +1271,3 @@ int EGSGeometry_IsIntersectLineSegment2UnrotBox(EGSSegment *segment, EGSBox *box
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsgeom", EGSGeometry_IsIntersectLineSegment2UnrotBox);
-#endif
