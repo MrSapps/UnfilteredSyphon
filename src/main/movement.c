@@ -1175,9 +1175,15 @@ static inline void MovementTurnTowards(Gobj *gobj, VECTOR32 *v, u8 mode) {
     s32 remain;
 
     if (dir.vx != 0 || dir.vy != 0 || dir.vz != 0) {
-        speed = 0x71;
+        /* mode set in both arms: the modified param gets its own pseudo, jump2 cross-jumps the two
+         * `mode = 0` into one (s1, in the ratan2 delay slot), and CSE cannot see its value past
+         * the join, so the call keeps `andi a3,s1,0xFF` as in the original */
         if (gobj->cas->active == 8) {
             speed = 0x11C;
+            mode = 0;
+        } else {
+            speed = 0x71;
+            mode = 0;
         }
         MovementValueArctan(dir.vx, dir.vz, &target);
         EGSGeometry_AngleInterpolate(MOVE(gobj)->rotation.cur.pos.vy, target, speed, mode, &step, &remain);
@@ -1185,11 +1191,6 @@ static inline void MovementTurnTowards(Gobj *gobj, VECTOR32 *v, u8 mode) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: original keeps the AngleInterpolate mode (0) in s1 across ratan2, shifting s-regs */
-/* r2B: the s1 pseudo can have no REG_EQUIV 0 in the original (set only in the ratan2 delay slot);
- * u8/s16/s32/s8 param, (u8) cast, `mode = mode`, caller `u8 mode = 0` (top or at the call) and an
- * inline-local copy all still fold to `move a3,zero`. The unk2C vx/vz/vy store order also differs. */
 s32 func_8004B058(Gobj *gobj) {
     MovementInfo *move = MOVE(gobj);
     u32 flags = move->edgeFlags;
@@ -1242,8 +1243,8 @@ s32 func_8004B058(Gobj *gobj) {
         gobj != NULL && gobj->move != NULL && MOVE(gobj)->charMove != NULL) {
         if (isFirstPerson) {
             cm->unk2C.vx = -cm->unk9C.vx;
-            cm->unk2C.vz = -cm->unk9C.vz;
             cm->unk2C.vy = -cm->unk9C.vy;
+            cm->unk2C.vz = -cm->unk9C.vz;
         }
         MovementTurnTowards(gobj, &cm->unk2C, 0);
     }
@@ -1252,9 +1253,6 @@ s32 func_8004B058(Gobj *gobj) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/movement", func_8004B058);
-#endif
 
 void MovementGobjTeleport(Gobj *gobj, VECTOR32 *pos, VECTOR32 *dir, s32 arg3) {
     MovementResetInfo info;
