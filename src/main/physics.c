@@ -102,15 +102,18 @@ s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* Case 2 keeps the deceleration in memory at 0x14($sp) (reloaded and negated before each
- * call); this version allocates it to $s0, so case 2 cross-jumps into case 1. A block-scoped
- * `s32 decel; s32 *pd = &decel;` in case 2 reproduces case 2 exactly (2 lines left); the
- * remaining diff is case 0's second FIXDiv, where the original schedules the out->vx store
- * between the out->vy and speed loads (ours fills the jal slot with it). */
+/* Case 2's deceleration lives in memory (reloaded and negated before each call): it is passed
+ * by address to the scaling helper. */
+static inline void iFrictionScale(PhysVector *vel, s32 *decel, PhysVector *out) {
+    out->vx = EGSMathFIXMul(vel->vx, -*decel);
+    out->vy = EGSMathFIXMul(vel->vy, -*decel);
+    out->vz = EGSMathFIXMul(vel->vz, -*decel);
+}
+
 s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, PhysVector *normal, PhysVector *out) {
     s32 speed;
     s32 decel;
+    s32 *o;
 
     if (friction <= 0 || (normal != NULL && VECTOR_IS_ZERO(normal) == 1) ||
         (vel != NULL && VECTOR_IS_ZERO(vel) == 1)) {
@@ -126,9 +129,12 @@ s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, Phys
                     out->vx = EGSMathFIXMul(vel->vx, friction);
                     out->vy = EGSMathFIXMul(vel->vy, friction);
                     out->vz = EGSMathFIXMul(vel->vz, friction);
-                    out->vx = EGSMathFIXDiv(out->vx, speed);
-                    out->vy = EGSMathFIXDiv(out->vy, speed);
-                    out->vz = EGSMathFIXDiv(out->vz, speed);
+                    /* through a plain s32 pointer: the stores may alias speed, so each
+                     * out->v? store stays ahead of the next speed reload */
+                    o = &out->vx;
+                    o[0] = EGSMathFIXDiv(o[0], speed);
+                    o[1] = EGSMathFIXDiv(o[1], speed);
+                    o[2] = EGSMathFIXDiv(o[2], speed);
                 } else {
                     EGSMath_VectorNegate(vel, out);
                 }
@@ -147,9 +153,7 @@ s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, Phys
                 EGSMath_VectorModulus(vel, &speed);
                 decel = EGSMathFIXMul(friction, speed);
                 if (decel < 0x1000) {
-                    out->vx = EGSMathFIXMul(vel->vx, -decel);
-                    out->vy = EGSMathFIXMul(vel->vy, -decel);
-                    out->vz = EGSMathFIXMul(vel->vz, -decel);
+                    iFrictionScale(vel, &decel, out);
                 } else {
                     EGSMath_VectorNegate(vel, out);
                 }
@@ -171,6 +175,3 @@ s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, Phys
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/physics", PhysicsApplyFrictionToVelocity);
-#endif
