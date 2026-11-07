@@ -954,7 +954,8 @@ extern u16 D_8010F8A0;                  /* sniper view width */
 extern s32 D_8010F8F0;                  /* target-lock message tick */
 extern u8 D_8010F8F8;                   /* zoom text shown */
 extern u8 D_8010F8F9;                   /* body part last reported */
-extern struct { s32 color; u8 unk04[0x20]; } D_801186E4[8]; /* zoom bar polys from their colour word */
+typedef struct { u8 unk00[0xC]; s32 color; u8 unk10[0x14]; } IfaceZoomBar;
+extern IfaceZoomBar D_801186E4[8]; /* zoom bar polys (POLY_G4-sized), .color = rgb1 */
 extern s16 gSniperGobjHit;
 extern s32 gSniperBonesHit;
 extern char *gTargetLockMsg;
@@ -4220,8 +4221,6 @@ void func_80045548(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* loops: the original does not strength-reduce the sprite field addresses (offsets stay in the sh/sw) and keeps the up-counting index in loops 2/3; here loop 1 counts down and loops 2/3 get reduced pointers */
 void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     char buf[16];
     s32 hi;
@@ -4229,7 +4228,6 @@ void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     s32 h;
     s32 step;
     s32 mid;
-    s32 off;
     s32 x;
     s32 y;
     s32 i;
@@ -4254,42 +4252,54 @@ void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     step = (hi - lo) * 3 / 10;
     angle *= 60;
     mid = (hi + lo) / 2;
-    off = -(angle / 1024);
+    angle /= 1024;
+    angle = -angle;
     sp = D_8010F8B8;
     if (sp != NULL) {
-        for (i = 0, y = -60; i < 5; i++, sp++, y += 30) {
-            n = y + off;
-            if (n > h / 2 || n < -h / 2) {
-                n = -256;
+        for (i = 0; i < 5; i++) {
+            y = i * 30 - 60;
+            n = y + angle;
+            if (n <= h / 2 && n >= -h / 2) {
+                sp[i].y = n;
+            } else {
+                sp[i].y = -256;
             }
-            sp->y = n;
         }
     }
-    off = -(pitch * 8 * step / 4096);
+    {
+        s32 t = pitch * 8;
+        pitch = t * step;
+    }
+    pitch /= 4096;
+    pitch = -pitch;
     sp = D_8010F8BC;
-    for (i = 0, x = 0; i < 8; i++, sp++, x += step) {
-        n = off + x + mid;
+    for (i = 0; i < 8; i++) {
+        x = i * step;
+        n = pitch + x + mid;
         if (n > hi) {
             n -= step * 8;
-            off -= step * 8;
+            pitch -= step * 8;
             if (n > hi) {
-                sp->x = -256;
+                sp[i].x = -256;
                 continue;
             }
         }
-        if (n < lo) {
-            sp->x = -256;
+        if (n >= lo) {
+            sp[i].x = n;
         } else {
-            sp->x = n;
+            sp[i].x = -256;
         }
     }
     if (D_8010F8AC == 3) {
-        n = 8 - (zoom - 181) * 8 / 646;
+        h = (zoom - 181) * 8;
+        h /= 646;
+        h = 8 - h;
         for (i = 0; i < 8; i++) {
-            if (i < n) {
-                D_801186E4[i].color = 0x2840FF40;
+            IfaceZoomBar *bar = &D_801186E4[i];
+            if (i < h) {
+                bar->color = 0x2840FF40;
             } else {
-                D_801186E4[i].color = 0x28106010;
+                bar->color = 0x28106010;
             }
         }
         return;
@@ -4346,7 +4356,8 @@ void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
     if (zoom == D_8010F8F4.zoom) {
         if (!D_8010F8F8) {
             D_8010F8F8 = 1;
-            sprintf(buf, gZoomFmt, 0xA6F99 / (zoom * zoom));
+            h = 0xA6F99 / (zoom * zoom);
+            sprintf(buf, gZoomFmt, h);
             TextAddString(gSpareTextWindow, buf, 50, 0);
         }
     } else {
@@ -4354,9 +4365,6 @@ void InterfaceSetSniperDoodads(s32 angle, s32 pitch, s32 zoom) {
         D_8010F8F8 = 0;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceSetSniperDoodads);
-#endif
 
 void InterfaceBuildMenuBackgroundPolys(IfacePoly4 *poly) {
     u32 i;
