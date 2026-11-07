@@ -103,8 +103,11 @@ s32 PhysicsGobjRegisterForce(PhysGobj *gobj, PhysVector *force) {
 }
 
 #ifdef NON_MATCHING
-/* Case 2 keeps the deceleration in $a1 with caller-saves (spilled to
- * 0x14($sp)); this version allocates it to $s0. Case 1 block order differs. */
+/* Case 2 keeps the deceleration in memory at 0x14($sp) (reloaded and negated before each
+ * call); this version allocates it to $s0, so case 2 cross-jumps into case 1. A block-scoped
+ * `s32 decel; s32 *pd = &decel;` in case 2 reproduces case 2 exactly (2 lines left); the
+ * remaining diff is case 0's second FIXDiv, where the original schedules the out->vx store
+ * between the out->vy and speed loads (ours fills the jal slot with it). */
 s32 PhysicsApplyFrictionToVelocity(s32 friction, PhysVector *vel, s32 mode, PhysVector *normal, PhysVector *out) {
     s32 speed;
     s32 decel;

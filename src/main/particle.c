@@ -633,7 +633,8 @@ void EGSDisplayAddPoly(void *display, void *prim);
                                                 : -(-((base) + ((D_801100C4 & rand()) << 8)) >> (12 - D_801100C8)))
 
 #ifdef NON_MATCHING
-/* i and the prim pointer get swapped callee-saved regs; group header loads scheduled differently */
+/* Register allocation only: the original gives i/prim (sharing one reg) $s0 and p $s1; ours
+ * ranks p first (refs 78, live 240, pri 19500) over i (16/42, 15238) and prim (12/25, 14400). */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
