@@ -1792,15 +1792,14 @@ void SetLoopingVolume(SoundEntry *s, s16 vol, s16 pan) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc/scheduling: param copies land in different temps (t4/t5 vs t3/a2) */
+/* block is read through a cast, not a local copy (a VabHdr * local takes a different register) */
+#define hdr ((VabHdr *)block)
 void GetVoiceVolume(SoundBlock *block, s16 prog, s16 tone, s16 vol, s16 pan, s16 *left, s16 *right) {
-    VabHdr *hdr = (VabHdr *)block;
     s16 level;
     s16 pos;
     ProgAtr *progs;
     VagAtr *tones;
-    u32 l, r;
+    u32 v, l, r;
 
     if (pan < vol) {
         level = vol;
@@ -1816,15 +1815,17 @@ void GetVoiceVolume(SoundBlock *block, s16 prog, s16 tone, s16 vol, s16 pan, s16
         pos = 0x7F - vol * 63 / pan;
     }
     progs = (ProgAtr *)(hdr + 1);
-    r = (u32)(hdr->mvol * 129 * progs[prog].mvol) / 127;
     tones = (VagAtr *)((u8 *)progs + (progs[prog].reserved1 * 0x200 + 0x800));
-    r = (u32)(r * tones[tone].vol) / 127;
-    r = (u32)(r * level) / 127;
+    v = (hdr->mvol << 7) + hdr->mvol;
+    v = (u32)(v * progs[prog].mvol) / 127;
+    v = (u32)(v * tones[tone].vol) / 127;
+    v = (u32)(v * level) / 127;
     if (hdr->pan <= 64) {
-        l = r;
-        r = r * hdr->pan >> 6;
+        l = v;
+        r = v * hdr->pan >> 6;
     } else {
-        l = r * (0x7F - hdr->pan) >> 6;
+        l = v * (0x7F - hdr->pan) >> 6;
+        r = v;
     }
     if (progs[prog].mpan <= 64) {
         r = r * progs[prog].mpan >> 6;
@@ -1844,9 +1845,7 @@ void GetVoiceVolume(SoundBlock *block, s16 prog, s16 tone, s16 vol, s16 pan, s16
     *left = l;
     *right = r;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", GetVoiceVolume);
-#endif
+#undef hdr
 
 s16 GetVoiceFromField(s32 field, s16 n) {
     s32 count = -1;
