@@ -458,9 +458,17 @@ static u8 func_80141908(s32 id) {
 
 #ifdef NON_MATCHING
 /*
- * Same instructions modulo scheduling: the original hoists the five anim
- * parameter loads above the global stores and sinks the tick/settings loads.
+ * Same instructions modulo scheduling (22 lines left, r3C): params read before the Vec4
+ * stores, and the NPC tick/rate fields written as struct members (ChopNPCTick) so they
+ * stay put. Still open: the five param stores (plain statics) sink below the tick/rate
+ * code in the original but not here.
  */
+typedef struct {
+    u8 pad[0x30];
+    s16 tick;
+    s16 pad32[2];
+    s16 rate;
+} ChopNPCTick;
 /* Chopper object init (message 2). */
 static void func_8014196C(s32 id) {
     Vec4 box[2];
@@ -484,6 +492,11 @@ static void func_8014196C(s32 id) {
     D_8014561C->target->unk02 = 1;
     MovementGobjInit(D_8014561C, 0, &chopperPos, &D_80145680, 0);
     MovementAddGobj(D_8014561C);
+    D_80145550 = D_8014561C->anim->params->p0;
+    D_80145560 = D_8014561C->anim->params->p2;
+    D_8014555C = D_8014561C->anim->params->p1;
+    D_80145558 = D_8014561C->anim->params->p4;
+    D_80145554 = D_8014561C->anim->params->p3;
     D_80145710.vy = 0x1E9;
     D_801456E0.vx = 0;
     D_801456E0.vy = 0;
@@ -491,13 +504,8 @@ static void func_8014196C(s32 id) {
     D_80145710.vx = 0;
     D_80145710.vz = 0;
     D_8014561C->npc = &D_80145578;
-    D_80145550 = D_8014561C->anim->params->p0;
-    D_80145560 = D_8014561C->anim->params->p2;
-    D_8014555C = D_8014561C->anim->params->p1;
-    D_80145558 = D_8014561C->anim->params->p4;
-    D_80145554 = D_8014561C->anim->params->p3;
-    D_801455A8 = gSystemTick;
-    D_801455AE = D_80106215 * ((D_80106218 & 7) + 1);
+    ((ChopNPCTick *)&D_80145578)->tick = gSystemTick;
+    ((ChopNPCTick *)&D_80145578)->rate = D_80106215 * ((D_80106218 & 7) + 1);
     box[0].vx = -0xE0;
     box[0].vy = -0x1A0;
     box[0].vz = -0x6E0;

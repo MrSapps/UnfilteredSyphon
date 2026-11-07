@@ -2875,7 +2875,12 @@ void InitDamagePolys(void) {
 }
 
 #ifdef NON_MATCHING
-/* callee-saved register assignment and scheduling of the uv setup differ */
+/* 24 lines left (r3C). Regs now all match (h/w/u order: w then h then py; uv[2]/uv[3]
+ * computed into a reused `t` and the uv[1] word built in `s` before the uv[2]/uv[3] stores).
+ * Remaining: sched1 puts `v = py & 0xFF` (+ v << 8) at the top of the block (both are
+ * birthing insns, 7f000001) where the original computes them inside the uv[0] chain; moving
+ * v after the cy/cx part (`t = A << 16; v = ...; t = t + (v << 8) + u * 2`) fixes that but
+ * then the uv[2]/uv[1] interleave and t0..t3 numbering differ. */
 void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTexture *tex, s32 owner) {
     VECTOR a;
     VECTOR b;
@@ -2887,6 +2892,7 @@ void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTextu
     s16 h;
     s32 v;
     s32 t;
+    s32 s;
 
     d = &gDamagePolys[gDamagePolyPtr++];
     shift = 9;
@@ -2905,15 +2911,17 @@ void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTextu
         gDamagePolyPtr = 0;
     }
     d->active = 1;
-    u *= 2;
     d->owner = (void *)owner;
-    v = py & 0xFF;
-    d->uv[0] = (((tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F)) << 16) + (v << 8) + u;
-    t = ((v + h) << 8) + u;
+    v = py;
+    v &= 0xFF;
+    t = (((tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F)) << 16) + (v << 8) + u * 2;
+    d->uv[0] = t;
+    t = ((v + h) << 8) + u * 2;
+    s = ((((py >> 4) & 0x10) | (((tex->image.px & 0x3FF) >> 6) | 0x80) | ((py & 0x200) * 4)) << 16) + (v << 8) + u * 2 +
+               (s16)w;
     d->uv[2] = t;
     d->uv[3] = t + (s16)w;
-    d->uv[1] = ((((py >> 4) & 0x10) | (((tex->image.px & 0x3FF) >> 6) | 0x80) | ((py & 0x200) * 4)) << 16) + (v << 8) + u +
-               (s16)w;
+    d->uv[1] = s;
     OuterProduct12(dir, normal, &a);
     if (a.vx == 0 && a.vy == 0 && a.vz == 0) {
         OuterProduct12(dir, pos, &a);

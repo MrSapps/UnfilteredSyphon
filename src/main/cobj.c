@@ -1015,7 +1015,13 @@ extern u8 *gLevData;
 void EGSDisplayGetSectorRotBoxList(void *model, u32 *count, u32 **boxes);
 
 #ifdef NON_MATCHING
-/* Sector selection: the original tests -3/-2/-1 as a linear chain and indexes links without strength reduction */
+/* 49 lines left (r3C). Fixed: `node` is declared inside `if (ok)` (stack: ok 0x10, node 0x18,
+ * count 0x30, boxes 0x34); ts and the list pointer are ONE variable (s0); the selection is a
+ * 2-case switch with `default: if (i == -1) ... else ...` (3 cases get balanced); two separate
+ * `if (kind == 0 && ..)` / `if (kind == 4 && ..)` hit tests that `goto found`; callback read
+ * into a local. Still open: the original keeps the box scan as `j test` (exit-test copy not
+ * duplicated), so the hit blocks land inside the loop and `count` is reloaded every pass;
+ * ours duplicates the test and hoists count. links[i] is strength-reduced (links - 3) in ours. */
 static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
     CobjTerrSector *ts;
 
@@ -1029,35 +1035,36 @@ static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
 
 /* Run a collision query over the dummy sectors (game objects, rotated boxes), the query's
  * sector and its neighbours. Kinds 0 and 4 of a terrain sector walk its rotated boxes. */
+#define LIST ((CobjNode *)ts)
 s32 CobjLoop(CobjQuery *q) {
     u8 ok;
-    CobjNode node;
     u32 count;
     u32 *boxes;
     s32 i = -3;
     u8 *links = gLevData + q->sector * 15 + 0x80;
     CobjTerrSector *ts;
-    CobjNode *list;
     u8 hasList;
     u8 done;
     u32 idx;
     s32 off;
     s32 kind;
     u32 *box;
+    CobjNodeCallback cb;
 
     for (;;) {
         switch (i) {
-        case -3:
-            ts = &gCobjDummySector_Gobj;
+        default:
+            if (i == -1) {
+                ts = CobjGetTerrSector(q->sector);
+            } else {
+                ts = CobjGetTerrSector(links[i]);
+            }
             break;
         case -2:
             ts = &gCobjDummySector_RotBox;
             break;
-        case -1:
-            ts = CobjGetTerrSector(q->sector);
-            break;
-        default:
-            ts = CobjGetTerrSector(links[i]);
+        case -3:
+            ts = &gCobjDummySector_Gobj;
             break;
         }
         if (ts == NULL) {
@@ -1071,6 +1078,8 @@ s32 CobjLoop(CobjQuery *q) {
         hasList = 0;
         idx = 0;
         if (ok) {
+            CobjNode node;
+
             kind = q->kind;
             node.gobj = NULL;
             node.type = 1;
@@ -1082,12 +1091,12 @@ s32 CobjLoop(CobjQuery *q) {
             node.next = NULL;
             if (i >= -1 && (kind == 4 || kind == 0)) {
                 hasList = 1;
-                list = &node;
                 EGSDisplayGetSectorRotBoxList(ts->model, &count, &boxes);
+                ts = (CobjTerrSector *)&node;
             } else {
-                list = (CobjNode *)ts->unk28[kind];
+                ts = (CobjTerrSector *)ts->unk28[kind];
             }
-            if (list != NULL) {
+            if (ts != NULL) {
                 off = idx * 0x48;
                 do {
                     done = 0;
@@ -1095,30 +1104,29 @@ s32 CobjLoop(CobjQuery *q) {
                         for (; idx < count; idx++, off += 0x48) {
                             box = (u32 *)((u8 *)boxes + off);
                             node.gobj = (Gobj *)box;
-                            if (kind == 0) {
-                                if (*box & 1) {
-                                    node.unk0C = 0;
-                                    break;
-                                }
-                            } else if (kind == 4 && (*box & 0x10)) {
+                            if (kind == 0 && (*box & 1)) {
+                                node.unk0C = 0;
+                                goto found;
+                            }
+                            if (kind == 4 && (*box & 0x10)) {
                                 node.unk0C = (s32)HotboxCallback;
-                                list->unk08 = (*box >> 9) & 1;
-                                break;
+                                LIST->unk08 = (*box >> 9) & 1;
+                                goto found;
                             }
                         }
-                        if (idx >= count) {
-                            done = 1;
-                        }
+                        done = 1;
                     }
+                found:
                     if (done) {
                         break;
                     }
                     if (q->nodeFilter != NULL) {
                         ok = 0;
-                        q->nodeFilter(list, &q->nodeFilter, &ok);
-                        if ((CobjNodeCallback)list->unk0C != NULL) {
-                            if (ok ? list->unk08 == 0 : list->unk08 == 1) {
-                                ((CobjNodeCallback)list->unk0C)(list, q->kind, q->arg);
+                        q->nodeFilter(LIST, &q->nodeFilter, &ok);
+                        cb = (CobjNodeCallback)LIST->unk0C;
+                        if (cb != NULL) {
+                            if (ok ? LIST->unk08 == 0 : LIST->unk08 == 1) {
+                                cb(LIST, q->kind, q->arg);
                             }
                         }
                         if (ok && q->stopOnHit == 1) {
@@ -1129,9 +1137,9 @@ s32 CobjLoop(CobjQuery *q) {
                         off += 0x48;
                         idx++;
                     } else {
-                        list = list->next;
+                        ts = (CobjTerrSector *)LIST->next;
                     }
-                } while (list != NULL);
+                } while (ts != NULL);
             }
         }
         i++;

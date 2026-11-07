@@ -899,8 +899,11 @@ static void *func_80142D74(s16 id, s16 kind) {
 
 /* SUBWAY level init. */
 #ifdef NON_MATCHING
-/* Same length; the constant 1 is hoisted out of the object loop ($fp used), and the objective
- * loop counts in $s0 instead of a fresh register. */
+/* 30 lines left (r3C): objective loop now matches (`for (j = i; ...)` with i = 0 before the
+ * if: entry test on s0, counter in a fresh reg). The constant 1 (type == 1,
+ * func_80141F04() == 1, pathStart == 1: savings 3, life 3) is still hoisted: loop.c
+ * moves it because threshold*3*3 >= 258 insns; the original loop must have been a few
+ * RTL insns longer (bumped/fogIn/fogOut then shift down one s-reg). */
 void func_80142E90(void) {
     SubwayRuntime *rt;
     GameObjectInfo *info;
@@ -937,10 +940,11 @@ void func_80142E90(void) {
         LevelObjectiveAdd(0, -1);
         LevelObjectiveAdd(4, -1);
         if (gObjectives != NULL) {
+            s32 j;
             count = gObjectives->count;
-            for (; i < count; i++) {
+            for (j = i; j < count; j++) {
                 if (gObjectives != NULL) {
-                    gObjectives->unk24 |= 1 << i;
+                    gObjectives->unk24 |= 1 << j;
                 }
             }
             if (gObjectives != NULL) {

@@ -2827,27 +2827,35 @@ void func_8013E480(void) {
 }
 
 #ifdef NON_MATCHING
-/* delta loads are scheduled differently; &D_8013FEA4 is not CSE'd into a register */
+/* 65 lines left (r3C). The original reaches the .y halves through a forced address
+ * (`((s16 *)&v)[1]` = INDIRECT_REF of a constant -> memory_address forces it into a reg,
+ * like XY(v).x does), which gives the addiu/lhu/sh RMW form; the first test reads
+ * `*(s32 *)&XY(D_8013FEA4)` (a2 base). Still open: the original computes all four deltas
+ * before any store (ours sinks/hoists the stores differently) and the quad corner loads. */
 void func_8013E5B0(void) {
     s32 dx0, dy0, dx1, dy1;
     s32 x, y;
     s32 x1, y1;
     MenuQuad *quad;
 
-    if (D_8013FEA4 == 0 && D_8013FEA8 == 0) {
-        XY(D_8013FEA4).x = dx0 = XY(D_8013FE8C).x - XY(D_8013FE94).x;
-        XY(D_8013FEA4).y = dy0 = XY(D_8013FE8C).y - XY(D_8013FE94).y;
-        XY(D_8013FEA8).x = dx1 = XY(D_8013FE90).x - XY(D_8013FE98).x;
-        XY(D_8013FEA8).y = dy1 = XY(D_8013FE90).y - XY(D_8013FE98).y;
+    if (*(s32 *)&XY(D_8013FEA4) == 0 && D_8013FEA8 == 0) {
+        dx0 = XY(D_8013FE8C).x - XY(D_8013FE94).x;
+        dy0 = XY(D_8013FE8C).y - XY(D_8013FE94).y;
+        dx1 = XY(D_8013FE90).x - XY(D_8013FE98).x;
+        dy1 = XY(D_8013FE90).y - XY(D_8013FE98).y;
+        XY(D_8013FEA4).x = dx0;
+        XY(D_8013FEA4).y = dy0;
+        XY(D_8013FEA8).x = dx1;
+        XY(D_8013FEA8).y = dy1;
         XY(D_8013FE9C).x = dx0 / 4;
         XY(D_8013FE9C).y = dy0 / 4;
         XY(D_8013FEA0).x = dx1 / 4;
         XY(D_8013FEA0).y = dy1 / 4;
     }
     HILITE_STEP(XY(D_8013FE94).x, XY(D_8013FE8C).x, XY(D_8013FE9C).x);
-    HILITE_STEP(XY(D_8013FE94).y, XY(D_8013FE8C).y, XY(D_8013FE9C).y);
+    HILITE_STEP(((s16 *)&D_8013FE94)[1], XY(D_8013FE8C).y, XY(D_8013FE9C).y);
     HILITE_STEP(XY(D_8013FE98).x, XY(D_8013FE90).x, XY(D_8013FEA0).x);
-    HILITE_STEP(XY(D_8013FE98).y, XY(D_8013FE90).y, XY(D_8013FEA0).y);
+    HILITE_STEP(((s16 *)&D_8013FE98)[1], XY(D_8013FE90).y, XY(D_8013FEA0).y);
     x = XY(D_8013FE94).x >> 6;
     y = XY(D_8013FE94).y >> 6;
     x1 = x + (XY(D_8013FE98).x >> 6);
@@ -2863,7 +2871,14 @@ INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E5B0);
 #endif
 
 #ifdef NON_MATCHING
-/* layout pointers: stores are batched differently and the frame-line loop allocates differently */
+/* 11 lines left (r3C), 4 of them the "\\%s\\MENU.HOG;1" literal that the original has in
+ * .text right before the function (needs a static const char[16] when unwrapping).
+ * Fixed: the line colours are `(c ? 0xA0 : 0x32) | (c' ? bottom << 16 : top << 16)` (two
+ * conditionals that jump threading merges; the b one tests !(j & 1) in the second arm),
+ * computed into locals before the call; for-increment order top, bottom, i, item; a
+ * reused temp `p` for the layout pointers keeps the stores in order. Still open: the
+ * original copies chars from v1 into s5 (addiu v1; move s5,v1) and stores mMap right
+ * after mem += 0x40F8 (ours sinks it). */
 void func_8013E98C(void) {
     char path[32];
     u8 *mem;
@@ -2874,13 +2889,18 @@ void func_8013E98C(void) {
     s32 j;
     s32 top;
     s32 bottom;
+    s32 a, b;
+    u8 *p;
 
     mem = EGSDisplayPacketAreaMalloc(0x15058);
-    chars = (TextChar *)(mem + 0x3390);
-    D_8013FE70 = (TextChar *)(mem + 0x39EC);
+    p = mem + 0x3390;
+    chars = (TextChar *)p;
+    p = mem + 0x39EC;
+    D_8013FE70 = (TextChar *)p;
+    p = mem + 0x3E38;
     D_8013FE6C = (TextChar *)mem;
-    mMap = (TextChar *)(mem + 0x3E38);
     mem += 0x40F8;
+    mMap = (TextChar *)p;
     D_8013FE78 = mem;
     mem += 0xF000;
     D_8013FEC4 = (MenuQuad *)(mem + 0x200);
@@ -2908,7 +2928,7 @@ void func_8013E98C(void) {
     TextSetWindowJustification(D_8013F7C1, 0);
     TextSetWindowMini(D_8013F7C3, 1);
     item = D_8013FCBC = D_8013F86C;
-    for (i = 0, top = 0x14, bottom = 0x1F; i < 5; i++, top += 16, bottom += 16, item++) {
+    for (i = 0, top = 0x14, bottom = 0x1F; i < 5; top += 16, bottom += 16, i++, item++) {
         *item->textIds = TextAddString(D_8013F7C1, *item->strings, -1, chars);
         if (*item->textIds == 0xFFFF) {
             func_8013EE78();
@@ -2917,9 +2937,9 @@ void func_8013E98C(void) {
         TextSetStringSpeed(*item->textIds, 0x800);
         chars += TextStringLength(*item->textIds, 1);
         for (j = 0; j < 4; j++) {
-            EGSDisplayBuildLineF(&lines[i * 4 + j], 0xF08250,
-                                 (j & 2) ? 0xA0 | (bottom << 16) : 0x32 | (top << 16),
-                                 (j & 1) ? 0xA0 | (top << 16) : 0x32 | (bottom << 16));
+            a = ((j & 2) ? 0xA0 : 0x32) | ((j & 2) ? bottom << 16 : top << 16);
+            b = ((j & 1) ? 0xA0 : 0x32) | (!(j & 1) ? bottom << 16 : top << 16);
+            EGSDisplayBuildLineF(&lines[j + i * 4], 0xF08250, a, b);
         }
     }
     EGSDisplayBuildPoly4F(&gMenuPolys[30], 0, 0, 0, 0, 0);
