@@ -2551,16 +2551,14 @@ static inline void iTrackStop(GameCamTrack *track, s32 dist, s32 d, s32 r) {
     track->unk74.vz = 0;
 }
 
-#ifdef NON_MATCHING
-/* 4 lines left: the original computes r into a1 (then-branch) and copies it to s3 for the else
- * (copy in the bnez delay slot), and loads unk3C after the plane normal. Here the inline's r
- * param copy is removed by CSE (make_regs_eqv: the copy only survives as canonical if it lives
- * beyond the cse block, and the else block runs to the function end). Passing
- * track->unk10 << 12, a block-local copy, or a separate var all get CSE'd. Fixed so far:
- * `d = dist - d; d += r;` (d/dist in s0/s2) and the pointer-store for p.vx (sw in the jal slot). */
+/* r0/r copy (r0 in a1 for the then-branch, the copy r in s3 for the inline): make_regs_eqv keeps
+ * a user copy made in the first block as canonical when it lives past it. A separate e for
+ * dist - d keeps d set once, so sched1 boosts its load (birthing insn) after the plane load. */
 void func_80020978(GameCamTrack *track) {
     VECTOR32 n;
-    s32 r = track->unk10 << 12;
+    s32 r0 = track->unk10 << 12;
+    s32 r = r0;
+    s32 e;
     s32 dist = track->unk40;
     GameCamSVec *normal = track->plane->normal;
     s32 d = track->unk3C;
@@ -2569,11 +2567,11 @@ void func_80020978(GameCamTrack *track) {
         n.vx = normal->vx;
         n.vy = normal->vy;
         n.vz = normal->vz;
-        d = dist - d;
-        d += r;
-        track->unk54.vx = EGSMathFIXMul(n.vx, d);
-        track->unk54.vy = EGSMathFIXMul(n.vy, d);
-        track->unk54.vz = EGSMathFIXMul(n.vz, d);
+        e = dist - d;
+        e += r;
+        track->unk54.vx = EGSMathFIXMul(n.vx, e);
+        track->unk54.vy = EGSMathFIXMul(n.vy, e);
+        track->unk54.vz = EGSMathFIXMul(n.vz, e);
         track->unk64.vx = EGSMathFIXMul(n.vx, dist);
         track->unk64.vy = EGSMathFIXMul(n.vy, dist);
         track->unk64.vz = EGSMathFIXMul(n.vz, dist);
@@ -2584,9 +2582,6 @@ void func_80020978(GameCamTrack *track) {
         iTrackStop(track, dist, d, r);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80020978);
-#endif
 
 void func_80020B58(GameCamTrack *track) {
     func_8001FF08(track);
