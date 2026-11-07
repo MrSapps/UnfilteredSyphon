@@ -673,7 +673,12 @@ void SoundPlayXACASAnimCB(s32 id, s32 event) {
  * (`n = (s16)note; n += d;`) it drops to priority 2 and ties with the a1/a3 arg moves,
  * which win on LUID, so it lands before them.  The original needs the ext between the arg
  * moves and the div: unboosted but with priority > 2 (i.e. depending on something after
- * the rand call). */
+ * the rand call).
+ * r4F (-dS): with `n = (s16)note; n += d` the ready list after the div's boosted chain is
+ * {a3=0, a1, lw a0, sw 0(sp), ext-sra(prio 2)}; the ext loses on LUID.  The original's s0 holds
+ * note through the whole sequence (in-place sll/sra s0, addu s0,s0,v0), i.e. one variable;
+ * `note = (s16)note; note += d;` gives the in-place ext but note then drops to s5 and the ext
+ * lands right after the mult (27 lines). */
 void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 id = song + variant;
     s16 note;
