@@ -2374,8 +2374,12 @@ void doPointAction(Gobj *obj, s32 kind) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/npc", D_80012070);
 
-#ifdef NON_MATCHING
-/* grenade weapon restore: target reloads obj->id for the second gameObjectsInfo address */
+/* gameObjectsInfo[].flags24 read as a struct member: the load may then move above the
+ * grenadeWeaponRestore store */
+typedef struct NPCInfoW {
+    s32 raw;
+} NPCInfoW;
+
 void initPointAction(PathPoint *path, Gobj *obj, s32 kind) {
     NPC *npc = NPC_OF(obj);
     s32 flags = npc->flags;
@@ -2393,7 +2397,8 @@ void initPointAction(PathPoint *path, Gobj *obj, s32 kind) {
     if (npc->awareness == 0 || action == kind) {
         if (action != 4) {
             if (action != 6) {
-                goto none;
+                npc->flags &= ~0x400;
+                return;
             }
             npc->script = look;
         } else {
@@ -2443,7 +2448,7 @@ void initPointAction(PathPoint *path, Gobj *obj, s32 kind) {
                 && NPC_WEAPON(obj->id, f) != 20) {
                 grenadeWeaponRestore = *(u8 *)&gameObjectsInfo[obj->id].flags24;
                 *(u8 *)&gameObjectsInfo[obj->id].flags24
-                    = (GOBJ_INFO_FLAGS(&gameObjectsInfo[obj->id]) & 0x3000) != 0x2000 ? 19 : 20;
+                    = (((NPCInfoW *)&gameObjectsInfo[obj->id].flags24)->raw & 0x3000) != 0x2000 ? 19 : 20;
             }
             npc->script = grenade;
             break;
@@ -2481,9 +2486,6 @@ void initPointAction(PathPoint *path, Gobj *obj, s32 kind) {
         doPointAction(obj, npc->script->kind);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", initPointAction);
-#endif
 
 void NPCRandomActions(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
