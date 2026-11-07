@@ -336,20 +336,19 @@ void FriendlyInit(void) {
 INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyInit);
 #endif
 
-#ifdef NON_MATCHING
-/* original keeps i*32 and a verts base in registers (two vertex address forms); ours strength-reduces */
 void func_80086B24(void) {
     s32 i, j;
-    FakeFace *f = D_8012CEC4.faces;
-    FakeVertex *verts = D_8012CEC4.verts[0];
+    FakeFace *f;
 
-    for (i = 0; i < 30; i++, f++) {
+    for (i = 0; i < 30; i++) {
+        f = &D_8012CEC4.faces[i];
         f->face.count = 0;
         for (j = 0; j < 4; j++) {
-            f->face.verts[j] = &verts[i * 4 + j];
-            verts[i * 4 + j].x = 0;
-            verts[i * 4 + j].y = 0;
-            verts[i * 4 + j].z = 0;
+            /* two address forms: 2D index for the pointer, byte offset i*32 + j*8 for the clears */
+            f->face.verts[j] = &D_8012CEC4.verts[i][j];
+            (*(FakeVertex *)((u8 *)D_8012CEC4.verts + (i * 32 + j * 8))).x = 0;
+            (*(FakeVertex *)((u8 *)D_8012CEC4.verts + (i * 32 + j * 8))).y = 0;
+            (*(FakeVertex *)((u8 *)D_8012CEC4.verts + (i * 32 + j * 8))).z = 0;
         }
         f->face.normalPtr = f->face.normal;
         f->face.normal[0] = 0;
@@ -362,9 +361,6 @@ void func_80086B24(void) {
     }
     CollisionClearFakeFaces();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80086B24);
-#endif
 
 void CollisionClearFakeFaces(void) {
     mCollisionFakeFacePool.count = 0;
