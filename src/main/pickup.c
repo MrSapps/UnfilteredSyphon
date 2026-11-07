@@ -1459,8 +1459,6 @@ void func_8008D548(Gobj *door, s32 type) {
     SysPostMessage(0xA, 4, door->id, door->id, 0, 0, 0, 0);
 }
 
-#ifdef NON_MATCHING
-/* type switch in case 24 has more cases (0x61/0x54) in the original; early part 4 insns off */
 void DOORObjDispatch(SysMsg *msg) {
     VECTOR32 rot;
     Gobj *door = gameObjectsInfo[msg->to].runtime;
@@ -1468,6 +1466,7 @@ void DOORObjDispatch(SysMsg *msg) {
     s32 ref;
     Gobj *linked;
     s32 state;
+    s32 *dst;
 
     switch (msg->id) {
     case 10:
@@ -1556,7 +1555,8 @@ void DOORObjDispatch(SysMsg *msg) {
         case 0xA:
         case 0x6:
             func_8008C058(door, msg->from);
-            for (ref = gameObjectsInfo[door->id].refId; ref != -1; ref = gameObjectsInfo[ref].refId) {
+            ref = door->id;
+            while ((ref = gameObjectsInfo[ref].refId) != -1) {
                 linked = gameObjectsInfo[ref].runtime;
                 if (linked != NULL && linked->npcState == 9) {
                     linked->flags0 |= 0x28;
@@ -1574,12 +1574,16 @@ void DOORObjDispatch(SysMsg *msg) {
             }
             door->flags1 = (door->flags1 & ~7) | 2;
             MovementAddGobj(door);
-            rot.vx = 0x44444;
             rot.vy = 0;
             rot.vz = 0;
+            rot.vx = 0x44444;
             door->move->unkF0.vx += rot.vx;
             door->move->unkF0.vy += rot.vy;
             door->move->unkF0.vz += rot.vz;
+            break;
+        case 0x3B:
+        case 0x54:
+        case 0x61:
             break;
         }
         door->flags0 |= 0x28;
@@ -1598,10 +1602,11 @@ void DOORObjDispatch(SysMsg *msg) {
         break;
     case 41:
         state = (door->flags23 >> 1) & 1;
+        dst = (s32 *)msg->data[0];
         if (door->move != NULL) {
             state |= door->move->unk174 << 16;
         }
-        *(s32 *)msg->data[0] = state;
+        *dst = state;
         if ((door->flags0 & 1) && type != 0x3E) {
             door->flags0 ^= 2;
         }
@@ -1646,9 +1651,6 @@ void DOORObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", DOORObjDispatch);
-#endif
 
 /* Door update: run the open/close path and post the open/close messages. */
 void func_8008E418(Gobj *door, s32 type) {
