@@ -3322,13 +3322,9 @@ typedef struct GameCamPathState {
     u8 reachedEnd;
 } GameCamPathState;
 
-#ifdef NON_MATCHING
-/* regalloc: case-10 ref/base in v1/a0 (a0/a1). In the original ref cannot take v1 (it must
- * conflict with hard reg v1), so ref -> a0 and the gameObjectsInfo base -> a1. Tried (r2C): a
- * fresh block-local ref, xa/behind for ref, no ref var, info = &gameObjectsInfo[id], a local
- * copy of gameObjectsInfo: all 9. */
 /* Script camera object: 18 starts a scripted shot, 10 steps it along its path, 19 ends it,
- * 2 sets the object up. */
+ * 2 sets the object up. ref holds case 18's first refId and is reused by case 10 (one pseudo:
+ * the v1 conflict from case 18 pushes it to a0 in case 10); the inner lookup is its own r2. */
 void CAMERAObjDispatch(SysMsg *msg) {
     GameCamPathState path;
     Gobj *gobj = gameObjectsInfo[msg->to].runtime;
@@ -3349,18 +3345,19 @@ void CAMERAObjDispatch(SysMsg *msg) {
         }
         D_8010FF78 = 1;
         GameSysSetLetterBoxMode(2);
-        if (gameObjectsInfo[gobj->id].refId == -1) {
+        ref = gameObjectsInfo[gobj->id].refId;
+        if (ref == -1) {
             target = gobj;
         } else {
             xa = -1;
-            target = gameObjectsInfo[gameObjectsInfo[gobj->id].refId].runtime;
+            target = gameObjectsInfo[ref].runtime;
             if (GOBJ_TYPE(gobj->id) == 0x5D) {
-                xa = gameObjectsInfo[gameObjectsInfo[gobj->id].refId].pathStart;
+                xa = gameObjectsInfo[ref].pathStart;
                 target = gobj;
             } else {
-                ref = gameObjectsInfo[target->id].refId;
-                if (ref != -1 && GOBJ_TYPE(ref) == 0x5D) {
-                    xa = gameObjectsInfo[ref].pathStart;
+                s32 r2 = gameObjectsInfo[target->id].refId;
+                if (r2 != -1 && GOBJ_TYPE(r2) == 0x5D) {
+                    xa = gameObjectsInfo[r2].pathStart;
                 }
             }
             if (xa != -1) {
@@ -3441,9 +3438,6 @@ void CAMERAObjDispatch(SysMsg *msg) {
         break;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", CAMERAObjDispatch);
-#endif
 
 static inline void iVecSet(VECTOR32 *out, s32 x, s32 y, s32 z) {
     out->vx = x;
