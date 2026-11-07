@@ -1657,7 +1657,13 @@ static inline void GrenadeFixDiv(s32 a, s32 b, s32 *out) {
 }
 
 #ifdef NON_MATCHING
-/* window path keeps a dead return value (no jump threading); bounce block scheduled differently */
+/* 31 lines. (1) The window path keeps a dead `ret = 1` in the j slot: ours threads the jump
+ * past the !ret test only in jump2 (after flow), the original earlier. Hand-inlining the LOS
+ * call with `if (losWindowCount) Damage...; else if (!noHit) {...}` fixes that and the dot/ratio
+ * slots (0x104/0x108), but then GrenadeFuzzyLength's `a` no longer reuses req's inline slot
+ * (0xC8), so req must stay an inline local. Variants of the inline's return (early
+ * `if (!losWindowCount) return noHit;`, u8 return, noHit = 1) don't help.
+ * (2) The two fuzzy lengths' abs/compare blocks are scheduled differently. */
 /* Per-tick grenade update: fly, bounce off what it hits, explode after 60 ticks. */
 void iWeaponGrenadeCB(Gobj *grenade) {
     VECTOR32 pos;
@@ -1744,7 +1750,8 @@ void iWeaponGrenadeCB(Gobj *grenade) {
             scale = ((PlayerMoveInfo *)gobj->move)->friction;
             GrenadeFixDiv(GrenadeFuzzyLength(norm.vx, norm.vy, norm.vz), GrenadeFuzzyLength(vel.vx, vel.vy, vel.vz) + 1, &ratio);
             scale *= ratio;
-            scale = -GRENADE_FIX(scale);
+            scale = GRENADE_FIX(scale);
+            scale = -scale;
             tang.vx = EGSMathFIXMul(tang.vx, scale);
             tang.vy = EGSMathFIXMul(tang.vy, scale);
             tang.vz = EGSMathFIXMul(tang.vz, scale);
