@@ -1560,7 +1560,9 @@ void func_8001D89C(VECTOR32 *pos) {
 /* regalloc: the pitch dead-zone bound 'up' lands in a2 instead of v1. The neg = -fov pseudo
  * (refs 4, live 7, pri 11428) is allocated before up (refs 4, live 16, pri 5000) and takes v1;
  * the original has neg in a0. Tried (r2C): up=0 inside the if, inverted if, neg as lim/fov/
- * down/up/diff.vz/cur.vz, -fov repeated, cur.vx + (diff.vx - down) order: all 11-16. */
+ * down/up/diff.vz/cur.vz, -fov repeated, cur.vx + (diff.vx - down) order: all 11-16.
+ * r4G: `up = neg * 3; up /= 64;` raises up's refs so it is allocated first (neg a0, up v1 as in
+ * the original, 8 lines) but then the *3 lands in up instead of a v0 temp. */
 /* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
  * scaled by the fov. The fov fetch copies a whole vector into one word (as the
  * original does, spilling over the saved registers above it). */
@@ -2030,7 +2032,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * d.vy and the negated src.vy stores sit in the block after abs(d.vy), and src.vz is loaded
  * before that abs, so the source order there differs. The 0x38 rumble case is laid out last:
  * `if (!inRange || r >= 0x39) { v = inRange ? r : 0xFF; } else { v = 0x38; }` fixes the
- * layout (inRange is then computed into v0 and copied to a0, the original sets a0 directly). */
+ * layout (inRange is then computed into v0 and copied to a0, the original sets a0 directly).
+ * r4G: abs is __builtin_abs (one abssi2 insn), so src/d/a is a single sched block. The
+ * shake->frame reloads (in-struct, varying address) depend on every in-struct stack store;
+ * in the original they pass the d.vx/d.vy stores, so those were probably scalar stores
+ * (`s32 *pd = &d.vx; pd[0] = ...`): d/a via pointers gives 25-27, order still differs. */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */

@@ -870,7 +870,10 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
  * local-alloc can't pick a3 over v0/a0 (a0-a2 are still pseudos then), so in the original the
  * result was a global-alloc pseudo (reg_n_deaths != 1 or used in two blocks). Tried: s16 lines
  * (still 2; the loop needs no extension), lines/scale/h/r as the result holder, h += / -=
- * splits, (s16) casts on parts, *y = ...; *y -= ... (all 2 or worse). */
+ * splits, (s16) casts on parts, *y = ...; *y -= ... (all 2 or worse).
+ * r4G: `lines = lines * scale + w->y - w->yAdjust; *y = lines;` (s32) does give a3, but the
+ * loads are no longer narrowed (lh/lb instead of lhu/lbu+sll/sra); with s16 lines the
+ * promoted var forces a sign extension. The result needs a non-promoted global pseudo. */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -1442,7 +1445,10 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * id is a spilled pseudo; its reload (lhu 0x10(sp)) can't pass the sb because sched's
  * true_dependence never exempts QImode stores, so in the original the `id & 0xFF` insn
  * was already ahead of the sb after sched1. Temps for the result / id & 0xFF either get
- * combined back behind the store or turn the load into lbu (2-5). */
+ * combined back behind the store or turn the load into lbu (2-5).
+ * r4G: sched.c adjust_priority gives birthing insns (dest set once) max priority, so the
+ * id & 0xFF andi sinks below the sb. `c = id & 0xFF;` before the store (c is set twice)
+ * gives the original order (3 lines), but the zero_extend form reloads id as lbu. */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

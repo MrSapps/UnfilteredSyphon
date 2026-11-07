@@ -2332,7 +2332,13 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
  * r4A: in the original len lives in a2 and a copy of it (a0) is made right after q/h2, then used
  * for lines[9].xy1 and the len / 8; D_8010FFEC is loaded into a0 and the len * D product lands
  * in a0 too. Moving q = prod / 4 before the lines[0] stores or adding a `prod = len` copy for the
- * tail did not change the allocation. */
+ * tail did not change the allocation.
+ * r4G: most of the 201 lines are the lines base (t1 vs t2). alloc.py: len (refs 21) loses a2
+ * to prod (refs 6, live 24), whose /4 makes a copy (ours: addu a1,a2; addiu a1,3). In the
+ * original the /4 adjusts prod in place in a0 (D's register) and the sra result goes to a new
+ * reg, so the division had no var target (expand_divmod's copy_to_suggested_reg), and the
+ * h2 = q/2 sign comes from the adjusted prod. Also the /4 branch sits before lines[0] and
+ * h2/6 after the len/8 branch. */
 void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
