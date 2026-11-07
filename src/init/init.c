@@ -1007,8 +1007,6 @@ void ObjectMakeMaximumBox(InitRuntime *rt, s32 w, s32 h, s32 d) {
 
 #define INIT_MAX(a, b) ((a) < (b) ? (b) : (a))
 
-#ifdef NON_MATCHING
-/* scheduling/regalloc: axis stores interleaved with the abs values in the original; rt copied to t3 */
 /* Makes the collision box at least h tall along whichever local axis points up. */
 void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
     MATRIX m;
@@ -1020,6 +1018,7 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
     s32 az;
     s32 up;
     s32 grow;
+    s32 len;
 
     anim = rt->anim;
     if (anim != NULL) {
@@ -1042,21 +1041,13 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
         axes[2].vx = m.m[0][2];
         axes[2].vy = m.m[1][2];
         axes[2].vz = m.m[2][2];
-        ax = axes[0].vy;
-        if (ax < 0) {
-            ax = -ax;
-        }
-        ay = axes[1].vy;
-        if (ay < 0) {
-            ay = -ay;
-        }
-        az = axes[2].vy;
-        if (az < 0) {
-            az = -az;
-        }
+        ax = axes[0].vy >= 0 ? axes[0].vy : -axes[0].vy;
+        ay = axes[1].vy >= 0 ? axes[1].vy : -axes[1].vy;
+        az = axes[2].vy >= 0 ? axes[2].vy : -axes[2].vy;
         up = INIT_MAX(ax, INIT_MAX(ay, az));
         if (up == ax) {
-            grow = h - (box[4] - box[0]);
+            len = box[4] - box[0];
+            grow = h - len;
             if (grow < 0) {
                 grow = 0;
             }
@@ -1066,7 +1057,8 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
                 box[0] -= grow;
             }
         } else if (up == ay) {
-            grow = h - (box[5] - box[1]);
+            len = box[5] - box[1];
+            grow = h - len;
             if (grow < 0) {
                 grow = 0;
             }
@@ -1076,7 +1068,8 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
                 box[5] += grow;
             }
         } else if (up == az) {
-            grow = h - (box[6] - box[2]);
+            len = box[6] - box[2];
+            grow = h - len;
             if (grow < 0) {
                 grow = 0;
             }
@@ -1088,9 +1081,6 @@ void ObjectRaiseTopOfBoxIfTooShort(InitRuntime *rt, s32 h) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", ObjectRaiseTopOfBoxIfTooShort);
-#endif
 
 /* Links a use object to the camera of its teleport target, if any. */
 void UseObjectTeleportCameraSetup(InitRuntime *rt) {
