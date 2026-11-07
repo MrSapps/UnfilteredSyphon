@@ -634,7 +634,12 @@ void EGSDisplayAddPoly(void *display, void *prim);
 
 #ifdef NON_MATCHING
 /* Register allocation only: the original gives i/prim (sharing one reg) $s0 and p $s1; ours
- * ranks p first (refs 78, live 240, pri 19500) over i (16/42, 15238) and prim (12/25, 14400). */
+ * ranks p first (refs 78, live 240, pri 19500) over i (16/42, 15238) and prim (12/25, 14400).
+ * r4I: from the flow dump i is p77 (refs 12, live 25) and prim p76 (16/42). Both need > p: i 16
+ * refs, prim 21 (or p below 64 refs). do-while(0) around `i = p->next` adds loop-depth weight
+ * (+1 per level) but also to p; around `p = &D_80119040[i]` at the loop top it adds nothing.
+ * Per-branch `i = p->next; continue;` copies (5 sites, cross-jumped later) give p 86, prim 20/39
+ * (20512), i 20/44: still under p (20890). Best seen: 48 lines (nested do-while on both). */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -2219,7 +2224,11 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * r4E: in that variant the D_8011008C pseudo (79, block-local, REG_EQUIV mem) dies in the vz
  * `*D` load (insn 78) but local-alloc does not tie the load's dest (102) to it; the remaining
  * diff there is that tie plus the `vel.vx >> 2` sra placement. Seven other orders of the
- * vel/pos.vx/flag statements are all 29+ lines. */
+ * vel/pos.vx/flag statements are all 29+ lines.
+ * r4I: the vz frame reload ties to a2 in the original because v0 is busy with D_80110088 (pos.vy)
+ * in its sched1 order; moving `pos.vy = D_80110088` (or a local copy of it) earlier in the source
+ * does not change ours (5). Empty do-while(0) sched barriers between the statements are 34-43
+ * lines: the LOOP_END note also ends the cse1 block, so *D_8011008C/pos.vx stop being CSE'd. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
@@ -4254,6 +4263,12 @@ typedef struct MoveVelView {
 
 #ifdef NON_MATCHING
 /* half/quarter shifts scheduled one slot off (sra s2 before the and; sra s1 in bgez delay slot) */
+/* r4I: a do-while(0) is a sched barrier (sched_analyze_insn flushes at loop notes), but it also
+ * weights refs inside it (local-alloc priorities) and ends a cse1 block. `r1 = rand() & life;
+ * do { vy = p->vel.vx; } while (0); half = ..` gets the first block's insn order exactly but
+ * swaps s1/s2 and the and's v0 (20 lines); `- (half = life >> 1)` in the vx expression plus
+ * `do { quarter = life >> 2; } while (0)` fixes quarter and the regs but hoists the vel.vx load
+ * above the life sra (12). Operand-order variants of the vx expression: 4-7. */
 /* r4E: sched1 boosts both `half` (insn after the rand call) and `rand() & life` (birthing_insn_p:
  * single-set pseudos), so the tie goes to INSN_LUID and the and (later in source) is scheduled last
  * backward = after half forward; sched2 then keeps that order. The original needs half's insn after
