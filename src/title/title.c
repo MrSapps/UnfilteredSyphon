@@ -325,16 +325,20 @@ static void (*const D_801415E0[6])(void) = {
 /* per mode: every frame */
 static void (*const D_801415F8[6])(void) = {func_80143764, NULL, NULL, NULL, NULL, NULL};
 
-/* Bit test tolerant of an unaligned base. */
-static inline u32 BitTest(void *base, s32 bit) {
-    u32 *words = base;
+/* Bit test tolerant of an unaligned base. words is a modified param, so each call copies
+ * &pressed into its own pseudo (cse then shares it across the skipped calls). */
+static inline u32 BitTest(u32 *words, s32 bit) {
     s32 misalign = (u32)words & 3;
 
     if (misalign) {
         bit = misalign * 8 + bit;
         words = (u32 *)((u32)words & ~3);
     }
-    return words[bit >> 5] & (1 << (bit & 0x1F));
+    {
+        s32 idx = bit >> 5;
+        u32 mask = 1 << (bit & 0x1F);
+        return words[idx] & mask;
+    }
 }
 
 #define TITLE_ASSERT(cond, line) \
@@ -1199,8 +1203,6 @@ static void func_80143920(void) {
     }
 }
 
-#ifdef NON_MATCHING
-/* cse does not carry &pressed/misalign across the first conditional call */
 /* Reads the pad and runs the current mode's handlers. */
 static void func_80143BA8(void) {
     u8 *pad;
@@ -1246,9 +1248,6 @@ static void func_80143BA8(void) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", func_80143BA8);
-#endif
 
 /* Fills in the slot menu from the save header. */
 static void func_80143EF8(void) {
