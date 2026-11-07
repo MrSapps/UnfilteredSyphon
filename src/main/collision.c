@@ -2079,6 +2079,10 @@ s32 CollisionGobjUpdate(Gobj *obj) {
 
 #ifdef NON_MATCHING
 /* regalloc: v/axis swap s5/s6; ratio load hoisted above the push stores */
+/* r4B: v (refs 23, live 224, pri 4107) outranks axis (refs 25, live 252, pri 3968) in global.c;
+ * the original needs axis first (one fewer in-loop v ref or v live > 232 would do it). The ratio
+ * reload differs only before hits[0]->push.vx (later pushes match); dropping (void)&ratio (ratio
+ * then spills anyway) changes nothing. */
 /* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
 s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, CollHit **hits, s32 *count) {
     VECTOR32 a;

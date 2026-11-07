@@ -2212,7 +2212,10 @@ void EGSDisplaySetFlashTime(s32 ticks);
 
 #ifdef NON_MATCHING
 /* sched only: the original issues pos.vx += vel.vx >> 2 and the particleFireWaveFlag store before the m[1][2] load (6 insns).
- * Statement reorders of the vel loads/flag store make it much worse (30+); iCamDir/iCamPos inline helpers change nothing. */
+ * Statement reorders of the vel loads/flag store make it much worse (30+); iCamDir/iCamPos inline helpers change nothing.
+ * r4B: the sb must precede the `lw *D_8011008C` reload for m[2][2] (two non-struct accesses: sched keeps
+ * their order), so the flag store comes before `vel.vz = ...` in the source; doing only that gets the sb
+ * right but the vz pointer reload then lands in $v0 instead of reusing $a2 (5 lines). */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
@@ -4399,7 +4402,11 @@ s32 getShift(s32 n) {
  * ranks them: ours 12 (1607) > prev (1136) > next (634) > 0x20000000 (496, no reg -> remade per
  * use); the original gives prev s6 > 12 s7 > 0x20000000 fp and leaves next on the stack (0x40).
  * Tried: a code variable (set before / inside the loop), the flag colour stored in both arms,
- * a second ParticleFree call instead of goto free (raises prev and next alike). */
+ * a second ParticleFree call instead of goto free (raises prev and next alike).
+ * r4B: `-(y << 16) + (u16)x` (as in the matched line drawers) fixes the sll/andi order (26 -> 23).
+ * The original's next is a spilled pseudo (loaded into $t0, stored to 0x40), not an addressable
+ * local: a volatile/address-taken next gives the right frame (0x70) and fp = 0x20000000 but
+ * still swaps prev/12 (s7/s6). Moving prev = i, goto/else-free layouts: no change. */
 /* Spinning flat triangles (debris), scaled by the projected size of the group's first particle */
 void ParticleDisplayPolyFlat(ParticleGroup *g) {
     VECTOR32 top;
@@ -4466,13 +4473,13 @@ void ParticleDisplayPolyFlat(ParticleGroup *g) {
             }
             x = center.vx + (rcos(angle) >> (12 - D_80110054));
             y = center.vy + (rsin(angle) >> (12 - D_80110054));
-            poly->xy0 = (u16)x - (y << 16);
+            poly->xy0 = -(y << 16) + (u16)x;
             x = center.vx + (rcos(angle + p->size) >> (12 - D_80110054));
             y = center.vy + (rsin(angle + p->size) >> (12 - D_80110054));
-            poly->xy1 = (u16)x - (y << 16);
+            poly->xy1 = -(y << 16) + (u16)x;
             x = center.vx + (rcos(angle + p->unk5C) >> (12 - D_80110054));
             y = center.vy + (rsin(angle + p->unk5C) >> (12 - D_80110054));
-            poly->xy2 = (u16)x - (y << 16);
+            poly->xy2 = -(y << 16) + (u16)x;
             prev = i;
             if (g->flags & 0x200) {
                 poly->rgbc0.c.code |= 2;

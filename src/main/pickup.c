@@ -958,7 +958,10 @@ void func_8008C534(Gobj *obj, s32 type) {
 #ifdef NON_MATCHING
 /* regalloc: the original loads the pickup byte into v0 and copies it to a2 (and info = off + base in v1).
  * Offset-first info fixes the addu order but moves info to v0; a separate byte local (s32/u8, copy
- * before or after the test, or an inline iPickupWeapon) always gets coalesced with data (a2). */
+ * before or after the test, or an inline iPickupWeapon) always gets coalesced with data (a2).
+ * r4B: cse's make_regs_eqv makes `data` the canonical reg (it lives past the block and longer
+ * than the byte temp), so `b = byte; data = b; if (b == 0)` becomes `data = byte; if (data)`;
+ * with the copy in an else arm global-alloc gives b and data the same reg (copy preference). */
 s32 UseLevelSpecificObject(void) {
     s32 data;
     s32 i;
