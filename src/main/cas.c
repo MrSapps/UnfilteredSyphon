@@ -858,8 +858,6 @@ static void func_8002AC1C(GameObjectRuntime *rt, CASQueue *queue) {
     }
 }
 
-#ifdef NON_MATCHING
-/* register allocation: loop index i gets fp and the post flag is spilled (original spills i, post in fp) */
 /* Run the frame's de-duplicated requests against a gobj until none is accepted. */
 static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
     s32 i;
@@ -888,8 +886,8 @@ static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
             if (action != 0) {
                 sub = 0;
                 set = &rt->cas->animSets[action];
-                D_80115670[action] = 0;
                 req = &rt->cas->active;
+                D_80115670[action] = 0;
                 if (set->sequences != NULL) {
                     sub = func_80029C04(rt, set, req);
                 }
@@ -906,8 +904,16 @@ static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
                 if (func_80029838(rt, set, req)) {
                     func_8002A4A0(rt, set, req, sub);
                     func_80029920(rt, set, req, sub);
-                    if (table == NULL || t->current == -1 || t->state[t->current] != 1) {
-                        call = post = 1;
+                    /* three copies (merged by cross-jumping) give post enough refs to win fp over i */
+                    if (table == NULL) {
+                        call = 1;
+                        post = 1;
+                    } else if (t->current == -1) {
+                        call = 1;
+                        post = 1;
+                    } else if (t->state[t->current] != 1) {
+                        call = 1;
+                        post = 1;
                     }
                     if (call && set->onDone != NULL) {
                         set->onDone(rt->id, action);
@@ -936,9 +942,6 @@ static void func_8002AD98(GameObjectRuntime *rt, CASQueue *list) {
     } while (again);
     list->count = 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cas", func_8002AD98);
-#endif
 
 /* Copy a gobj's requests into the frame list, dropping actions already queued this frame. */
 static void func_8002B138(CASQueue *queue) {
