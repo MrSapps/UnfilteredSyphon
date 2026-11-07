@@ -1793,6 +1793,12 @@ s32 NPCDebugGetNoDamageFlag(void) {
  * `if (unk28 < 800) { if (...) mode = 6; else mode = 7; } else mode = 7;` is needed for
  * the delay-slot mode = 7 -- still 8 because volatile changes scheduling.  The nested
  * `if (flags & 0x40000) { mode = 6; if (...) goto done; }` form changes nothing. */
+/* r4F: why the else-branch flags load is CSE'd: cse1's path is start -> jump around the
+ * `mode = 6; targetId` block (skip_blocks AROUND: no label inside it) -> test2 -> TAKEN into
+ * the awareness block (one use, BARRIER before it), so mem(npc+0x20) stays known.  A local
+ * `flags = npc->flags` for the first two tests does not help (same path).  The original must
+ * break that path (a label inside the skipped block, a second use of the awareness label, or
+ * memory invalidated in the skipped block). */
 u8 NPCGetMoveMode(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     u8 mode;
@@ -2007,8 +2013,14 @@ void NPCShoot(Gobj *obj) {
 #ifdef NON_MATCHING
 /* regalloc: target copies points to a2 and keeps v in a0; the vz store goes through v (a0) instead of a %lo symbol */
 /* r2B: `v = &D; v->vz = ..` still folds (cse1 knows v == &D, so (plus v 8) becomes D+8); all-through-v is worse (31). */
+/* r4F (22 -> 19): the fold is cse2's (v = reg101 carries REG_EQUAL &D); a pre-loop `p = &D` written
+ * through p->vx/vy and `v = p; v->vz` keeps the vz store on v.  Left: v must get a0 and points a2.
+ * global.c: v (pri 4909) is allocated before points (4852) but pass 0 skips a0 because points
+ * copy-prefers it (regs_someone_prefers), so v takes a2.  The original's v either prefers a0 too
+ * or points lost its a0 preference (a0 conflict); renaming points via a copy changes nothing. */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
+    VECTOR32 *p = &D_8011D1F0;
     NPC *npc = NPC_OF(obj);
     s32 i;
     s32 link;
@@ -2016,10 +2028,10 @@ VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     for (i = 0; i < 3; i++) {
         link = ((s8 *)points[npc->curPoint].links)[i];
         if (link >= 0 && ((points[link].flags & 0xF00) >> 8) == 1) {
-            D_8011D1F0.vx = points[link].x;
-            D_8011D1F0.vy = points[link].y;
-            v = &D_8011D1F0;
-            D_8011D1F0.vz = points[link].z;
+            p->vx = points[link].x;
+            p->vy = points[link].y;
+            v = p;
+            v->vz = points[link].z;
             break;
         }
     }

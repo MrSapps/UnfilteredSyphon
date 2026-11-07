@@ -1200,6 +1200,12 @@ INCLUDE_ASM("asm/main/nonmatchings/friendly", func_80088EE4);
 /*
  * Logic matches; the original never CSEs the D_80106AEC field addresses (each store is
  * lui/sw, and c is rematerialised after the call), and its pos block copy moves 3+1 words.
+ * r4F: explow.c memory_address forces every constant field address into a pseudo; cse1's
+ * use_related_value then rewrites D+0x234 etc. as (D+0x1F4 reg) + k off the first block copy's
+ * dest, so that reg lives on (s0) and the copy gets a 4th scratch.  The original's 3+1 / 2+2
+ * copies mean both address regs die at each copy (output_block_move drops a temp that coincides
+ * with a dying address reg), so no relation was made: the copies/stores were probably in
+ * separate cse blocks (labels) or not constant-related in the original source.
  */
 static void func_80089544(Gobj *gobj) {
     FaceCollect *c;

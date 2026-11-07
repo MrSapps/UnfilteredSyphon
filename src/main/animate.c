@@ -935,6 +935,10 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
  * "(sex == 0x1000)" test of the first class switch, so this is one insn short.
  * The fold happens in cse (the test is still present after jump1); splitting the third test
  * into its own if, a user label before it, or a switch on the sex bits do not stop it.
+ * r4F: cse records both the `== 0x1000` fall-through (as a known-false comparison) and the
+ * `!= 0x2000` fall-through (x == 0x2000) and folds the third test from either; (u16)/(s16)/u32
+ * casts, a do-while(0) around the first two tests, a `sex` local with `else sex = sex;` and a
+ * volatile local do not keep it.
  */
 u8 func_8007D120(AnimSlot *slot) {
     AnimCharState *state;
@@ -1374,6 +1378,11 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
  * Same length and stack layout; differs in global register allocation
  * (aiming/gobj/aimType land in s3/s1/s2 instead of s1/s2/s3) and a few
  * temporaries.
+ * r4F: the s-reg order comes from the else-branch `bone` (refs 14, life ~104, pri 4077) beating
+ * slot (pri 3049): bone takes s0, slot shares it.  The original has slot s0, bone s1, gobj s2,
+ * aimType s3, aiming s1 -- i.e. slot allocated before bone and the two conflict.  `bone = NULL`
+ * before `ang = slot->aimAngle` gives the conflict (gobj/aimType then land in s2/s3, 71 lines)
+ * but bone still outranks slot; one function-scope bone for both branches is worse.
  */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
