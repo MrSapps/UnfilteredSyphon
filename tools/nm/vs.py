@@ -9,7 +9,7 @@ def orig(sfile):
     ins = []
     for l in open(sfile):
         m = re.match(r"\s*/\* \w+ \w+ ([0-9A-F]{8}) \*/\s+(.*)", l)
-        if m:
+        if m and not m.group(2).startswith(".word"):  # skip jump-table data
             ins.append((m.group(1), '%' in m.group(2) or re.search(r'\b(j|jal)\b', m.group(2)) is not None))
     return ins
 
