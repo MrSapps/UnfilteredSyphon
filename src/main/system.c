@@ -215,24 +215,12 @@ void CopyMsgToSysQueue(SysMsg *msg) {
     mSysMsgQueue.count++;
 }
 
-#ifdef NON_MATCHING
-/*
- * Structure and the scratchpad-stack sequence match (SPAD_ENTER/LEAVE around plain calls
- * reproduce the original exactly); remaining differences are register allocation in the
- * dispatch loop (original: s0 = queue then msg, s3 = table, s4 = msgs) and which delay
- * slot the loop counter's zeroing lands in.
- * r3A: the main blocker is data: mSysMsgQueue/Next are one static object here, so cc1
- * addresses mSysMsgQueue as &mSysMsgQueueNext - 0xAF4 (the original uses a separate
- * lui/addiu per symbol) and the queue/table registers follow from that.
- * r4C (39 -> 35): the queue symbols are now reached through asm-named externs
- * (sSysMsgQueueSym etc. -> the config/main.syms.ld names), which gives the separate
- * lui/addiu and the s1 text-sprite base.  Left: the dispatch loop.  The original keeps
- * queue (s0) only for the call and n, then s4 = queue + 4 and the count test is
- * `lw -4(s4)` (msgs[-1]): CSE's use_related_value turns mem(SYM) into mem(reg - 4) when a
- * reg holds SYM + 4, so the count test probably named the symbol directly
- * (sSysMsgQueueNextSym.count) -- but cse stops at the loop-top label, so the reg holding
- * SYM+4 must be visible inside the body (strength-reduced msg giv?).  Also `i = 0` is
- * scheduled into the first SPAD block's jal slot in the original (set much earlier). */
+/* Dispatch loop tells: the count test reads `queue->count` with queue re-set to the symbol
+ * after msg = &SYM.msgs[i], so cse's use_related_value turns SYM into (SYM+4 reg) - 4
+ * (`lw -4(s4)`); `table = gDispatchFunctions` inside the loop is hoisted by loop.c after the
+ * duplicated exit test; the global/level arms call the handler directly (cross-jumping
+ * merges their jalr with the dispatch arm's, skipping its NULL test); "XX" goes through a
+ * local so it stays in s1; the final SPAD restore carries the load-delay nop itself. */
 void SysExecute(void) {
     char *noDmgText[2];
     s16 loadA;
@@ -246,6 +234,8 @@ void SysExecute(void) {
     SysMsgQueue *queue;
     int i;
     int n;
+    char *xx;
+    s32 to;
     s32 noDamage;
 
     gExeTick++;
@@ -269,26 +259,28 @@ void SysExecute(void) {
     queue = &sSysMsgQueueNextSym;
     func_800153BC(&sSysMsgQueueSym, queue);
     n = queue->count;
-    table = gDispatchFunctions;
     for (i = 0; i < n; i++) {
+        table = gDispatchFunctions;
         msg = &sSysMsgQueueNextSym.msgs[i];
-        if (sSysMsgQueueNextSym.count == 0) {
+        queue = &sSysMsgQueueNextSym;
+        to = msg->to;
+        if (queue->count == 0) {
             break;
         }
-        if (msg->to == SYS_MSG_GLOBAL) {
-            fn = gSysMsgTable[msg->id].handle;
-        } else if (msg->to == SYS_MSG_LEVEL || msg->to == SYS_MSG_LEVEL_RAW) {
-            fn = gSysInfo.levelMsgTable[msg->id].handle;
+        if (to == SYS_MSG_GLOBAL) {
+            gSysMsgTable[msg->id].handle(msg);
+        } else if (to == SYS_MSG_LEVEL || to == SYS_MSG_LEVEL_RAW) {
+            gSysInfo.levelMsgTable[msg->id].handle(msg);
         } else {
-            if (msg->to != SYS_MSG_OBJ_666) {
-                dispatch = &table[gameObjectsModelInfo[gameObjectsInfo[msg->to].modelIndex].type];
+            if (to != SYS_MSG_OBJ_666) {
+                dispatch = &table[gameObjectsModelInfo[gameObjectsInfo[to].modelIndex].type];
             } else {
                 dispatch = &table[SYS_MSG_OBJ_666];
             }
             fn = *dispatch;
-        }
-        if (fn != NULL) {
-            fn(msg);
+            if (fn != NULL) {
+                fn(msg);
+            }
         }
     }
 
@@ -302,11 +294,12 @@ void SysExecute(void) {
                 D_8010F622 = TextAddWindow(70, -85, 92, 75);
                 TextSetWindowJustification(D_8010F622, 1);
                 TextSpriteInitialize(sSysTextSpritesSym, 20);
-                D_8010FF6C = TextAddString(D_8010F622, D_8010F630, -1, sSysTextSpritesSym);
+                xx = D_8010F630;
+                D_8010FF6C = TextAddString(D_8010F622, xx, -1, sSysTextSpritesSym);
                 TextAddStringMulti(D_8010F622, 2, noDmgText, -1, sSysTextSpritesSym + 0x2C0, &D_8010FF68);
                 TextSetStringIntensity(D_8010FF6C, 0xA0, 0x60, 0xA0);
                 TextSetStringIntensity(D_8010FF6A, 0x30, 0x60, 0xA0);
-                D_8010FF70[0] = TextAddString(D_8010F622, D_8010F630, -1, sSysTextSpritesSym + 0x39C);
+                D_8010FF70[0] = TextAddString(D_8010F622, xx, -1, sSysTextSpritesSym + 0x39C);
                 D_8010FF68 = TextReplaceString(D_8010FF68, D_8010F608);
                 TextSetStringIntensity(D_8010FF70[0], 0xA0, 0x50, 0x30);
             }
@@ -329,11 +322,8 @@ void SysExecute(void) {
     SPAD_LEAVE();
     SPAD_ENTER();
     CameraUpdateBeforeDisplay();
-    SPAD_LEAVE();
+    __asm__ volatile("lui $29, 0x1F80\n\tlw $29, 0($29)\n\tnop");
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/system", SysExecute);
-#endif
 
 void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2, s32 d3) {
     SysMsg *msg;
