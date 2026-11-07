@@ -1,6 +1,7 @@
 #include "common.h"
 #include "level.h"
 #include "system.h"
+#include "weapon.h"
 
 typedef struct Vec4 {
     s32 vx, vy, vz, pad;
@@ -268,8 +269,6 @@ void MovementGobjInit(ChopperGobj *gobj, s32 arg1, Vec4 *pos, Vec4 *dir, s32 arg
 void MovementAddGobj(ChopperGobj *gobj);
 void EGSAnimSetBox(ChopperAnim *anim, s32 arg1, Vec4 *box);
 
-extern u8 D_80106215;
-extern s32 D_80106218;
 extern NPCInfo D_80145578; /* the chopper's NPC block */
 extern s16 D_801455A8;
 extern s16 D_801455AE;
@@ -456,13 +455,10 @@ static u8 func_80141908(s32 id) {
 }
 
 
-#ifdef NON_MATCHING
-/*
- * Same instructions modulo scheduling (22 lines left, r3C): params read before the Vec4
- * stores, and the NPC tick/rate fields written as struct members (ChopNPCTick) so they
- * stay put. Still open: the five param stores (plain statics) sink below the tick/rate
- * code in the original but not here.
- */
+/* The NPC tick/rate fields are written as struct members (ChopNPCTick) so they stay put;
+ * the rate reads gWeaponInfo[22] as struct fields, which (unlike plain scalar externs)
+ * conflict with the npc pointer store and so are not hoisted above it. The params are
+ * copied in field order (the stores sink, so only local-alloc's tie order showed it). */
 typedef struct {
     u8 pad[0x30];
     s16 tick;
@@ -493,10 +489,10 @@ static void func_8014196C(s32 id) {
     MovementGobjInit(D_8014561C, 0, &chopperPos, &D_80145680, 0);
     MovementAddGobj(D_8014561C);
     D_80145550 = D_8014561C->anim->params->p0;
-    D_80145560 = D_8014561C->anim->params->p2;
     D_8014555C = D_8014561C->anim->params->p1;
-    D_80145558 = D_8014561C->anim->params->p4;
+    D_80145560 = D_8014561C->anim->params->p2;
     D_80145554 = D_8014561C->anim->params->p3;
+    D_80145558 = D_8014561C->anim->params->p4;
     D_80145710.vy = 0x1E9;
     D_801456E0.vx = 0;
     D_801456E0.vy = 0;
@@ -505,7 +501,7 @@ static void func_8014196C(s32 id) {
     D_80145710.vz = 0;
     D_8014561C->npc = &D_80145578;
     ((ChopNPCTick *)&D_80145578)->tick = gSystemTick;
-    ((ChopNPCTick *)&D_80145578)->rate = D_80106215 * ((D_80106218 & 7) + 1);
+    ((ChopNPCTick *)&D_80145578)->rate = gWeaponInfo[22].clipSize * ((gWeaponInfo[22].flags & 7) + 1);
     box[0].vx = -0xE0;
     box[0].vy = -0x1A0;
     box[0].vz = -0x6E0;
@@ -514,9 +510,6 @@ static void func_8014196C(s32 id) {
     box[1].vz = 0x300;
     EGSAnimSetBox(D_8014561C->anim, 0, box);
 }
-#else
-INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_8014196C);
-#endif
 
 #ifdef NON_MATCHING
 /* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758.
