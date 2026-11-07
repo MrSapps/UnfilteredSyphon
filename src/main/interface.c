@@ -1877,12 +1877,10 @@ void func_8003D76C(void) {
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003D76C);
 #endif
 
-#ifdef NON_MATCHING
-/* delay-slot/regalloc: the hide constant lands in the first branch's delay slot in the original.
- * Leads (r2C): the original computes (idx+1)*24 from idx+1 (not idx*24+24), so idx+1 is its own
- * statement (j = idx + 1 per branch gets the shape but shifts every register); the hide branch
- * uses a base pointer for three stores and the lui/%lo form for the last ([idx].xy0); the grow
- * path is `t = w + 8; if (t > 52) {w = 53; done = 1;} else {w = t; done = 0;}` (31 -> 27). */
+/* Grows or shrinks weapon-select bar idx by 8 (hides it when shrunk to nothing); returns 1 when
+ * done. Block-local j = idx + 1 keeps (idx+1)*24 from folding into idx*24+24; the hide path
+ * uses a base pointer and D_801179B0 for the last store; (u16)(v + (w - 3)) with v = pt->vx in
+ * a local keeps the w - 3 add (an & 0xFFFF lets fold reassociate the constant). */
 s32 func_8003DF74(s32 idx, u8 grow) {
     const IfacePoint *pt = &D_80011BE4[idx];
     s32 w;
@@ -1894,16 +1892,18 @@ s32 func_8003DF74(s32 idx, u8 grow) {
         w = (s16)D_801179A0[idx].xy1 - (s16)D_801179A0[idx].xy0;
         if (grow) {
             if (D_801179A0[idx].xy0 == D_801179A0[idx].xy1) {
-                x = (pt->vx - 3) & 0xFFFF;
-                D_801179A0[idx + 1].xy0 = x | (pt->vy << 16);
-                D_801179A0[idx + 1].xy1 = x | ((pt->vy + 4) << 16);
-                D_801179A0[idx].xy0 = x | ((pt->vy + 5) << 16);
+                s32 j = idx + 1;
+                s32 m = (pt->vx - 3) & 0xFFFF;
+                D_801179A0[j].xy0 = m | (pt->vy << 16);
+                D_801179A0[j].xy1 = m | ((pt->vy + 4) << 16);
+                D_801179A0[idx].xy0 = m | ((pt->vy + 5) << 16);
             }
-            w += 8;
-            if (w > 52) {
+            x = w + 8;
+            if (x > 52) {
                 w = 53;
                 done = 1;
             } else {
+                w = x;
                 done = 0;
             }
         } else {
@@ -1913,19 +1913,21 @@ s32 func_8003DF74(s32 idx, u8 grow) {
             }
             done = 0;
         }
-        D_801179A0[idx].xy1 = ((pt->vx + (w - 3)) & 0xFFFF) | ((pt->vy + 5) << 16);
+        {
+            s32 v = pt->vx;
+            D_801179A0[idx].xy1 = (u16)(v + (w - 3)) | ((pt->vy + 5) << 16);
+        }
         return done;
     } else {
-        D_801179A0[idx + 1].xy1 = 0x04000400;
-        D_801179A0[idx + 1].xy0 = 0x04000400;
-        D_801179A0[idx].xy1 = 0x04000400;
-        D_801179A0[idx].xy0 = 0x04000400;
+        IfaceLine *p = D_801179A0;
+        s32 j = idx + 1;
+        p[j].xy1 = 0x04000400;
+        p[j].xy0 = 0x04000400;
+        p[idx].xy1 = 0x04000400;
+        D_801179B0[idx].unk00 = 0x04000400;
         return 1;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003DF74);
-#endif
 
 extern const u8 D_80011C10[];
 extern const s32 D_80011BD4, D_80011BD8, D_80011BDC; /* meter colours */
