@@ -911,21 +911,23 @@ void func_8008C2FC(Gobj *obj) {
     }
 }
 
-#ifdef NON_MATCHING
-/* block layout: the original enters the loop at its test and places the LevelDoEOL exit first */
 /* Elevator: walk the linked objects for the next floor's object (type 0xE ends the level). */
 s32 func_8008C3A4(Gobj *obj) {
     s16 floors = 1;
-    s32 ref = (u16)obj->id;
+    u16 ref = obj->id;
     Gobj *rt;
     s16 type;
 
+    /* The LevelDoEOL exit sits before the loop: with the call out of the loop body,
+     * loop.c can hoist the gameObjectsInfo/gameObjectsModelInfo loads. */
+    goto start;
+eol:
+    LevelDoEOL(0);
+    return 1;
+start:
     while ((s16)(ref = gameObjectsInfo[(s16)ref].refId) != -1) {
         type = GOBJ_TYPE((s16)ref);
-        if (type == 0xE) {
-            LevelDoEOL(0);
-            return 1;
-        }
+        if (type == 0xE) goto eol;
         if (type != 0x22) {
             if (++floors >= 3) {
                 return 0;
@@ -938,9 +940,6 @@ s32 func_8008C3A4(Gobj *obj) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", func_8008C3A4);
-#endif
 
 /* Door opens: the position computed here is never used. */
 void func_8008C534(Gobj *obj, s32 type) {
