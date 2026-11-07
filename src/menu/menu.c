@@ -2878,7 +2878,12 @@ INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E5B0);
  * computed into locals before the call; for-increment order top, bottom, i, item; a
  * reused temp `p` for the layout pointers keeps the stores in order. Still open: the
  * original copies chars from v1 into s5 (addiu v1; move s5,v1) and stores mMap right
- * after mem += 0x40F8 (ours sinks it). */
+ * after mem += 0x40F8 (ours sinks it).
+ * r4D: the s5 copy survives only if some insn uses p between `p = mem + 0x3390` and
+ * `chars = p` (flow makes the LOG_LINK from the first following use, so combine never sees
+ * the copy): `D_8013FE68 = (TextChar *)p; chars = D_8013FE68;` reproduces the copy, but then
+ * the D_8013FE68 store is early (original: late, from s5). The mMap store is moved by sched1
+ * below `mem += 0xF000` (insn order 34,40,43,45,37). */
 void func_8013E98C(void) {
     char path[32];
     u8 *mem;

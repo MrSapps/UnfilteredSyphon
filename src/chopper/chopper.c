@@ -1138,6 +1138,10 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_801421D8);
 /*
  * Same logic; gcc keeps &D_801456B0 / &D_80145690 in callee-saved registers
  * where the original rematerialises them, which shifts register allocation.
+ * r4D: it is cse: the block copy's address pseudo (aim = D_801456B0, look = D_80145690)
+ * replaces the symbol in one later `D_801456B0.vx = ...` store reached on the same cse path,
+ * so the pseudo lives across calls. Moving `aim = D_801456B0;` after `track = 1;` gives 22
+ * (fixes the D_80145565 load order) but the cse reuse remains.
  */
 /* Swing the gun and searchlight toward their targets. */
 static void func_80143B88(u8 visible) {

@@ -123,7 +123,10 @@ void WindowLOSLoop(LOSContext *ctx);
 #define HALF(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
 
 #ifdef NON_MATCHING
-/* original has a dead 'addiu s0,sp,0x10' after VectorModulus and sets GTELOSLoop args after the hitInfo stores */
+/* 15 lines left (r4D; ctx.ignore/ctx.target right after ctx.mid as in _LOSPoint2PointCollide).
+ * Open: the original has a dead 'addiu s0,sp,0x10' in the HALF(length) branch (bltz + j layout;
+ * `length < 0 ? .. : ..` and an if/else don't change it) and sets the GTELOSLoop args after the
+ * hitInfo stores (see _LOSPoint2PointCollide). */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
@@ -158,13 +161,13 @@ u8 _LOSPoint2Point(LOSRequest *req) {
     ctx.delta = delta;
     ctx.mid = mid;
     ctx.ignore = req->fromObj;
+    ctx.target = req->toObj;
     ctx.radius = halfLength + 0xF00;
     ctx.length = length;
     ctx.halfLength = halfLength;
     ctx.unkA8 = 1;
     ctx.nearest = 0x7FFFFFFF;
     ctx.hit = 0;
-    ctx.target = req->toObj;
     ctx.hitPos = *req->to;
     if (req->toObj != NULL) {
         ctx.hitInfo.obj = req->toObj;
@@ -335,7 +338,10 @@ u8 _LOSGobjAlongAngleDirectionYXZ(LOSRequest *req) {
 }
 
 #ifdef NON_MATCHING
-/* ctx init stores and GTELOSLoop arg setup scheduled differently */
+/* 4 lines left (r4D): ctx.ignore/ctx.target right after ctx.mid fixed the req loads (they
+ * must precede the ctx.unkA8/ctx.hit sb's: QImode stores conflict with every load). Still open:
+ * sched1 hoists the a0/a1 GTELOSLoop arg sets above the hitInfo stores (sched2 then keeps that
+ * LUID order), the original has them after the stores with a2 in the jal slot. */
 u8 _LOSPoint2PointCollide(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
@@ -365,13 +371,13 @@ u8 _LOSPoint2PointCollide(LOSRequest *req) {
     ctx.delta = delta;
     ctx.mid = mid;
     ctx.ignore = req->fromObj;
+    ctx.target = req->toObj;
     ctx.radius = halfLength + 0xF00;
     ctx.length = length;
     ctx.halfLength = halfLength;
     ctx.unkA8 = 1;
     ctx.nearest = 0x7FFFFFFF;
     ctx.hit = 0;
-    ctx.target = req->toObj;
     ctx.hitPos = *req->to;
     if (req->toObj != NULL) {
         ctx.hitInfo.obj = req->toObj;
