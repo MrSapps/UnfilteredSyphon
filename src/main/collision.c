@@ -2077,18 +2077,8 @@ s32 CollisionGobjUpdate(Gobj *obj) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: v/axis swap s5/s6; ratio load hoisted above the push stores */
-/* r4B: v (refs 23, live 224, pri 4107) outranks axis (refs 25, live 252, pri 3968) in global.c;
- * the original needs axis first (one fewer in-loop v ref or v live > 232 would do it). The ratio
- * reload differs only before hits[0]->push.vx (later pushes match); dropping (void)&ratio (ratio
- * then spills anyway) changes nothing.
- * r4E (45 -> 11): the v/axis swap is fixed by writing the zero-axis block out in case 1 instead of
- * `goto zero` (extra axis refs; jump2 cross-jumps the copies back into one). Left (sched2 only):
- * (1) b.vy = FIXMul(axis->vy, *lenOut): the original loads axis->vy before the lenOut reload and
- * the b.vx store; (2) the ratio reload for each hits[k]->push.vy call comes after the D_8011EB40[k].vy
- * load in the original (ours hoists it next to the hits reload); the push.vz ones already match. */
-/* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
+/* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). The first (.vx) stores of b and of
+ * each push go through `*(s32 *)&` (non-struct MEMs, so sched orders them like the original). */
 s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, CollHit **hits, s32 *count) {
     VECTOR32 a;
     VECTOR32 b;
@@ -2170,7 +2160,7 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
                     OuterProduct12((VECTOR *)&planes[1], (VECTOR *)&planes[0], (VECTOR *)axis);
                     GTEMath_VectorNormal((VECTOR *)axis, (VECTOR *)axis);
                     *lenOut = DOT_FIX(*v, *axis);
-                    b.vx = EGSMathFIXMul(axis->vx, *lenOut);
+                    *(s32 *)&b = EGSMathFIXMul(axis->vx, *lenOut);
                     b.vy = EGSMathFIXMul(axis->vy, *lenOut);
                     b.vz = EGSMathFIXMul(axis->vz, *lenOut);
                     a.vx = v->vx - b.vx;
@@ -2233,7 +2223,7 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
             D_8011EB40[0].vx = EGSMathFIXMul(D_8011EB40[0].vx, len);
             D_8011EB40[0].vy = EGSMathFIXMul(D_8011EB40[0].vy, len);
             D_8011EB40[0].vz = EGSMathFIXMul(D_8011EB40[0].vz, len);
-            hits[0]->push.vx = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
+            *(s32 *)&hits[0]->push = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
             hits[0]->push.vy = EGSMathFIXMul(D_8011EB40[0].vy, ratio);
             hits[0]->push.vz = EGSMathFIXMul(D_8011EB40[0].vz, ratio);
             ratio = EGSMathFIXDiv(D_8011EB80[3], D_8011EB80[2]);
@@ -2241,7 +2231,7 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
             D_8011EB40[1].vx = EGSMathFIXMul(D_8011EB40[1].vx, len);
             D_8011EB40[1].vy = EGSMathFIXMul(D_8011EB40[1].vy, len);
             D_8011EB40[1].vz = EGSMathFIXMul(D_8011EB40[1].vz, len);
-            hits[1]->push.vx = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
+            *(s32 *)&hits[1]->push = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
             hits[1]->push.vy = EGSMathFIXMul(D_8011EB40[1].vy, ratio);
             hits[1]->push.vz = EGSMathFIXMul(D_8011EB40[1].vz, ratio);
             break;
@@ -2259,7 +2249,7 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
             D_8011EB40[0].vx = EGSMathFIXMul(D_8011EB40[0].vx, len);
             D_8011EB40[0].vy = EGSMathFIXMul(D_8011EB40[0].vy, len);
             D_8011EB40[0].vz = EGSMathFIXMul(D_8011EB40[0].vz, len);
-            hits[0]->push.vx = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
+            *(s32 *)&hits[0]->push = EGSMathFIXMul(D_8011EB40[0].vx, ratio);
             hits[0]->push.vy = EGSMathFIXMul(D_8011EB40[0].vy, ratio);
             hits[0]->push.vz = EGSMathFIXMul(D_8011EB40[0].vz, ratio);
             ratio = EGSMathFIXDiv(D_8011EB80[3], D_8011EB80[2]);
@@ -2267,7 +2257,7 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
             D_8011EB40[1].vx = EGSMathFIXMul(D_8011EB40[1].vx, len);
             D_8011EB40[1].vy = EGSMathFIXMul(D_8011EB40[1].vy, len);
             D_8011EB40[1].vz = EGSMathFIXMul(D_8011EB40[1].vz, len);
-            hits[1]->push.vx = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
+            *(s32 *)&hits[1]->push = EGSMathFIXMul(D_8011EB40[1].vx, ratio);
             hits[1]->push.vy = EGSMathFIXMul(D_8011EB40[1].vy, ratio);
             hits[1]->push.vz = EGSMathFIXMul(D_8011EB40[1].vz, ratio);
             ratio = EGSMathFIXDiv(D_8011EB80[5], D_8011EB80[4]);
@@ -2275,16 +2265,13 @@ s32 func_8007112C(VECTOR32 *v, VECTOR32 *rest, VECTOR32 *axis, s32 *lenOut, Coll
             D_8011EB40[2].vx = EGSMathFIXMul(D_8011EB40[2].vx, len);
             D_8011EB40[2].vy = EGSMathFIXMul(D_8011EB40[2].vy, len);
             D_8011EB40[2].vz = EGSMathFIXMul(D_8011EB40[2].vz, len);
-            hits[2]->push.vx = EGSMathFIXMul(D_8011EB40[2].vx, ratio);
+            *(s32 *)&hits[2]->push = EGSMathFIXMul(D_8011EB40[2].vx, ratio);
             hits[2]->push.vy = EGSMathFIXMul(D_8011EB40[2].vy, ratio);
             hits[2]->push.vz = EGSMathFIXMul(D_8011EB40[2].vz, ratio);
             break;
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/collision", func_8007112C);
-#endif
 
 /* Also called from cobj.c (CollisionPhysicsGobj_DetectorMotion). */
 s32 func_80071E04(Gobj *a, Gobj *b, VECTOR32 *rel, VECTOR32 *out) {
