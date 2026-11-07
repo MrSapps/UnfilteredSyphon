@@ -72,9 +72,9 @@ typedef struct FakeFaceBlock {
 extern FakeFaceBlock D_8012CEC4; /* == mCollisionFakeFacePool.faces */
 extern u8 D_8012D7AC[30];        /* == mCollisionFakeFacePool.flags */
 #define COLLISION_BOX_MAX 15
-extern FakeVertex mCollisionBoxVertices[COLLISION_BOX_MAX][8];
-extern FakeFace mCollisionBoxFaces[COLLISION_BOX_MAX][6];
-extern u8 mCollisionBoxFaceFlags[COLLISION_BOX_MAX][6];
+extern FakeVertex mCollisionBoxVertices[COLLISION_BOX_MAX][2][2][2];
+extern FakeFace mCollisionBoxFaces[COLLISION_BOX_MAX][3][2];
+extern u8 mCollisionBoxFaceFlags[COLLISION_BOX_MAX][3][2];
 static s32 D_8010FAB4 = 0;          /* .sdata: number of vertices in D_801212D8 */
 static FakeVertex *D_801212D8[400]; /* .bss: vertices whose y is currently negated */
 
@@ -277,9 +277,9 @@ typedef struct FriendlyAnim {
 /* The camera's anim block, wrapped in a temporary gobj to reuse the face-list code. */
 extern FriendlyAnim gCameraAnim;
 
-#ifdef NON_MATCHING
-/* loop strength reduction/regalloc differs (original keeps per-side face offsets in t0/t1/t2) */
 /* Build the six faces (two per axis) of every collision box. */
+/* The vertex/face/flag tables are [box][x][y][z] / [box][axis][side] (as in gtegeo.c); flat
+ * [box][axis * 2 + side] indexing defeats the strength reduction of the face offsets. */
 void FriendlyInit(void) {
     FakeVertex *quad[4];
     s32 box;
@@ -291,50 +291,46 @@ void FriendlyInit(void) {
             for (side = 0; side < 2; side++) {
                 switch (axis) {
                     case 0:
-                        quad[0] = &mCollisionBoxVertices[box][side * 4];
-                        quad[1] = &mCollisionBoxVertices[box][side * 4 + 1];
-                        quad[2] = &mCollisionBoxVertices[box][side * 4 + 3];
-                        quad[3] = &mCollisionBoxVertices[box][side * 4 + 2];
+                        quad[0] = &mCollisionBoxVertices[box][side][0][0];
+                        quad[1] = &mCollisionBoxVertices[box][side][0][1];
+                        quad[2] = &mCollisionBoxVertices[box][side][1][1];
+                        quad[3] = &mCollisionBoxVertices[box][side][1][0];
                         break;
                     case 1:
-                        quad[0] = &mCollisionBoxVertices[box][side * 2];
-                        quad[1] = &mCollisionBoxVertices[box][side * 2 + 4];
-                        quad[2] = &mCollisionBoxVertices[box][side * 2 + 5];
-                        quad[3] = &mCollisionBoxVertices[box][side * 2 + 1];
+                        quad[0] = &mCollisionBoxVertices[box][0][side][0];
+                        quad[1] = &mCollisionBoxVertices[box][1][side][0];
+                        quad[2] = &mCollisionBoxVertices[box][1][side][1];
+                        quad[3] = &mCollisionBoxVertices[box][0][side][1];
                         break;
                     case 2:
-                        quad[0] = &mCollisionBoxVertices[box][side];
-                        quad[1] = &mCollisionBoxVertices[box][side + 2];
-                        quad[2] = &mCollisionBoxVertices[box][side + 6];
-                        quad[3] = &mCollisionBoxVertices[box][side + 4];
+                        quad[0] = &mCollisionBoxVertices[box][0][0][side];
+                        quad[1] = &mCollisionBoxVertices[box][0][1][side];
+                        quad[2] = &mCollisionBoxVertices[box][1][1][side];
+                        quad[3] = &mCollisionBoxVertices[box][1][0][side];
                         break;
                 }
-                mCollisionBoxFaces[box][axis * 2 + side].face.count = 4;
+                mCollisionBoxFaces[box][axis][side].face.count = 4;
                 switch (side) {
                     case 0:
-                        mCollisionBoxFaces[box][axis * 2].face.verts[0] = quad[0];
-                        mCollisionBoxFaces[box][axis * 2].face.verts[1] = quad[1];
-                        mCollisionBoxFaces[box][axis * 2].face.verts[2] = quad[2];
-                        mCollisionBoxFaces[box][axis * 2].face.verts[3] = quad[3];
+                        mCollisionBoxFaces[box][axis][side].face.verts[0] = quad[0];
+                        mCollisionBoxFaces[box][axis][side].face.verts[1] = quad[1];
+                        mCollisionBoxFaces[box][axis][side].face.verts[2] = quad[2];
+                        mCollisionBoxFaces[box][axis][side].face.verts[3] = quad[3];
                         break;
                     case 1:
-                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[0] = quad[0];
-                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[1] = quad[3];
-                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[2] = quad[2];
-                        mCollisionBoxFaces[box][axis * 2 + 1].face.verts[3] = quad[1];
+                        mCollisionBoxFaces[box][axis][side].face.verts[0] = quad[0];
+                        mCollisionBoxFaces[box][axis][side].face.verts[1] = quad[3];
+                        mCollisionBoxFaces[box][axis][side].face.verts[2] = quad[2];
+                        mCollisionBoxFaces[box][axis][side].face.verts[3] = quad[1];
                         break;
                 }
-                mCollisionBoxFaces[box][axis * 2 + side].face.flags = &mCollisionBoxFaceFlags[box][axis * 2 + side];
-                mCollisionBoxFaces[box][axis * 2 + side].face.normalPtr =
-                    mCollisionBoxFaces[box][axis * 2 + side].face.normal;
+                mCollisionBoxFaces[box][axis][side].face.flags = &mCollisionBoxFaceFlags[box][axis][side];
+                mCollisionBoxFaces[box][axis][side].face.normalPtr = mCollisionBoxFaces[box][axis][side].face.normal;
             }
         }
     }
     func_80086B24();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/friendly", FriendlyInit);
-#endif
 
 void func_80086B24(void) {
     s32 i, j;
