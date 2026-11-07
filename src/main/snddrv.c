@@ -541,25 +541,26 @@ void ClearVABsResolvedFlag(SoundBlock *block) {
     block->numSounds &= 0x7FFFFFFF;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: s4/s5 swapped in loop 1; target copies type to a3 for the 7/9/10 tests */
-/* r2B: byID as its own statement / (u32)(type-7)<2, `s32 t = type` in the other!=NULL block, and the
- * copy block as a static inline taking type (any param order) change nothing; the original also
- * computes byID straight into a1 (sltiu a1) where ours copies v0 -> a1 in the delay slot.
- * r4J (19 -> 10): loop 2 reuses `n` (u8 via cast) for the sound count; that fixed the s4/s5 swap.
- * `s32 t = type` in the other!=NULL block survives cse1 but cse2 canonicalises it back to type
- * (make_regs_eqv: t only becomes the class head if it lives past the cse block end, and cse2's
- * path follows the `t == 10` label).  The original's a3 copy needs t to outlive that path. */
+/* Matching notes: loop 2 reuses `n` for the sound count (fixes the s4/s5 swap).  byID comes
+ * from an inline (its return pseudo keeps type-7 out of byID) and t is a copy of type for the
+ * 7/9/10 tests.  Both are initialised at their declarations: cse's make_regs_eqv only makes a
+ * copy the head of its equivalence class if it lives past the cse block (or starts before it),
+ * and the dead `= 0` puts their first use before the block, so the jump tests byID itself and
+ * the a3 copy of type survives cse2.  flow deletes the dead inits. */
+static inline s32 SndTypeByID(s32 type) {
+    return type == 7 || type == 8;
+}
+
 void SetupAllLoaded(s16 revType, s16 revDepth) {
     s32 n;
     s32 i;
     s16 j;
-    u8 count;
     MIDIDesc *m;
     SoundBlock *other;
     s32 type;
     u8 idx;
-    s32 byID;
+    s32 byID = 0;
+    s32 t = 0;
 
     for (i = 0; i < 16; i++) {
         if (gVabBlock[i] != NULL && !(gVabBlock[i]->numSounds & 0x80000000)) {
@@ -589,7 +590,7 @@ void SetupAllLoaded(s16 revType, s16 revDepth) {
                     gVabBlock[i]->sounds[j].voices = ((s16)gVabBlock[i]->sounds[j].flags >> 11) & 0xF;
                     gVabBlock[i]->sounds[j].vab = (gVabBlock[i]->sounds[j].flags >> 5) & 0x3F;
                 }
-                if ((byID = (type == 7 || type == 8)) || type == 9 || type == 10) {
+                if ((byID = SndTypeByID(type)) || type == 9 || type == 10) {
                     idx = gVabBlock[i]->sounds[j].vab;
                     if (byID) {
                         other = FindSoundBlockByID(gVabBlock[i]->sounds[j].voices);
@@ -597,12 +598,13 @@ void SetupAllLoaded(s16 revType, s16 revDepth) {
                         other = FindSoundBlockByNum(gVabBlock[i]->sounds[j].voices);
                     }
                     if (other != NULL) {
+                        t = type;
                         gVabBlock[i]->sounds[j].vab = other->vabId;
                         gVabBlock[i]->sounds[j].seq = other->sounds[idx].seq;
                         gVabBlock[i]->sounds[j].sepNum = other->sounds[idx].sepNum;
                         gVabBlock[i]->sounds[j].prog = other->sounds[idx].prog;
                         gVabBlock[i]->sounds[j].firstTone = other->sounds[idx].firstTone;
-                        if (type == 7 || type == 9) {
+                        if (t == 7 || t == 9) {
                             gVabBlock[i]->sounds[j].tone = other->sounds[idx].tone;
                             gVabBlock[i]->sounds[j].note = other->sounds[idx].note;
                             gVabBlock[i]->sounds[j].vol = other->sounds[idx].vol;
@@ -610,13 +612,13 @@ void SetupAllLoaded(s16 revType, s16 revDepth) {
                             gVabBlock[i]->sounds[j].defVol = other->sounds[idx].defVol;
                             gVabBlock[i]->sounds[j].defPan = other->sounds[idx].defPan;
                             gVabBlock[i]->sounds[j].unk12 = other->sounds[idx].unk12;
-                            if (type == 9) {
+                            if (t == 9) {
                                 gVabBlock[i]->sounds[j].flags = (other->sounds[idx].flags & 0x1F) | (idx << 5) |
                                                                 (gVabBlock[i]->sounds[j].voices << 11);
                             } else {
                                 gVabBlock[i]->sounds[j].flags = other->sounds[idx].flags;
                             }
-                        } else if (type == 10) {
+                        } else if (t == 10) {
                             gVabBlock[i]->sounds[j].flags = (other->sounds[idx].flags & 0x1F) | (idx << 5) |
                                                             (gVabBlock[i]->sounds[j].voices << 11) | 0x8000;
                         } else {
@@ -635,9 +637,6 @@ void SetupAllLoaded(s16 revType, s16 revDepth) {
     }
     ReverbSet(revType, revDepth);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetupAllLoaded);
-#endif
 
 void ReleaseAllSoundBlocks(void) {
     s16 j;
