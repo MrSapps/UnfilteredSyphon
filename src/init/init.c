@@ -299,14 +299,15 @@ extern InitActivationList *objActivationList;
 extern InitActivationList *generatorActivationList;
 void NPCInitTerrainGenerator(s32 index);
 
-#ifdef NON_MATCHING
-/* scheduling: generatorInfo = NULL store hoisted above the objActivationList store; inner j in a1 instead of a0 */
+static const char D_80145CB4[16] = "\\%s\\%s.BIN;1";
+
 /* Loads (or locates, when preloaded) the level's world file and relocates its tables. */
 static void func_80145F98(u8 preloaded) {
     char path[32];
     s32 base;
     s32 i;
     s32 j;
+    s32 k;
     InitModelRelocs *mi;
     GameObjectInfo *info;
     NPCGenerator *gen;
@@ -319,7 +320,7 @@ static void func_80145F98(u8 preloaded) {
         base = (s32)gWorldBin;
     } else {
         name = gLevelNames[gSysInfo.level];
-        sprintf(path, "\\%s\\%s.BIN;1", name, name);
+        sprintf(path, D_80145CB4, name, name);
         SysLoadData(path, &gWorldBin, 0);
         base = (s32)gWorldBin;
     }
@@ -342,8 +343,8 @@ static void func_80145F98(u8 preloaded) {
     }
     objActivationList = (InitActivationList *)(base + gWorldBin->objActivation);
     generatorInfo = NULL;
-    gNPCGeneratorCount = gWorldBin->generatorCount;
     generatorActivationList = (InitActivationList *)(base + gWorldBin->generatorActivation);
+    gNPCGeneratorCount = gWorldBin->generatorCount;
     if (gNPCGeneratorCount > 0) {
         generatorInfo = (NPCGenerator *)(base + gWorldBin->generators);
     }
@@ -361,14 +362,11 @@ static void func_80145F98(u8 preloaded) {
         genAct = &generatorActivationList[i];
         obj->ids = (s32 *)(base + (s32)obj->ids);
         genAct->ids = (s32 *)(base + (s32)genAct->ids);
-        for (j = 0; j < obj->count; j++) {
-            obj->ids[j] = (s32)&gameObjectsInfo[obj->ids[j]];
+        for (k = 0; k < obj->count; k++) {
+            obj->ids[k] = (s32)&gameObjectsInfo[obj->ids[k]];
         }
     }
 }
-#else
-INCLUDE_ASM("asm/init/nonmatchings/init", func_80145F98);
-#endif
 
 /* Loads the level data and the level overlay. */
 static void func_801462CC(void) {
