@@ -1,4 +1,5 @@
 #include "common.h"
+#include "scratch.h"
 
 typedef struct AnimVec {
     s32 vx, vy, vz, pad;
@@ -1013,27 +1014,27 @@ done:
 INCLUDE_ASM("asm/main/nonmatchings/animate", func_8007D120);
 #endif
 
-#ifdef NON_MATCHING
-/* Run on the scratchpad stack (old sp saved at 0x1F800000). */
-#define SPAD_STACK_ENTER() __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0")
-#define SPAD_STACK_LEAVE() __asm__ volatile("lw $29, 0x1F800000")
-/* same, spelled differently so jump.c does not cross-jump the two call sites */
-#define SPAD_STACK_ENTER2() __asm__ volatile("sw $29,0x1F800000\n\tli $29,0x1F8003E0")
-#define SPAD_STACK_LEAVE2() __asm__ volatile("lw $29,0x1F800000")
+/* Calls made on the scratchpad stack (SCRATCH_CALL1, scratch.h): the original leaves
+ * the jal delay slot empty.  A second spelling of the same asm keeps jump.c from
+ * cross-jumping the two call sites. */
+#define SCRATCH_CALL1_B(fn, arg)                                                       \
+    __asm__ volatile(SCRATCH_ENTER "move $4,%0\n\tjal " #fn "\n\t" SCRATCH_LEAVE  \
+                     :                                                                 \
+                     : "r"(arg)                                                        \
+                     : SCRATCH_CLOBBERS)
 
 /*
- * Control flow matches; differs in register allocation ("paused & 0xFF" is not
- * hoisted out of the loop) and the original leaves the jal delay slots of the
- * scratchpad calls empty.
- * r3A: `s32 p = paused;` before the loop (tests use p, the unk00 stores use paused)
- * gives the original's prologue andi and drops the score 41 -> 30, but loop.c then
- * still hoists the constant 1 of the two `== 1` compares (-dL: life 16, savings 1,
- * moved) where the original sets s1 = 1 inside the loop; the jal delay slots stay.
+ * `s32 p = paused;` gives the prologue andi (the unk00 stores use the raw param).
+ * `s32 one = 1;` (a user variable set after a conditional jump) keeps loop.c from
+ * hoisting the constant shared by the two `== 1` compares.  The `if (!p)
+ * func_80079950()` call is written out in both places (jump2 cross-jumps them into
+ * one): the extra refs lift p above the loop's D_8011F810 base in global-alloc.
  */
 void AnimateProcess(u8 paused) {
     s32 i;
     AnimGobj *gobj;
     u8 action;
+    s32 p = paused;
 
     for (i = 0; i < ANIM_SLOT_MAX; i++) {
         gobj = D_8011F810[i].gobj;
@@ -1043,17 +1044,16 @@ void AnimateProcess(u8 paused) {
         if (D_8011F810[i].aimRequest) {
             if ((gobj->unk22 == 1 || gobj->unk22 == 2) && (gobj->anim->master->flags & 0x400000) &&
                 !(gobj->anim->flags & 0x10) && gobj->runtime) {
-                if (D_8011F810[i].unk14 == 1) {
+                s32 one = 1;
+                if (D_8011F810[i].unk14 == one) {
                     LOSGetGobjLOSTestPoint((void *)D_8011F810[i].aimPoint.vx, &D_8011F810[i].aimPoint);
                 }
-                if (func_8007D120(&D_8011F810[i]) == 1) {
+                if (func_8007D120(&D_8011F810[i]) == one) {
                     if (D_8011F810[i].mode != 0) {
                         D_8011F810[i].unk00 = paused;
-                        SPAD_STACK_ENTER();
-                        func_8007E650(&D_8011F810[i]);
-                        SPAD_STACK_LEAVE();
-                    } else {
-                        goto simple;
+                        SCRATCH_CALL1(func_8007E650, &D_8011F810[i]);
+                    } else if (!p) {
+                        func_80079950(&D_8011F810[i]);
                     }
                 }
             }
@@ -1061,18 +1061,15 @@ void AnimateProcess(u8 paused) {
             action = gobj->state->action;
             if (action == 5 || action == 6 || action == 9) {
             } else if (D_8011F810[i].mode == 0) {
-            simple:
-                if (!paused) {
+                if (!p) {
                     func_80079950(&D_8011F810[i]);
                 }
             } else {
                 D_8011F810[i].unk00 = paused;
-                SPAD_STACK_ENTER2();
-                func_8007E650(&D_8011F810[i]);
-                SPAD_STACK_LEAVE2();
+                SCRATCH_CALL1_B(func_8007E650, &D_8011F810[i]);
             }
         }
-        if (paused) {
+        if (p) {
             continue;
         }
         if (D_8011F810[i].aimRequest > 0) {
@@ -1092,9 +1089,6 @@ void AnimateProcess(u8 paused) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/animate", AnimateProcess);
-#endif
 
 void AnimateInit(void) {
     s32 i;
