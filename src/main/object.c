@@ -148,8 +148,8 @@ typedef struct ObjectMove {
     /* 0xF0 */ VECTOR32 rotVel;
 } ObjectMove;
 
-static inline u8 ObjectIsInactive(s16 id) {
-    Gobj *gobj = gameObjectsInfo[id].runtime;
+static inline u8 ObjectIsInactive(s32 id) {
+    Gobj *gobj = gameObjectsInfo[(s16)id].runtime;
     s32 ret = 0;
 
     if (gobj == NULL || gobj->anim == NULL) {
@@ -313,16 +313,11 @@ GameObjectRuntime *ObjectMatchToRefID(s16 id, s16 type) {
     return gameObjectsInfo[id].runtime;
 }
 
-#ifdef NON_MATCHING
-/* target hoists the gLevelGameObjCount reload out of the loop (cse2 then copies it, a3 = v1); our loop.c rates that move "not desirable" (44 insns) */
-/* loop.c: the count load (life 1, savings 1) is the last movable; each earlier move costs threshold 3,
- * so it fails threshold*1*1 >= 44. `count > i`, do-while with `> ++i`, split ifs, continue forms: no change. */
 GameObjectRuntime *ObjectMatchToRefIDByCatID(s16 id, s16 category) {
     s32 i;
     Gobj *gobj;
-    s32 count = gLevelGameObjCount;
 
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < gLevelGameObjCount; i++) {
         if (!ObjectIsInactive(i)) {
             gobj = gameObjectsInfo[i].runtime;
             if (gobj != NULL && category == gobj->npcState && gameObjectsInfo[i].refId == id) {
@@ -332,9 +327,6 @@ GameObjectRuntime *ObjectMatchToRefIDByCatID(s16 id, s16 category) {
     }
     return gameObjectsInfo[id].runtime;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/object", ObjectMatchToRefIDByCatID);
-#endif
 
 /* Move the player to a teleport object. sector < 0: through a door (-1: keep the player's
  * side of the door), the player stays in the current sector. */
