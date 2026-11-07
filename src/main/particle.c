@@ -4250,6 +4250,12 @@ typedef struct MoveVelView {
 
 #ifdef NON_MATCHING
 /* half/quarter shifts scheduled one slot off (sra s2 before the and; sra s1 in bgez delay slot) */
+/* r4E: sched1 boosts both `half` (insn after the rand call) and `rand() & life` (birthing_insn_p:
+ * single-set pseudos), so the tie goes to INSN_LUID and the and (later in source) is scheduled last
+ * backward = after half forward; sched2 then keeps that order. The original needs half's insn after
+ * the and in the sched1 output. `- (half = life >> 1)` inside the vx expression or `(life >> 1)`
+ * everywhere does that but local-alloc then swaps life/half (s1/s2) (12 lines); a twice-set
+ * `half = life; half >>= 1;` or `r0 = rand(); r0 &= life;` are worse (5 / 42). */
 /* Shared particle step; returns 0 when the particle died */
 s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
     u32 flags = g->flags;
