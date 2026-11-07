@@ -740,8 +740,11 @@ s32 GetFuzzyDistancePoint2Point(VECTOR *a, VECTOR *b) {
     return dx + ((dy + dz) >> 2);
 }
 
-#ifdef NON_MATCHING
-/* regalloc only: node/gobj/hit/flags/modelFlags rotated through s4-s7/fp */
+/* __FILE__ of the assert below, kept word-padded for the Psy-Q rodata layout */
+static const char D_80012300[12] = "s/gtegeo.c";
+
+/* The early `node = node->next; continue;` exits are what the original had: the duplicated
+ * advances give node enough (loop-weighted) refs to get s4 ahead of the other loop values. */
 void GobjCollideLoop(GameObjectRuntime *gobj) {
     LOSHit hit;
     LOSHit *hitp;
@@ -787,7 +790,11 @@ void GobjCollideLoop(GameObjectRuntime *gobj) {
         anim = node->anim;
         model = anim->model;
         flags = anim->collideFlags;
-        if (anim != self && (flags & 6)) {
+        if (anim == self || !(flags & 6)) {
+            node = node->next;
+            continue;
+        }
+        {
             if (model->box.state == -1) {
                 InitBxv(model);
             }
@@ -795,7 +802,11 @@ void GobjCollideLoop(GameObjectRuntime *gobj) {
             otherPos.vy = anim->frame->matrix.t[1];
             otherPos.vz = anim->frame->matrix.t[2];
             otherPos.vy = -otherPos.vy;
-            if (GetFuzzyDistancePoint2Point(&pos, &otherPos) <= model->box.radius) {
+            if (GetFuzzyDistancePoint2Point(&pos, &otherPos) > model->box.radius) {
+                node = node->next;
+                continue;
+            }
+            {
                 if (flags & 2) {
                     LOSBounds saved;
 
@@ -803,7 +814,7 @@ void GobjCollideLoop(GameObjectRuntime *gobj) {
                     modelFlags = model->flags;
                     isCharacter = (u32)(target->npcState - 1) < 2;
 #line 645
-                    ASSERT(boxCount < 15);
+                    if (!(boxCount < 15)) EGSDebugAssert(1, 0, (char *)D_80012300, __LINE__);
                     if (isCharacter) {
                         saved = model->bounds;
                         model->bounds.max.vz = 0x80;
@@ -859,6 +870,3 @@ void GobjCollideLoop(GameObjectRuntime *gobj) {
         node = node->next;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gtegeo", GobjCollideLoop);
-#endif
