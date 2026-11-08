@@ -1024,7 +1024,10 @@ void EGSDisplayGetSectorRotBoxList(void *model, u32 *count, u32 **boxes);
  * `if (kind == 0 && ..)` / `if (kind == 4 && ..)` hit tests that `goto found`; callback read
  * into a local. Still open: the original keeps the box scan as `j test` (exit-test copy not
  * duplicated), so the hit blocks land inside the loop and `count` is reloaded every pass;
- * ours duplicates the test and hoists count. links[i] is strength-reduced (links - 3) in ours. */
+ * ours duplicates the test and hoists count. links[i] is strength-reduced (links - 3) in ours.
+ * r5B: jump.c duplicate_loop_exit_test only refuses for a CALL/CODE_LABEL/BLOCK or LOOP_CONT note in the test.
+ * An explicit `goto test; next: ...; test: if (idx < count) goto next;` gives the j-test layout and the count
+ * reload (44 lines) but no loop notes, so loop.c does not move the hit blocks next to the j (original does). */
 static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
     CobjTerrSector *ts;
 

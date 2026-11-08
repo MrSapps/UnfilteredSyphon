@@ -1000,7 +1000,10 @@ void func_80139150(MenuItem *item, s32 on, s32 enabled) {
 #ifdef NON_MATCHING
 /* register allocation of the x/y invariants and the end-x register. Original: half=s3, x1&0xFFFF=s4, quad=s5,
  * top=s6 (priority half > x1 > quad > top); ours puts half last. `x1 = ...; x1 &= 0xFFFF;` + `x1 | top` removes
- * our extra loop-2 copy (22 lines) but not the order; u16 x1 is worse. */
+ * our extra loop-2 copy (22 lines) but not the order; u16 x1 is worse.
+ * r5B: in the original `value - half - 0x39` stays in loop 1 (value reloaded there) and its masked value is ONE
+ * pseudo (s4) used by both loops. Any temp form (`(..) & 0xFFFF`, u16, a separate masked var) lets loop.c hoist
+ * the subtraction (31 lines); only a user var used after the loop stays. half needs ~8 refs (now 5) to land in s3. */
 void func_80139230(MenuBox *box, s32 y, s32 width, s32 value) {
     MenuQuad *quad = box->quads;
     MenuLine *line = box->lines;
@@ -2888,7 +2891,10 @@ INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E5B0);
  * before the mMap store) fixed the mMap order. The copy: cse_insn's (set REG0 REG1) swap rewrites
  * `p = mem+0x3390; chars = p;` into `chars = mem+0x3390; p = chars` (dead) whenever chars outlives
  * p (make_regs_eqv makes it qty_first_reg); giving p a use after the loop stops the swap, but
- * then combine merges the copy because p dies there. */
+ * then combine merges the copy because p dies there.
+ * r5B: cse_insn only swaps when the copy directly follows p's set, and combine refuses only if mem changes (or a
+ * call sits) between them: `c = mem+0x3390; ... mem += 0x40F8; chars = c;` keeps the copy (no swap/combine) but
+ * sched1 leaves it late (chars is set twice -> not birthing; luid order), 6 lines. */
 void func_8013E98C(void) {
     char path[32];
     u8 *mem;

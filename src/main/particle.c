@@ -4274,7 +4274,11 @@ typedef struct MoveVelView {
  * backward = after half forward; sched2 then keeps that order. The original needs half's insn after
  * the and in the sched1 output. `- (half = life >> 1)` inside the vx expression or `(life >> 1)`
  * everywhere does that but local-alloc then swaps life/half (s1/s2) (12 lines); a twice-set
- * `half = life; half >>= 1;` or `r0 = rand(); r0 &= life;` are worse (5 / 42). */
+ * `half = life; half >>= 1;` or `r0 = rand(); r0 &= life;` are worse (5 / 42).
+ * r5B (cc1 -dS prints the ready lists): `{ s32 rnd = rand() & life; s32 v = p->vel.vx; half = life >> 1;
+ * p->vel.vx = (v >> 1) + rnd - half; }` gives the sched1 order (3 lines), but sched2 then hoists the vel.vx lw
+ * above the and: the and has priority 2 (lhu->sll->sra latency chain), the lw only 1. Reusing vy/r1 for the and
+ * result also fixes the order but changes v0/v1 or the later and (20). */
 /* Shared particle step; returns 0 when the particle died */
 s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
     u32 flags = g->flags;

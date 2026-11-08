@@ -704,7 +704,9 @@ int EGSGeometry_FaceGetNonUnitNormal(EGSFace *face)
 
 #ifdef NON_MATCHING
 /* sched: product/mult order differs (n stores and p reloads match). Original issues e1.vz*e0.vx right after
- * e1.vz (2nd mult); ours delays it past n.vy's mults. Plain n.vx stores and all 64 operand-order swaps don't help. */
+ * e1.vz (2nd mult); ours delays it past n.vy's mults. Plain n.vx stores and all 64 operand-order swaps don't help.
+ * r5B: sched1 (-dS) keeps P2 blocked on the mult unit and takes it as soon as it frees, before P3/P4 are ready;
+ * the 5 other n.vx/n.vy/n.vz statement orders and a twice-set temp for P2 (not birthing) are 21-39 lines. */
 int EGSGeometryINT_PointProjectOnFacePlaneAlongY(VECTOR *p, EGSFace *face, u8 *ok, s32 *y)
 {
     VECTOR o;
