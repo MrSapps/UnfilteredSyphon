@@ -482,10 +482,7 @@ s32 SysLoadData(char *name, void **buf, s32 size) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/system", D_80010078);
 
-#ifdef NON_MATCHING
-/* Returns the loaded size. Register allocation differs around the size clamp (the original builds the limit in v0 and copies it to a3).
- * Block-local lim + copy, an inline returning the difference, (u32) casts, ?: clamp: combine still
- * folds the copy (subu straight into a3). */
+/* Returns the loaded size. */
 s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
     char path[56];
     s32 file;
@@ -495,7 +492,7 @@ s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
     u32 max;
 
     DrawSync(0);
-    sprintf(path, "\\BIN\\%s;1", name);
+    sprintf(path, D_80010078, name);
 #line 1135
     ASSERT(EGSFileOpen(path, &file) == 0);
     EGSFileGetBufferSize(file, &len);
@@ -506,11 +503,8 @@ s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
 #line 1139
     ASSERT(EGSFileRead(file, dst, len, &nread) == 0);
     if (viaBuffer) {
-        max = D_80145BF0 - D_80140FE0;
         len = (len + 3) & ~3;
-        if (len < max) {
-            max = len;
-        }
+        max = len < (u32)(D_80145BF0 - D_80140FE0) ? len : (u32)(D_80145BF0 - D_80140FE0);
         len = max;
         EGSMiscMemcpy(addr, D_801377E0, max >> 2);
         EGSMemRegisterVariableOverlayEnd(D_80140FE0 + len);
@@ -519,9 +513,6 @@ s32 SysLoadOverlay(char *name, u8 *addr, u8 viaBuffer) {
     EGSFileClose(&file);
     return len;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/system", SysLoadOverlay);
-#endif
 
 void SysLoadTextureCacheOverlay(char *name, u8 arg1) {
     if (name == NULL) {
