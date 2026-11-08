@@ -1160,7 +1160,18 @@ void EGSDisplayRunTextureAnimations(void) {
     }
 }
 
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", a_prim);
+/* libgpu P_TAG-style ordering-table tag: 24-bit next pointer + 8-bit word count */
+typedef struct {
+    unsigned addr : 24;
+    unsigned len : 8;
+} OTTag;
+
+/* addPrim: link prim in front of the OT entry. The volatile OT access keeps reorg from
+ * putting the final store in the jr delay slot (resource_conflicts_p). */
+void a_prim(u32 *ot, void *prim) {
+    ((OTTag *)prim)->addr = ((volatile OTTag *)ot)->addr;
+    ((volatile OTTag *)ot)->addr = (u32)prim;
+}
 
 #ifdef NON_MATCHING
 /* register allocation: original spills end/maxDepth/flags to the stack differently */
