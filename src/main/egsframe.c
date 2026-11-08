@@ -185,7 +185,11 @@ int EGSFrameAddNode(EGSFrame *frame, EGSFrame *parent)
 /* loop entry not threaded past the cur!=frame test; prev in a2 not a1.
  * The loop shape (frame test on top, bnez cur at the bottom) already matches; only the entry
  * differs. CSE folds the duplicated cur!=NULL entry test but not the frame one, in any operand
- * order (cur == frame / frame != cur, 7-10); a do-while gives a different layout (9). */
+ * order (cur == frame / frame != cur, 7-10); a do-while gives a different layout (9).
+ * r5A: thread_jumps can't do it: it needs identical operand order and no CODE_LABEL between b1's
+ * target and b2 (the loop-top label sits there). `goto body;` before the while with `body:` at the
+ * top of the body and `node = cur->node; prev = cur;` gives the entry + prev a1/node v1 (6 -> 2);
+ * left: reorg puts the prev copy into the beqz slot (original: copy before the lw, slot = 0x2B). */
 int EGSFrameRemoveNode(EGSFrame *frame)
 {
     EGSFrameNode *pnode;

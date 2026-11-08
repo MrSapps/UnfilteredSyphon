@@ -972,7 +972,8 @@ void func_8008C534(Gobj *obj, s32 type) {
  * reg copy, so cse keeps b (v0) for the test and data gets a2: the only diff left is `andi a2,v0,0xFF`
  * vs the original's `move a2,v0` in the bnez slot. A plain copy needs make_regs_eqv (cse.c) to
  * keep b canonical, i.e. b's last use at or after data's; `? 0x14 : b` (b known 0 there) and
- * u8/u32 casts don't do it. */
+ * u8/u32 casts don't do it. r5A: reusing i/type as the byte var (to outlive data) makes it global and
+ * it coalesces with data (5-11); ?: forms (`data = b != 0 ? b : ...`) 5-7. */
 s32 UseLevelSpecificObject(void) {
     s32 data;
     s32 i;

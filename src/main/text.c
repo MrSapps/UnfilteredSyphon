@@ -873,7 +873,9 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
  * splits, (s16) casts on parts, *y = ...; *y -= ... (all 2 or worse).
  * r4G: `lines = lines * scale + w->y - w->yAdjust; *y = lines;` (s32) does give a3, but the
  * loads are no longer narrowed (lh/lb instead of lhu/lbu+sll/sra); with s16 lines the
- * promoted var forces a sign extension. The result needs a non-promoted global pseudo. */
+ * promoted var forces a sign extension. The result needs a non-promoted global pseudo.
+ * r5A: one-member struct/union HImode temps and `lines = (s16)(...)` all still subu into v0
+ * (local-alloc ties the dest to the dying addu input). */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -1448,7 +1450,11 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * combined back behind the store or turn the load into lbu (2-5).
  * r4G: sched.c adjust_priority gives birthing insns (dest set once) max priority, so the
  * id & 0xFF andi sinks below the sb. `c = id & 0xFF;` before the store (c is set twice)
- * gives the original order (3 lines), but the zero_extend form reloads id as lbu. */
+ * gives the original order (3 lines), but the zero_extend form reloads id as lbu.
+ * r5A (-dS): the sb has no dest reg, so it is never birthing-boosted and keeps priority 1: it
+ * always lands first after the call unless its LUID is after the v0 set. `x = sum<<8 | id&0xFF;
+ * s->serial = sum; return x;` gives that order (2), but combine then splits the and out of the ior
+ * as zero_extend:QI (make_compound_operation) and reload turns it into lbu 0x10(sp). */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

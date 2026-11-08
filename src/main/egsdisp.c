@@ -3346,7 +3346,9 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 #ifdef NON_MATCHING
 /* one insn off: the original keeps the dead ret=0 in s2 but returns a literal 0 on the count path (ours copies s2).
  * Returning 0/ret swapped just moves the s2 copy into the bnez slot: both original returns are literal 0, so
- * s2's last use must vanish after global-alloc (no-op move / jump2); if/else + one shared return is worse (14). */
+ * s2's last use must vanish after global-alloc (no-op move / jump2); if/else + one shared return is worse (14).
+ * r5A: not REG_EQUIV: ret set once (no in-loop set, `return ret` twice) gets REG_EQUIV 0, but reload only
+ * substitutes it for unallocated pseudos (alter_reg renumbers allocated ones first) -> both returns copy s3 (8). */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
