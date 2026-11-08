@@ -174,9 +174,12 @@ static struct {
     /* 0x73C */ TitlePolyF4 highlight;       /* selection highlight */
 } titleBss;
 #define D_80144920 (titleBss.cardOps)
-#define D_80144948 (titleBss.outline)
-#define D_80144B1C (titleBss.edges)
-#define D_80144D8C (titleBss.grid)
+/* Labels inside titleBss. The original addresses them as separate symbols (cse never relates
+ * them: each gets its own lui/addiu), so the code uses externs; a matching C function needs
+ * `.set D_80144948, titleBss+0x28` etc. (GNU) and psylink equates (_PSYQ), as chopper.c does. */
+extern TitlePolyF4 D_80144948[13];
+extern TitleLineF2 D_80144B1C[13][2];
+extern TitleLineF2 D_80144D8C[30];
 #define D_8014505C (titleBss.highlight)
 
 /* commons: psylink lays them out after the .bss */
@@ -379,7 +382,8 @@ static const s32 D_80141610[14][2] = {
     { 0xFFDA0084, 0xFFDC0078 }, { 0xFFD1007B, 0xFFD60072 },
 };
 
-/* regalloc and giv choice in the add loop */
+/* r6H: 104 (separate-symbol externs fixed the outline loop's base loads). Left: the outline
+ * loop's s-reg order (orig n gets s3, ours s7), and the add/delete loops' giv choice. */
 /*
  * Builds (frame 0) and shows/hides the memory card drawing a piece at a time;
  * frame counts up to 12.

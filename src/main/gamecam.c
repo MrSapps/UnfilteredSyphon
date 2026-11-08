@@ -2709,7 +2709,9 @@ static inline void iDotSV(GameCamSVec *a, VECTOR32 *b, s32 *out) {
  * like MAX's COND_EXPR), `-FIX12` split in two statements, `(u32)face < 0x80000000` (a GEU test cse
  * can't use to fold the loop's NULL test), count = 0 at the loop top, r computed in both track arms.
  * Left: loop.c hoists the track.plane load out of the edge loop (no aliasing store in the loop:
- * edge/a stores are sp-fixed), the original reloads it per iteration -> plane/i regs shift. */
+ * edge/a stores are sp-fixed), the original reloads it per iteration -> plane/i regs shift.
+ * With `(plane = track.plane)->count` + `plane->count` in the body the load stays in the loop
+ * but cse_around_loop then shares the exit test's count with the body (orig reloads it). */
 /* Moves a sphere from cur by d against the collision faces (static, then the player's),
  * leaving the result in pos; a second pass pushes pos out of whatever it still touches.
  * Returns whether anything was hit. */

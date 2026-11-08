@@ -257,7 +257,11 @@ static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, 
 static const s32 D_80013360[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 #ifdef NON_MATCHING
-/* stack layout: the original overlays the bone tables with the half/centre vectors */
+/* stack layout: the original overlays the bone tables with the half/centre vectors
+ * r6H: orig frame is 0x168 (ours 0x1C0) and it reloads obj->anim at every use (no anim local;
+ * `#define anim (obj->anim)` reproduces those loads, 139). 2.7.2 never reuses block-scope slots,
+ * but inline-function frames are temp slots that later inlines reuse: the bone loop and the
+ * half/centre math were probably static inlines. */
 u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count) {
     ShadowAnim *anim;
     s32 i;

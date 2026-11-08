@@ -2834,7 +2834,9 @@ void func_8013E480(void) {
  * (`((s16 *)&v)[1]` = INDIRECT_REF of a constant -> memory_address forces it into a reg,
  * like XY(v).x does), which gives the addiu/lhu/sh RMW form; the first test reads
  * `*(s32 *)&XY(D_8013FEA4)` (a2 base). Still open: the original computes all four deltas
- * before any store (ours sinks/hoists the stores differently) and the quad corner loads. */
+ * before any store (ours sinks/hoists the stores differently) and the quad corner loads.
+ * r6H: the /4s differ too: orig `bgez x; move t,x; addiu t,x,3; sra` (expand_divmod's adjusted copy
+ * with x still live), ours adds in place; s16 deltas / re-reading XY(D_8013FEA4) are worse (68-73). */
 void func_8013E5B0(void) {
     s32 dx0, dy0, dx1, dy1;
     s32 x, y;

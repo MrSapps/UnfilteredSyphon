@@ -572,7 +572,9 @@ s32 AddFaceToFaceList(GameObjectRuntime *gobj, LOSFace *face) {
 }
 
 #ifdef NON_MATCHING
-/* same size; vertex loop offsets are kept as integers off one base register in the original */
+/* same size; vertex loop offsets are kept as integers off one base register in the original
+ * r6H: the original also accumulates corner.vx/vy/vz through memory (lw/addu/sw per term) and
+ * keeps delta[] in stack slots, so the corner/delta block is scheduled very differently. */
 s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRuntime *owner, s32 box) {
     LOSBounds bounds;
     MATRIX m;
