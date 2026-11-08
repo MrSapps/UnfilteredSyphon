@@ -1560,8 +1560,6 @@ void EGSDisplayLOSSectorPolys(s32 sector, u8 steep, u8 arg2);
                      : "r"(q), "r"(w), "r"(z)                                              \
                      : SCRATCH_CLOBBERS)
 
-#ifdef NON_MATCHING
-/* Reload scheduling only: the endZ spill and its reload in the loop are placed differently */
 typedef struct GTELOSLevData {
     /* 0x00 */ u8 unk00[0x80];
     /* 0x80 */ u8 links[1][15]; /* per sector: linked sectors */
@@ -1574,6 +1572,8 @@ static inline void GTELOSSectors(GTELOSQuery *query, LOSVec *origin, u8 windows,
     s32 sector;
     LOSTerrSectorModel *model;
     LOSHit *hit;
+    LOSSectorBounds *b;
+    s32 t; /* reused: sector before the loop, box pointer in it (a twice-set pseudo is not "birthing" for sched1) */
 
     if (losEndPointZ != 0) {
         sectorInfo = 0;
@@ -1584,7 +1584,8 @@ static inline void GTELOSSectors(GTELOSQuery *query, LOSVec *origin, u8 windows,
         D_80127F8C = 0;
         D_80127F88 = 0;
         D_80127F90 = 0;
-        link = ((GTELOSLevData *)gLevData)->links[query->sector] - 1;
+        t = query->sector;
+        link = ((GTELOSLevData *)gLevData)->links[t] - 1;
         for (i = -1;; link++, i++) {
             if (i < 0) {
                 sector = query->sector;
@@ -1596,11 +1597,11 @@ static inline void GTELOSSectors(GTELOSQuery *query, LOSVec *origin, u8 windows,
             }
             model = (LOSTerrSectorModel *)gTerrSector[sector].model;
             if (model->unk00 != 0 &&
-                ((model->bounds->minX < x && x < model->bounds->maxX && model->bounds->minZ < z && z < model->bounds->maxZ) ||
-                 (model->bounds->minX < endX && endX < model->bounds->maxX && model->bounds->minZ < endZ &&
-                  endZ < model->bounds->maxZ) ||
+                ((b = model->bounds, b->minX < x && x < b->maxX && b->minZ < z && z < b->maxZ) ||
+                 (b->minX < endX && endX < b->maxX && b->minZ < endZ &&
+                  endZ < b->maxZ) ||
                  (hit = &losHitArray[losHitCount], hit->owner = (LOSHitOwner *)model,
-                  LOSRotBoxV((u8 *)model->bounds + 0x30, losEndPointZ, hit, origin)))) {
+                  (t = (s32)model->bounds, LOSRotBoxV((u8 *)t + 0x30, losEndPointZ, hit, origin))))) {
                 EGSDisplayLOSSectorPolys(model->bounds->unk20, steep, arg2);
             }
         }
@@ -1650,9 +1651,6 @@ void GTELOSLoop(GTELOSQuery *query, u8 windows, u8 arg2) {
     /* load delay slot after restoring $sp; the shared exit starts with it */
     __asm__ volatile("nop");
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cobj", GTELOSLoop);
-#endif
 
 /* D_800122F4: "s/cobj.c", now emitted by PreSortHits (see config/syms.d/main/cobj.ld) */
 
