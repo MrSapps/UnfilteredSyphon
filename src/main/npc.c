@@ -3517,8 +3517,32 @@ void NPCDoAction(Gobj *obj) {
     }
 }
 
+/* NPC_WEAPON with the 0x1000 test the other way round (NPCKill) */
+#define NPC_WEAPON_ID(id, f)                                                           \
+    (*(u8 *)&gameObjectsInfo[id].flags24 != 0                                          \
+         ? *(u8 *)&gameObjectsInfo[id].flags24                                         \
+         : ((f = GOBJ_INFO_FLAGS(&gameObjectsInfo[id]) & 0x3000) == 0x1000 ? 19 : (f == 0x2000 ? 20 : 0)))
+
+/* First neighbour of cur (not itself) whose point action kind is 'kind', or -1 */
+static inline s32 NPCKillFindLink(PathPoint *pts, PathPoint *cur, s32 kind) {
+    s32 link = -1;
+    s32 i;
+
+    for (i = 0; i < 3; i++) {
+        if (cur->links[i] != i && cur->links[i] >= 0 && ((pts[cur->links[i]].flags & 0xF00) >> 8) == kind) {
+            link = cur->links[i];
+            break;
+        }
+    }
+    return link;
+}
+
 #ifdef NON_MATCHING
-/* draft: link-search loops' regalloc and the shared DamageGOBJ tail differ (34 insns short) */
+/* 15 lines, all in the first link search: the original sets link = -1, i = 0 before the
+ * pts/cur copies and kind = 7 in the preheader and loads D_80110134 into a1, not a0 (an inline
+ * with an expression cur arg gave the copies; local/param order variants did not reorder them).
+ * Fixed so far: off+base cur, type = GOBJ_TYPE() kept unfolded, NPC_WEAPON_ID arm order, and
+ * `ret = 17` after the DamageGOBJ call so jump2 cross-jumps only the call tail. */
 s32 NPCKill(s32 id, VECTOR32 *dir) {
     Gobj *obj = gameObjectsInfo[id].runtime;
     NPC *npc = NPC_OF(obj);
@@ -3533,6 +3557,7 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
     s32 refId;
     Gobj *ref;
     s32 f;
+    s32 type;
 
     LevelGetPathInfo(obj->id, &start, &D_80110134);
     NPCSoundGobj(4, id, NULL, 0x280);
@@ -3547,16 +3572,10 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
             obj->target->targetId = -1;
         }
     }
-    cur = &D_80110134[npc->curPoint];
+    cur = (PathPoint *)(npc->curPoint * sizeof(PathPoint) + (u32)D_80110134);
     found = -1;
     if (((cur->flags & 0xF00) >> 8) == 7) {
-        link = -1;
-        for (i = 0; i < 3; i++) {
-            if (cur->links[i] != i && cur->links[i] >= 0 && ((D_80110134[cur->links[i]].flags & 0xF00) >> 8) == 7) {
-                link = cur->links[i];
-                break;
-            }
-        }
+        link = NPCKillFindLink(D_80110134, &D_80110134[npc->curPoint], 7);
         if (link >= 0) {
             b.vx = D_80110134[link].x;
             b.vy = D_80110134[link].y;
@@ -3574,10 +3593,10 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
             obj->move->unk12C = b.vy;
             refId = gameObjectsInfo[obj->id].refId;
             ret = 15;
-            if (refId >= 0 && (ref = gameObjectsInfo[refId].runtime) != NULL && GOBJ_TYPE(ref->id) == 0x37
+            if (refId >= 0 && (ref = gameObjectsInfo[refId].runtime) != NULL && (type = GOBJ_TYPE(ref->id)) == 0x37
                 && !(npc->flags & 0x20000000)) {
+                DamageGOBJ(obj->id, obj->id, ref->id, D_80105F58[NPC_WEAPON_ID(obj->id, f)].nearDamage, 0x892);
                 ret = 17;
-                DamageGOBJ(obj->id, obj->id, ref->id, D_80105F58[NPC_WEAPON(obj->id, f)].nearDamage, 0x892);
             }
         }
     } else {
@@ -3606,9 +3625,9 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
             MOVE_ROT(obj->move).vy = ratan2(a.vx, a.vz);
             MOVE_ROT(obj->move).vz = 0;
             refId = gameObjectsInfo[obj->id].refId;
-            if (refId >= 0 && (ref = gameObjectsInfo[refId].runtime) != NULL && GOBJ_TYPE(ref->id) == 0x37
+            if (refId >= 0 && (ref = gameObjectsInfo[refId].runtime) != NULL && (type = GOBJ_TYPE(ref->id)) == 0x37
                 && !(npc->flags & 0x20000000)) {
-                DamageGOBJ(obj->id, obj->id, ref->id, D_80105F58[NPC_WEAPON(obj->id, f)].nearDamage, 0x892);
+                DamageGOBJ(obj->id, obj->id, ref->id, D_80105F58[NPC_WEAPON_ID(obj->id, f)].nearDamage, 0x892);
             }
         }
     }
