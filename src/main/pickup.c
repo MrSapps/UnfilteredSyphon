@@ -284,7 +284,7 @@ static void func_8008A550(s32 idx) {
     D_80121978[D_801101BC].objId = -1;
 }
 
-/* global until PickupObjectTake, DOORObjDispatch and ELEVATORObjDispatch are C */
+/* global until DOORObjDispatch and ELEVATORObjDispatch are C */
 void func_8008A62C(s32 idx) {
     s32 i;
     s32 j;
@@ -564,7 +564,25 @@ s32 PickupObjectIsNotMaxed(s32 objId) {
     return notMaxed;
 }
 
-#ifdef NON_MATCHING
+/* {1,1,1,0}; must precede the "s/pickup.c" literal PickupObjectTake's ASSERTs emit */
+INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
+
+/* Bit n of a bit array that may start at any byte. */
+static inline u32 PickupBitTest(void *base, s32 n) {
+    u8 *p = base;
+    s32 b = n;
+    s32 w;
+    u32 m;
+
+    if ((u32)p & 3) {
+        b = n + ((u32)p & 3) * 8;
+        p = (u8 *)((u32)p & ~3);
+    }
+    w = b >> 5;
+    m = 1 << (b & 0x1F);
+    return ((u32 *)p)[w] & m;
+}
+
 /* logic complete; loop induction variables and the manual/auto test layout differ (369 vs 388 insns) */
 /* Take the pickups the player is standing on (auto = from walking over them, else on "use"). */
 u8 PickupObjectTake(u8 manual) {
@@ -572,7 +590,6 @@ u8 PickupObjectTake(u8 manual) {
     char flakMsg[0x40];
     char takenMsg[0x40];
     u8 took;
-    u8 msgShown;
     u8 any;
     char *msg;
     s32 i;
@@ -581,111 +598,109 @@ u8 PickupObjectTake(u8 manual) {
     u8 consumed;
     u8 armorTaken;
     s32 weapon;
-    u32 *words;
-    s32 bit;
-    s32 misalign;
     s32 added;
     u8 notGrenade;
     u8 notPistol;
     s16 key;
+    s32 wpn;
 
     any = 0;
     if (gObjPlayer->healthInfo->health <= 0) {
         return 0;
     }
-    msg = flakMsg;
-    for (i = D_801101C0 - 1; i >= 0; i--) {
+    i = D_801101C0 - 1;
+    if (i >= 0) {
+        msg = flakMsg;
         p = &D_80121990[i];
-        if (manual ? (p->objId == -1 || !(gameObjectsInfo[p->objId].runtime->flags0 & 0x20))
-                   : !p->showMsg) {
-            armorTaken = 0;
-            took = 0;
-            type = p->objId != -1 ? GOBJ_TYPE(p->objId) : -1;
-            consumed = 0;
-            if (type == -1 || gameObjectsInfo[p->objId].runtime->npcState == 2 || type == 0x63) {
-                consumed = 1;
-            }
-            weapon = 1;
-            if (p->weapon != 2) {
-                weapon = p->weapon;
-            }
-            if (weapon != 0) {
-                words = (u32 *)gWeaponsAvailable;
-                bit = weapon;
-                misalign = (u32)words & 3;
-                if (misalign) {
-                    bit = weapon + misalign * 8;
-                    words = (u32 *)((u32)words & ~3);
+        do {
+            if (!manual ? !D_80121990[i].showMsg
+                        : (p->objId == -1 || !(gameObjectsInfo[p->objId].runtime->flags0 & 0x20))) {
+                armorTaken = 0;
+                took = 0;
+                type = p->objId != -1 ? GOBJ_TYPE(p->objId) : -1;
+                consumed = 0;
+                if (type == -1 || gameObjectsInfo[p->objId].runtime->npcState == 2 || type == 0x63) {
+                    consumed = 1;
                 }
-                if (words[bit >> 5] & (1 << (bit & 0x1F))) {
-                    notGrenade = weapon != 0x13 && weapon != 0x14;
-                    notPistol = weapon != 6 && weapon != 7;
-                    added = WeaponAddAmmo(weapon, p->amount);
-                    if (added != 0) {
-                        took = 1;
-                        StringTakeAmmoMsg(takenMsg, added, WEAPON_FIELD(D_80105F64, s16, p->weapon), notGrenade,
-                                          notPistol);
-                    } else {
-                        StringMaxedAmmoMsg(takenMsg, WEAPON_FIELD(D_80105F64, s16, p->weapon), notGrenade, notPistol);
-                    }
-                } else {
-                    took = 1;
-                    WeaponAdd(weapon, p->amount);
-                    StringTakeObjectMsg(takenMsg, p->amount, WEAPON_FIELD(D_80105F64, s16, p->weapon));
-                    if (weapon == 0x12) {
-                        SysPlayXA(0xA3, 0, 1);
-                    }
+                wpn = D_80121990[i].weapon;
+                weapon = 1;
+                if (wpn != 2) {
+                    weapon = wpn;
                 }
-                iPickupObjectTakenMsg(takenMsg, p->weapon);
-            }
-            switch (p->armor) {
-            case 0:
-                break;
-            case 1:
-                if (gObjPlayer->healthInfo->armor < 600) {
-                    armorTaken = 1;
-                    StringTakeObjectMsg(flakMsg, 1, 0x18);
-                    if (consumed) {
-                        GameObjectHealth *health = gObjPlayer->healthInfo;
-                        s32 armor = health->armor + 250;
-
-                        if (armor > 600) {
-                            armor = 600;
+                if (weapon != 0) {
+                    if (PickupBitTest(gWeaponsAvailable, weapon)) {
+                        notGrenade = weapon != 0x13 && weapon != 0x14;
+                        notPistol = weapon != 6 && weapon != 7;
+                        added = WeaponAddAmmo(weapon, D_80121990[i].amount);
+                        if (added != 0) {
+                            StringTakeAmmoMsg(takenMsg, added, WEAPON_FIELD(D_80105F64, s16, wpn), notGrenade,
+                                              notPistol);
+                            took = 1;
+                        } else {
+                            StringMaxedAmmoMsg(takenMsg, WEAPON_FIELD(D_80105F64, s16, wpn), notGrenade, notPistol);
                         }
-                        health->armor = armor;
                     } else {
-                        gObjPlayer->healthInfo->armor = 600;
+                        took = 1;
+                        WeaponAdd(weapon, D_80121990[i].amount);
+                        StringTakeObjectMsg(takenMsg, D_80121990[i].amount, WEAPON_FIELD(D_80105F64, s16, wpn));
+                        if (weapon == 0x12) {
+                            SysPlayXA(0xA3, 0, 1);
+                        }
                     }
-                } else {
-                    StringUndamagedFlakJacket(flakMsg);
+                    iPickupObjectTakenMsg(takenMsg, wpn);
                 }
-                iPickupObjectTakenMsg(flakMsg, 0x1A);
-                break;
-            case 2:
+                if (D_80121990[i].armor != 0) {
+                    switch (D_80121990[i].armor) {
+                    case 1:
+                        if (gObjPlayer->healthInfo->armor < 600) {
+                            armorTaken = 1;
+                            StringTakeObjectMsg(flakMsg, 1, 0x18);
+                            if (consumed) {
+                                GameObjectHealth *health = gObjPlayer->healthInfo;
+                                s32 armor = health->armor;
+
+                                armor += 250;
+
+                                if (armor > 600) {
+                                    armor = 600;
+                                }
+                                health->armor = armor;
+                            } else {
+                                gObjPlayer->healthInfo->armor = 600;
+                            }
+                        } else {
+                            StringUndamagedFlakJacket(flakMsg);
+                        }
+                        iPickupObjectTakenMsg(flakMsg, 0x1A);
+                        break;
+                    case 2:
 #line 825
-                ASSERT(p->objId != -1);
-                key = gameObjectsInfo[gameObjectsInfo[p->objId].runtime->id].refId;
-                armorTaken = 1;
+                        ASSERT(D_80121990[i].objId != -1);
+                        key = gameObjectsInfo[gameObjectsInfo[D_80121990[i].objId].runtime->id].refId;
 #line 828
-                ASSERT(key != -1);
-                StringTakeObjectMsg(msg, 1, 0x19);
-                WeaponAdd(0x17, 0);
-                if (key != -1) {
-                    SysPostMessage(0x1B, 5, p->objId, key, 0, 0, 0, 0);
+                        ASSERT(key != -1);
+                        armorTaken = 1;
+                        StringTakeObjectMsg(msg, 1, 0x19);
+                        WeaponAdd(0x17, 0);
+                        if (key != -1) {
+                            SysPostMessage(0x1B, 5, D_80121990[i].objId, key, 0, 0, 0, 0);
+                        }
+                        TextStatusMessage(msg, 0);
+                        break;
+                    }
                 }
-                TextStatusMessage(msg, 0);
-                break;
-            }
-            if (took || armorTaken) {
-                if (manual && p->objId != -1) {
-                    PickUpInventory(p->objId);
+                if (took || armorTaken) {
+                    if (manual && p->objId != -1) {
+                        PickUpInventory(p->objId);
+                    }
+                    any = 1;
                 }
-                any = 1;
+                if (consumed) {
+                    func_8008A62C(i);
+                }
             }
-            if (consumed) {
-                func_8008A62C(i);
-            }
-        }
+            p--;
+        } while (--i >= 0);
     }
     if (any) {
         pos.vx = gObjPlayer->anim->frame->pos.vx;
@@ -696,9 +711,6 @@ u8 PickupObjectTake(u8 manual) {
     }
     return any;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", PickupObjectTake);
-#endif
 
 void *PickupSetKeyCallback(void (*cb)()) {
     void *old = D_8010FD00;
@@ -1032,7 +1044,6 @@ void iSwitchReactivate(Gobj *obj) {
     }
 }
 
-INCLUDE_RODATA("asm/main/nonmatchings/pickup", D_80012DE0);
 
 
 
