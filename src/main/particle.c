@@ -3591,7 +3591,18 @@ void EGSDisplayAddSprite(void *display, void *prim);
 
 #ifdef NON_MATCHING
 /* scheduling of the camera-matrix copy and register choice for p/sprite differ */
+/* r6E (114 -> 24): the delete/add loops use their own pointers (e, f: block-local, so local-alloc ties
+ * the i*0x68 chain to them in s0) and the main loop its own q; screen offsets via s16 inlines
+ * (POSITION.x - 0xC0 computed first, lhu). Left: the original reads `i = q->next` but then q
+ * (32 refs, live 120: 13333) outranks sprite (30/106: 11320) and takes s0; `D_80119040[i].next`
+ * drops q to 30 refs (right regs) but recomputes the address (13 lines). Also sprite->b = 0 is
+ * stored after the three color lbu's, and the else-branch y/w/h order. */
 /* Glows: camera-facing sprites sized by the projected height of the group */
+static inline s16 ScreenOX(void) { return POSITION.x - 0xC0; }
+static inline s16 ScreenOY(void) { return POSITION.y - 0x78; }
+#define SCREEN_OX ScreenOX()
+#define SCREEN_OY ScreenOY()
+static inline s16 ScreenY(s32 vy) { vy = -vy; return vy - ScreenOY(); }
 void ParticleDisplayPolyFlat4(ParticleGroup *g) {
     VECTOR32 screen;
     void *display[2];
@@ -3610,6 +3621,9 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
     s32 depth;
     s32 bias;
     Particle *p;
+    Particle *q;
+    Particle *e;
+    Particle *f;
     ParticleSprite *sprite;
 
     CameraGetDisplay(gCamera, display);
@@ -3660,41 +3674,41 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
         }
     } else if (scale == 0) {
         CameraGetDisplay(gCamera, display2);
-        for (i = g->head; i >= 0; i = p->next) {
-            p = &D_80119040[i];
-            EGSDisplayDeleteSprite(display2[0], p->prim);
+        for (i = g->head; i >= 0; i = e->next) {
+            e = &D_80119040[i];
+            EGSDisplayDeleteSprite(display2[0], e->prim);
         }
         g->unk25 = 0;
         return;
     }
     while (i >= 0) {
-        p = &D_80119040[i];
-        sprite = SPRITE(p);
+        q = &D_80119040[i];
+        sprite = SPRITE(q);
         if (i != g->head) {
-            EGSDisplayTransformWorldToScreen(&p->pos, &screen);
+            EGSDisplayTransformWorldToScreen(&q->pos, &screen);
         }
         if (screen.vz <= 0) {
             if (g->id < 0) {
-                ParticleFree(g, p, prev, i);
+                ParticleFree(g, q, prev, i);
                 goto next;
             }
         } else {
             if (g->unk1C == 1) {
                 D_80110050++;
                 D_8011004C += (rcos(gSystemTick) + 0x2000) >> 6;
-                SPRITE(p)->w = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 1))) >> 14);
-                SPRITE(p)->h = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 3))) >> 15);
-                SPRITE(p)->x = screen.vx - (POSITION.x - 0xC0);
-                SPRITE(p)->y = -screen.vy - (POSITION.y - 0x78);
+                SPRITE(q)->w = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 1))) >> 14);
+                SPRITE(q)->h = scale + ((scale * rcos(D_8011004C * ((D_80110050 + 1) & 3))) >> 15);
+                SPRITE(q)->x = screen.vx - SCREEN_OX;
+                SPRITE(q)->y = ScreenY(screen.vy);
             } else {
                 w = scale;
-                if ((s32)g->fade < 0 && p->unk62 == 3 && w < 0x4000) {
+                if ((s32)g->fade < 0 && q->unk62 == 3 && w < 0x4000) {
                     w *= 2;
                 }
-                sprite->x = screen.vx - (POSITION.x - 0xC0);
+                sprite->x = screen.vx - SCREEN_OX;
                 sprite->w = w;
                 sprite->h = w;
-                sprite->y = -screen.vy - (POSITION.y - 0x78);
+                sprite->y = ScreenY(screen.vy);
             }
             depth = (screen.vz >> 2) - (screen.vz >> 4);
                 depth += (bias = g->unk26 - 16);
@@ -3707,22 +3721,22 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
             if (infrared) {
                 sprite->r = 0;
                 sprite->b = 0;
-                sprite->g = (u32)(((u8 *)&p->color)[2] + ((u8 *)&p->color)[1] + ((u8 *)&p->color)[0]) >> 2;
+                sprite->g = (u32)(((u8 *)&q->color)[2] + ((u8 *)&q->color)[1] + ((u8 *)&q->color)[0]) >> 2;
             } else {
-                sprite->r = p->color;
-                sprite->g = (u32)p->color >> 8;
-                sprite->b = ((u16 *)&p->color)[1];
+                sprite->r = q->color;
+                sprite->g = (u32)q->color >> 8;
+                sprite->b = ((u16 *)&q->color)[1];
             }
         }
         prev = i;
     next:
-        i = p->next;
+        i = D_80119040[i].next;
         D_80110080++;
     }
     if (added) {
-        for (i = g->head; i >= 0; i = p->next) {
-            p = &D_80119040[i];
-            EGSDisplayAddSprite(display[0], p->prim);
+        for (i = g->head; i >= 0; i = f->next) {
+            f = &D_80119040[i];
+            EGSDisplayAddSprite(display[0], f->prim);
         }
     }
 }
