@@ -280,7 +280,7 @@ extern s32 gNPCGeneratorCount;
 extern u16 *generatorInfo; /* 0x10-byte records, id first */
 extern s32 gSaveLevelData[1];
 extern s32 gExeTick;
-static const char D_80013354[9] = "s/save.c"; /* __FILE__ of SaveRestoreContinue (asm) */
+static const char D_80013354[9] = "s/save.c"; /* __FILE__ */
 
 s32 FriendlyGobjGetReferenceY(GameObjectRuntime *obj, s32 arg1);
 s16 InterfaceCountdownGet(void);
@@ -375,16 +375,28 @@ void func_80090724(void) {
 }
 
 
-#ifdef NON_MATCHING
-/* logic matches; GCC here anchors the continue-data base at a different field and saves one register less */
+/* Bit n of a bit array that may start at any byte (see BITARRAY_SET). */
+static inline u32 BitArrayTest(void *base, s32 n) {
+    u8 *p = base;
+    s32 b = n;
+    s32 w;
+    u32 m;
+
+    if ((u32)p & 3) {
+        b = n + ((u32)p & 3) * 8;
+        p = (u8 *)((u32)p & ~3);
+    }
+    w = b >> 5;
+    m = 1 << (b & 0x1F);
+    return ((u32 *)p)[w] & m;
+}
+
 s32 SaveRestoreContinue(void) {
     s32 saved = 0;
     s32 dummy = 0;
     s32 i;
     GameObjectRuntime *obj;
     ContinueObject *entry;
-    u32 *words;
-    s32 bit;
 
     if (!gContinueLevel) {
         return 0;
@@ -396,32 +408,24 @@ s32 SaveRestoreContinue(void) {
     if (D_80121B08.generatorCount != gNPCGeneratorCount) {
         EGSDebugAssert(1, 0, (char *)D_80013354, 0x1D3);
     }
-    gLevData->sector = D_80121B08.sector;
-    gGabeSector = D_80121B08.sector;
+    gGabeSector = gLevData->sector = D_80121B08.sector;
     TerrainZoomAndOrient(D_80121B08.position, D_80121B08.orient, D_80121B08.sector);
     GameCameraRequestCutToBehind();
     WeaponRestoreSaveInfo(D_80121B08.weaponInfo);
     gExeTick = D_80121B08.exeTick;
-    entry = D_80121B08.objects;
     for (i = 0; i < gLevelGameObjCount; i++) {
         obj = gameObjectsInfo[i].runtime;
         if (obj != NULL) {
-            words = D_80121B08.objAlive;
-            bit = i;
-            if ((u32)words & 3) {
-                bit = i + ((u32)words & 3) * 8;
-                words = (u32 *)((u32)words & ~3);
-            }
-            if (!(words[bit >> 5] & (1 << (bit & 0x1F)))) {
+            if (!BitArrayTest(D_80121B08.objAlive, i)) {
                 obj->healthInfo->health = -1;
             }
         }
+        entry = &D_80121B08.objects[saved];
         if (entry->id == i) {
             if (saved >= D_80121B08.savedObjCount) {
                 EGSDebugAssert(1, 0, (char *)D_80013354, 0x1F4);
             }
             SysPostMessage(0x2A, 5, 0xFFFE, entry->id, (s32)&entry->data1, (s32)&entry->data0, 0, 0);
-            entry++;
             saved++;
         } else {
             SysPostMessage(0x2A, 5, 0xFFFE, i, (s32)&dummy, (s32)&dummy, 0, 0);
@@ -435,19 +439,6 @@ s32 SaveRestoreContinue(void) {
     }
     return 1;
 }
-#else
-#ifndef _PSYQ
-/* INCLUDE_ASM functions still address these through their splat labels */
-__asm__(
-        ".set D_80121B0A, D_80121B08+0x2\n"
-        ".set D_80121B0E, D_80121B08+0x6\n"
-        ".set D_80121BA0, D_80121B08+0x98\n"
-        ".set D_80121BC8, D_80121B08+0xC0\n"
-        ".set D_80121C90, D_80121B08+0x188\n"
-        ".set D_801221E0, D_80121B08+0x6D8\n");
-#endif
-INCLUDE_ASM("asm/main/nonmatchings/save", SaveRestoreContinue);
-#endif
 
 void SavePrepareMemoryCardSave(void) {
     u32 xorSum = 0;
