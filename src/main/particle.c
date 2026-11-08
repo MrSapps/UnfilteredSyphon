@@ -4270,27 +4270,6 @@ typedef struct MoveVelView {
     /* 0x10 */ VECTOR32 vel; /* << 12 */
 } MoveVelView;
 
-#ifdef NON_MATCHING
-/* r6E: the bgez/nop/negu is the abssi2 pattern (`vy >= 0 ? vy : -vy`), fixing the quarter sra.
- * Left (1 line): the vel.vx lw must follow the and. sched2 priority = depth from block start:
- * the and is 2 (lhu->sll latency 2), the lw only 1 (anti dep on the call), so backward sched
- * always places the and last. Needs either the and at prio 1 or the lw at prio 2. */
-/* r4I: a do-while(0) is a sched barrier (sched_analyze_insn flushes at loop notes), but it also
- * weights refs inside it (local-alloc priorities) and ends a cse1 block. `r1 = rand() & life;
- * do { vy = p->vel.vx; } while (0); half = ..` gets the first block's insn order exactly but
- * swaps s1/s2 and the and's v0 (20 lines); `- (half = life >> 1)` in the vx expression plus
- * `do { quarter = life >> 2; } while (0)` fixes quarter and the regs but hoists the vel.vx load
- * above the life sra (12). Operand-order variants of the vx expression: 4-7. */
-/* r4E: sched1 boosts both `half` (insn after the rand call) and `rand() & life` (birthing_insn_p:
- * single-set pseudos), so the tie goes to INSN_LUID and the and (later in source) is scheduled last
- * backward = after half forward; sched2 then keeps that order. The original needs half's insn after
- * the and in the sched1 output. `- (half = life >> 1)` inside the vx expression or `(life >> 1)`
- * everywhere does that but local-alloc then swaps life/half (s1/s2) (12 lines); a twice-set
- * `half = life; half >>= 1;` or `r0 = rand(); r0 &= life;` are worse (5 / 42).
- * r5B (cc1 -dS prints the ready lists): `{ s32 rnd = rand() & life; s32 v = p->vel.vx; half = life >> 1;
- * p->vel.vx = (v >> 1) + rnd - half; }` gives the sched1 order (3 lines), but sched2 then hoists the vel.vx lw
- * above the and: the and has priority 2 (lhu->sll->sra latency chain), the lw only 1. Reusing vy/r1 for the and
- * result also fixes the order but changes v0/v1 or the later and (20). */
 /* Shared particle step; returns 0 when the particle died */
 s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
     u32 flags = g->flags;
@@ -4336,7 +4315,12 @@ s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
             alive = 0;
         } else if (flags & 0x40) {
             life = p->state;
-            { s32 rnd = rand() & life; half = life >> 1; vy = p->vel.vx;
+            { s32 rnd = rand() & life;
+            /* empty do-while(0): its loop notes are a sched barrier that keeps the and ahead of the vel.vx load */
+            do {
+            } while (0);
+            vy = p->vel.vx;
+            half = life >> 1;
             p->vel.vx = (vy >> 1) + rnd - half; }
             p->vel.vz = (p->vel.vz >> 1) + (rand() & life) - half;
             r0 = rand();
@@ -4357,9 +4341,6 @@ s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
     }
     return alive;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateMovement);
-#endif
 
 
 void ParticleUpdateLineMeter(ParticleGroup *g) {
