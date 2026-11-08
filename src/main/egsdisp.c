@@ -2051,21 +2051,28 @@ void EGSDisplayPacketAreaFree(void) {
 }
 
 #ifdef NON_MATCHING
-/* same length now; original stores gCameraID+1 before the camera index math (index copied from the loaded value) and assigns pos/dist/region/priority/otShift to s2-s6 in a different order.
- * The original s2..s6 order is plain pseudo order (pos, dist, region, priority, otShift), i.e. those
- * params tie in global-alloc priority there; here pos (4 refs, live 62) ranks last. u16/s16 index
- * variants only reach 27. */
+/* 8 diff lines. The do {} while (0) (sched barrier) keeps sched1 from sinking the birthing-boosted
+ * param copies down to the EGSFrameCreate call, so their live lengths grow and pos/dist/region/
+ * priority/otShift get s2-s6 as in the original. Left: the original copies the gCameraID load into
+ * s0 with a plain move (here andi: zero_extend of the u16 temp); a same-mode u16/s16 copy is merged
+ * by cse2 (load temp stays class head, its path spans the whole function), and parent's a0 copy is
+ * scheduled later than in the original. */
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
-    s32 index = gCameraID++;
-    EGSCamera *camera = &gCameraArray[(s16)index];
+    u16 id;
+    s32 index;
+    EGSCamera *camera;
     VECTOR p;
     s32 err;
+
+    id = gCameraID++;
+    index = id;
+    do {} while (0);
+    camera = &gCameraArray[(s16)index];
 
     err = EGSFrameCreate(&camera->frame);
     if (err != 0) {
         return err;
     }
-    {
         camera->id = -1;
         camera->projection = dist;
         camera->priority = priority;
@@ -2092,7 +2099,6 @@ s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 p
         p.vz += pos->vz;
         EGSFrameSetPosition(camera->frame, parent, &p);
         *out = camera;
-    }
     return 0;
 }
 #else
@@ -2455,7 +2461,13 @@ s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent) {
 }
 
 #ifdef NON_MATCHING
-/* frame has 0x10 extra bytes and spill slots/prologue order differ */
+/* 7 diff lines, prologue order only. Plain for loops over frames[j] (instead of do/while + fp++)
+ * give the original's frame size (0x78: reload's extra spill slots), the numBlocks reloads and
+ * the loop-exit delay slots; `(s32)hmd` gives the addu off,base order. Left: the original
+ * schedules the anims (a2) and hmd/copies param copies late in block 0 (sw a2,0x30(sp) lands in
+ * the beqz delay slot, root's lw/sw come first). sched1 never schedules the leading run of
+ * hard-reg param copies (sched.c schedule_block, b == 0), so in the original something that is
+ * not a plain hard-reg copy (or a deleted-insn note) must follow the a0 copy. */
 void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
     EGSFrame *root = anim->frame;
     MATRIX m;
@@ -2463,7 +2475,6 @@ void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
     HMDCacheEntry *entries;
     HMDCacheEntry *e;
     EGSFrame **frames;
-    EGSFrame **fp;
     HMDBlock *blk;
     EGSFrame *parent;
     s32 i;
@@ -2492,44 +2503,34 @@ void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
                 anim->unk18 = frames;
                 anim->rot = EGSMemMalloc(hmd->numBlocks * 8);
             }
-            j = 0;
-            blk = (HMDBlock *)(hmd->primOffset * 4 + (u8 *)hmd + 0x24);
-            if (hmd->numBlocks > 0) {
-                fp = frames;
-                do {
-                    m.m[0][0] = blk->m[0];
-                    m.m[1][0] = blk->m[1];
-                    m.m[2][0] = blk->m[2];
-                    m.m[0][1] = blk->m[3];
-                    m.m[1][1] = blk->m[4];
-                    m.m[2][1] = blk->m[5];
-                    m.m[0][2] = blk->m[6];
-                    m.m[1][2] = blk->m[7];
-                    m.m[2][2] = blk->m[8];
-                    m.t[0] = blk->t[0];
-                    m.t[1] = blk->t[1];
-                    j++;
-                    m.t[2] = blk->t[2];
-                    EGSFrameCreateWithNode(fp, NULL);
-                    blk->frame = *fp;
-                    EGSFrameSetMatrixParent(*fp++, &m);
-                    blk = (HMDBlock *)((u8 *)blk + blk->size);
-                } while (j < hmd->numBlocks);
-                j = 0;
+            blk = (HMDBlock *)(hmd->primOffset * 4 + (s32)hmd + 0x24);
+            for (j = 0; j < hmd->numBlocks; j++) {
+                m.m[0][0] = blk->m[0];
+                m.m[1][0] = blk->m[1];
+                m.m[2][0] = blk->m[2];
+                m.m[0][1] = blk->m[3];
+                m.m[1][1] = blk->m[4];
+                m.m[2][1] = blk->m[5];
+                m.m[0][2] = blk->m[6];
+                m.m[1][2] = blk->m[7];
+                m.m[2][2] = blk->m[8];
+                m.t[0] = blk->t[0];
+                m.t[1] = blk->t[1];
+                m.t[2] = blk->t[2];
+                EGSFrameCreateWithNode(&frames[j], NULL);
+                blk->frame = frames[j];
+                EGSFrameSetMatrixParent(frames[j], &m);
+                blk = (HMDBlock *)((s32)blk + blk->size);
             }
-            blk = (HMDBlock *)(hmd->primOffset * 4 + (u8 *)hmd + 0x24);
-            if (hmd->numBlocks > 0) {
-                fp = frames;
-                do {
-                    if (blk->parent >= 0) {
-                        parent = frames[blk->parent];
-                    } else {
-                        parent = root;
-                    }
-                    j++;
-                    EGSFrameLinkParent(*fp++, parent);
-                    blk = (HMDBlock *)((u8 *)blk + blk->size);
-                } while (j < hmd->numBlocks);
+            blk = (HMDBlock *)(hmd->primOffset * 4 + (s32)hmd + 0x24);
+            for (j = 0; j < hmd->numBlocks; j++) {
+                if (blk->parent >= 0) {
+                    parent = frames[blk->parent];
+                } else {
+                    parent = root;
+                }
+                EGSFrameLinkParent(frames[j], parent);
+                blk = (HMDBlock *)((s32)blk + blk->size);
             }
         }
     } else {
