@@ -22,6 +22,12 @@
                      :                                                                 \
                      : "r"(arg)                                                        \
                      : SCRATCH_CLOBBERS)
+#define SCRATCH_CALL3(fn, a, b, c)                                                     \
+    __asm__ volatile(SCRATCH_ENTER "move $4, %0\n\tmove $5, %1\n\tmove $6, %2\n\tjal " #fn \
+                     "\n\t" SCRATCH_LEAVE                                                 \
+                     :                                                                 \
+                     : "r"(a), "r"(b), "r"(c)                                          \
+                     : SCRATCH_CLOBBERS)
 /* As SCRATCH_CALL1, but the argument move sits in the jal delay slot. */
 #define SCRATCH_CALL1_DS(fn, arg)                                                      \
     __asm__ volatile(SCRATCH_ENTER ".set noreorder\n\tjal " #fn "\n\tmove $4, %0\n\t"  \

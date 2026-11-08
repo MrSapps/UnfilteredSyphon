@@ -1,6 +1,7 @@
 #include "common.h"
 #include "game.h"
 #include "egsframe.h"
+#include "scratch.h"
 
 /* egsdisp.c's data is defined before the first function */
 
@@ -463,8 +464,6 @@ typedef struct Str8 {
 } Str8;
 
 /* Run on the scratchpad stack (old sp saved at 0x1F800000). */
-#define SPAD_STACK_ENTER() __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0")
-#define SPAD_STACK_LEAVE() __asm__ volatile("lw $29, 0x1F800000")
 s32 gPointSourceHMD; /* common, $gp */
 SDATA_LOCAL(gPointSourceHMD)
 extern struct CameraAnim {
@@ -1173,8 +1172,7 @@ void a_prim(u32 *ot, void *prim) {
     ((volatile OTTag *)ot)->addr = (u32)prim;
 }
 
-#ifdef NON_MATCHING
-/* register allocation: original spills end/maxDepth/flags to the stack differently */
+/* D_80013724 (the video-mode border box) */
 INCLUDE_PART1("asm/main/nonmatchings/egsdisp", iEGSDisplaySort)
 
 s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
@@ -1196,7 +1194,6 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     s32 code;
     s32 words;
     s32 abr;
-    u16 sortBuffer;
 
     gSubsectorsSorted = 0;
     gSubsectorPolysSorted = 0;
@@ -1207,7 +1204,7 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     end = gPacketAreaEnd;
     anims = camera->anims;
     if (camera->index == 0) {
-        skip = gCameraArray[3].flags & 1;
+        skip = gCameraArray[3].flags % 2; /* % keeps the u16 load (& 1 narrows it to lbu) */
     }
     for (; sprites != NULL && !skip; sprites = sprites->next) {
         spkt = GsOUT_PACKET_P;
@@ -1242,10 +1239,7 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
             FinalizePointSources();
         }
         SortEMDs(camera, anims, gSortBuffer);
-        sortBuffer = gSortBuffer;
-        __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0" : : : "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$10", "$11", "$12", "$13", "$14", "$15", "$24", "$25");
-        SortGs(camera, anims, sortBuffer);
-        SPAD_STACK_LEAVE();
+        SCRATCH_CALL3(SortGs, camera, anims, (u16)gSortBuffer);
     }
     camera->polysSorted += gSubsectorPolysSorted;
     for (; glines != NULL; glines = glines->next) {
@@ -1300,9 +1294,6 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", iEGSDisplaySort);
-#endif
 
 void EGSDisplayQueueInterrupt(void (*func)(), s32 delay, s32 arg) {
     EGSListNode *node = gDisplayInterruptList;
