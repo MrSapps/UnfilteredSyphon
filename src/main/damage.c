@@ -857,8 +857,6 @@ void DamageGobjCAS2(s16 id, s16 from, s16 by, s32 amount, s32 kind, s32 aimed, V
     SysPostMessage(0xD, 4, by, id, 0, 0, 0, 0);
 }
 
-#ifdef NON_MATCHING
-/* regalloc only: callee-saved permutation (original: attacker s1, gobj s2, packet s3, from s4; ours gobj s1, packet s2, from s3, attacker s4) */
 /* Hit animation callback: work out where the pending damage hit and from which direction,
  * then apply it now or queue it as a delayed bullet impact. */
 void DamageGobjCAS(s16 id, s32 action) {
@@ -894,12 +892,12 @@ void DamageGobjCAS(s16 id, s32 action) {
                 D_8011E8D8 = target->aimPos;
                 dir = target->aimDir;
             } else {
-                aimed = 0;
                 D_8011E8D8.vx = gobj->anim->frame->pos.vx;
                 D_8011E8D8.vy = gobj->anim->frame->pos.vy;
                 D_8011E8D8.vz = gobj->anim->frame->pos.vz;
                 D_8011E8D8.vy = -D_8011E8D8.vy;
                 func_800669B0(&D_8011E8D8, attacker, &dir);
+                aimed = 0;
             }
         } else {
             if ((u32)(gobj->npcState - 1) < 2) {
@@ -930,18 +928,24 @@ void DamageGobjCAS(s16 id, s32 action) {
         } else if (from < 0) {
             DamageGobjCAS2(id, from, by, health->unk0C, GOBJ_HEALTH(gobj)->material, aimed, &D_8011E8D8, &dir);
         } else {
-            delay = ParticleDamageDelay(from, &D_8011E8D8);
-            if (delay > 0) {
-                packet = func_80066714();
-            }
+            /* the nested do-while(0)s are loop-weight for flow.c's ref counts: they put
+             * &D_8011E8D8's pseudo and packet above gobj/from in global-alloc priority */
+            do {
+                do {
+                    delay = ParticleDamageDelay(from, &D_8011E8D8);
+                } while (0);
+                if (delay > 0) {
+                    packet = func_80066714();
+                }
+            } while (0);
             if (packet != NULL) {
                 packet->delay = delay + 1;
+                packet->kind = GOBJ_HEALTH(gobj)->material;
                 packet->target = id;
                 packet->from = from;
                 packet->unk16 = by;
-                packet->kind = GOBJ_HEALTH(gobj)->material;
-                packet->unk1E = aimed;
                 packet->unk12 = health->unk0C;
+                packet->unk1E = aimed;
                 packet->x = D_8011E8D8.vx;
                 packet->y = D_8011E8D8.vy;
                 packet->z = D_8011E8D8.vz;
@@ -957,15 +961,6 @@ void DamageGobjCAS(s16 id, s32 action) {
         health->lastAttacker = -1;
     }
 }
-#else
-#ifndef _PSYQ
-/* INCLUDE_ASM functions still address these through their splat labels */
-__asm__(
-        ".set D_8011E8DC, D_8011E8D8+0x4\n"
-        ".set D_8011E8E0, D_8011E8D8+0x8\n");
-#endif
-INCLUDE_ASM("asm/main/nonmatchings/damage", DamageGobjCAS);
-#endif
 
 void DamageDeathCAS(s16 id, s32 action) {
     Gobj *gobj = gameObjectsInfo[id].runtime;
