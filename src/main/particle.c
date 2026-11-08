@@ -3051,16 +3051,14 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
 /* glass object type with a textured ceiling pane */
 #define GOBJ_TYPE_GLASS_CEILING 0x56
 
-#ifdef NON_MATCHING
-/* register allocation differs throughout (abs values, spill slots) */
 ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTOR32 *max) {
     VECTOR32 center;
     VECTOR32 size;
     s32 velocity;
     PathData *path;
-    s32 textured;
     s32 rows;
     s32 cols;
+    s32 textured;
     s32 stepX;
     s32 stepY;
     s32 stepZ;
@@ -3074,6 +3072,7 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
     s32 n;
     s32 r;
     s32 s;
+    s32 s2;
 
     path = NULL;
     LevelGetPathInfo(id, &velocity, &path);
@@ -3109,15 +3108,14 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
     ParticleInitLifeColor(1, 0xEF9F9F);
     D_801100B4 = textured | 0x202;
     ParticleInitDirection(&D_80106428, 0, 0);
-    n = (rows + cols) * 2;
-    g = ParticlePoolAllocate(n, NULL);
+    g = ParticlePoolAllocate((rows + cols) * 2, NULL);
     if (g != NULL) {
         g->unk23 = 16;
         g->wind = -0x2916;
         g->updateType = 4;
         g->unk1C = floor;
         g->drawType = 1;
-        ParticleStart(g, n);
+        ParticleStart(g, (rows + cols) * 2);
     }
     if (D_8011007C + 12 < 0x78) {
         ParticleInitEmitterMask(&center, &size);
@@ -3125,20 +3123,20 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
         D_801100B4 = 0x282;
         dust = ParticlePoolAllocate(6, NULL);
         if (dust != NULL) {
+            dust->unk23 = size.vx >> 4;
             dust->wind = -0x2996;
             dust->unk1C = floor;
             dust->updateType = 10;
             dust->drawType = 0;
-            dust->unk23 = size.vx >> 4;
             ParticleStart(dust, 6);
         }
         dust = ParticlePoolAllocate(6, NULL);
         if (dust != NULL) {
-            dust->wind = -0x2816;
+            dust->unk23 = size.vx >> 3;
             dust->unk1C = floor;
+            dust->wind = -0x2816;
             dust->updateType = 10;
             dust->drawType = 0;
-            dust->unk23 = size.vx >> 3;
             ParticleStart(dust, 6);
         }
     }
@@ -3147,11 +3145,11 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
         VECTOR32 edge;
 
         g->unk25 = 3;
-        stepY = (max->vy - min->vy) / rows;
-        pos.vx = min->vx;
         spin = (rand() & 0x3F) - 0x1F;
-        pos.vy = min->vy;
+        stepY = (max->vy - min->vy) / rows;
         stepX = (max->vx - min->vx) / rows;
+        pos.vx = min->vx;
+        pos.vy = min->vy;
         for (n = 0; n < rows; n++) {
             p = &D_80119040[i];
             pos.vz = min->vz;
@@ -3164,7 +3162,7 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
             s = spin >> (r & 1);
             p->unk64 = s;
             pos.vz = max->vz;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3174,7 +3172,7 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
             pos.vy += stepY;
             p->vel.vy = ((rand() & 0xF) + 1) << 11;
             p->unk64 = s;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3192,10 +3190,10 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
             edge.vz = r * stepZ >> 4;
             ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, 6, textured);
             p->vel.vy = ((rand() & 0xF) + 1) << 11;
-            s = spin >> (r & 1);
-            p->unk64 = s;
+            s2 = spin >> (r & 1);
+            p->unk64 = s2;
             pos.vx = max->vx;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3204,8 +3202,8 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
             pos.vy += stepY;
             pos.vz += stepZ;
             p->vel.vy = ((rand() & 0xF) + 1) << 11;
-            p->unk64 = s;
-            i = p->next;
+            p->unk64 = s2;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3213,9 +3211,6 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
     }
     return g;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneCeiling);
-#endif
 
 void ParticleStartRain(void) {
     VECTOR32 mask = D_80012050;
