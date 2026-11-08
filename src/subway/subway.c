@@ -901,13 +901,10 @@ static void *func_80142D74(s16 id, s16 kind) {
     return NULL;
 }
 
-/* SUBWAY level init. */
-#ifdef NON_MATCHING
-/* 30 lines left (r3C): objective loop now matches (`for (j = i; ...)` with i = 0 before the
- * if: entry test on s0, counter in a fresh reg). The constant 1 (type == 1,
- * func_80141F04() == 1, pathStart == 1: savings 3, life 3) is still hoisted: loop.c
- * moves it because threshold*3*3 >= 258 insns; the original loop must have been a few
- * RTL insns longer (bumped/fogIn/fogOut then shift down one s-reg). */
+/* SUBWAY level init. The npcDead `|= 1` (bitfield RMW that combine folds back to lbu/ori/sb)
+ * makes the object loop 4 RTL insns longer, so loop.c (threshold 29 * savings 3 * life 3 < 262)
+ * keeps the three `== 1` constants in the loop like the original. `info = &gameObjectsInfo[..]`
+ * gives the base+offset addu order of the flags24 reads. */
 void func_80142E90(void) {
     SubwayRuntime *rt;
     GameObjectInfo *info;
@@ -980,7 +977,7 @@ void func_80142E90(void) {
         type = GOBJ_TYPE(i);
         if (type == 1) {
             if (rt->id == gLevelSpecificNpcID && rt->healthInfo->health <= 0) {
-                D_8014586C.npcDead = 1;
+                D_8014586C.npcDead |= 1;
             }
         } else if (type == 0x38) {
             func_80149480(i);
@@ -994,13 +991,13 @@ void func_80142E90(void) {
                 D_8014586C.switchUsed = 1;
             }
         } else if (type == 0x5D) {
-            if (0x78 - xaLevelStartIndex[gSysInfo.level] == i && ((gameObjectsInfo + (s16)i)->flags24 & 0x20) &&
+            if (0x78 - xaLevelStartIndex[gSysInfo.level] == i && ((info = &gameObjectsInfo[(s16)i])->flags24 & 0x20) &&
                 (gObjectives == NULL || !(gObjectives->completed & 1))) {
                 SysExeTickQueueTimer(func_8014284C, 5, (s32)D_80145868);
             }
         } else if (type == 0x5F) {
             ref = gameObjectsInfo[i].refId;
-            if (ref != -1 && GOBJ_TYPE(ref) != GOBJ_TYPE_BOMB && ((gameObjectsInfo + (s16)i)->flags24 & 0x20)) {
+            if (ref != -1 && GOBJ_TYPE(ref) != GOBJ_TYPE_BOMB && ((info = &gameObjectsInfo[(s16)i])->flags24 & 0x20)) {
                 D_8014586C.switchUsed = 1;
             }
         } else if (type == SUBWAY_TYPE_VIRUS) {
@@ -1033,25 +1030,22 @@ void func_80142E90(void) {
         func_80141B3C();
     }
     if (fogIn != -1 && fogOut != -1) {
-        fog = fogOut;
-        if (!(gameObjectsInfo[(s16)fogOut].flags24 & 0x20)) {
+        if (!((info = &gameObjectsInfo[(s16)fogOut])->flags24 & 0x20)) {
             fog = fogIn;
+        } else {
+            fog = fogOut;
         }
         ObjectUpdateAmbientObjectSetting(fog, SUBWAY_TYPE_FOG);
         func_80142B6C(fog, SUBWAY_TYPE_FOG);
     }
     if (gLevelSpecificNpcID != -1) {
-        info = &gameObjectsInfo[gLevelSpecificNpcID];
-        if (((SubwayRuntime *)info->runtime)->npcState == 2) {
+        if (RT(gLevelSpecificNpcID)->npcState == 2) {
             gLevelSpecificNpcName = D_801455D8;
-            ((SubwayRuntime *)info->runtime)->npc->nameMsgId = 0x5A;
+            RT(gLevelSpecificNpcID)->npc->nameMsgId = 0x5A;
         }
     }
     gDefaultLevelDmgFX = 11;
 }
-#else
-INCLUDE_ASM("asm/subway/nonmatchings/subway", func_80142E90);
-#endif
 
 /* Line the cars of a train up behind its head car again. */
 static void func_80143740(s32 train) {
