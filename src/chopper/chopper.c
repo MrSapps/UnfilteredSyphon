@@ -1137,19 +1137,27 @@ static void func_801421D8(u8 *facingOut) {
 INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_801421D8);
 #endif
 
-#ifdef NON_MATCHING
-/*
- * Same logic; gcc keeps &D_801456B0 / &D_80145690 in callee-saved registers
- * where the original rematerialises them, which shifts register allocation.
- * r4D: it is cse: the block copy's address pseudo (aim = D_801456B0, look = D_80145690)
- * replaces the symbol in one later `D_801456B0.vx = ...` store reached on the same cse path,
- * so the pseudo lives across calls. Moving `aim = D_801456B0;` after `track = 1;` gives 22
- * (fixes the D_80145565 load order) but the cse reuse remains.
- * r5C: the original's copy is movstrsi with a CONSTANT source (output_block_move does `la a2,sym` itself and
- * has only 3 temps left: 3 lw/sw + 1 lw/sw), i.e. combine folded the address pseudo into the movstr because cse
- * never reused it. The reused store is the else-branch one (D_80145565 == 0), reached by cse follow-jumps
- * (taken beqz, label preceded by BARRIER); a goto/if(0) layout of the else body is followed the same way.
- */
+/* Gun aim point straight ahead along D_801456C0. (As an inline, cse never reuses the
+ * aim/look block copy's address pseudo for these stores.) */
+static inline void iAimAhead(Vec4 *ofs) {
+    ofs->vx = EGSMathFIXMul(D_801456C0.vx, 0x1900);
+    ofs->vy = EGSMathFIXMul(D_801456C0.vy, 0x1900);
+    ofs->vz = EGSMathFIXMul(D_801456C0.vz, 0x1900);
+    D_801456B0.vx = D_801456A0.vx + ofs->vx;
+    D_801456B0.vy = D_801456A0.vy + ofs->vy;
+    D_801456B0.vz = D_801456A0.vz + ofs->vz;
+}
+
+/* Searchlight point ahead along the heading D_80145680, at target height. */
+static inline void iLookAhead(Vec4 *ofs) {
+    ofs->vx = EGSMathFIXMul(D_80145680.vx, 0xC80);
+    ofs->vy = EGSMathFIXMul(D_80145680.vy, 0xC80);
+    ofs->vz = EGSMathFIXMul(D_80145680.vz, 0xC80);
+    D_80145690.vx = chopperPos.vx + ofs->vx;
+    D_80145690.vy = chopperPos.vy + ofs->vy;
+    D_80145690.vz = chopperPos.vz + ofs->vz;
+    D_80145690.vy = D_80145670.vy;
+}
 /* Swing the gun and searchlight toward their targets. */
 static void func_80143B88(u8 visible) {
     Vec4 dir;
@@ -1160,9 +1168,9 @@ static void func_80143B88(u8 visible) {
     u8 track;
     u8 fire;
 
-    aim = D_801456B0;
     D_80145571 = 0;
     track = 1;
+    aim = D_801456B0;
     if (D_80145565) {
         D_801456E0.vy += 0x11C;
         if (D_801456E0.vy > 0x800) {
@@ -1180,12 +1188,7 @@ static void func_80143B88(u8 visible) {
         EGSFrameSetRotationParentYXZ(D_80145560, &D_80145710);
         EGSGeometry_GetFuzzyXZDistancePoint2Point(&aim, &D_80145670, &dist);
         if (!D_80145570 || !visible) {
-            ofs.vx = EGSMathFIXMul(D_801456C0.vx, 0x1900);
-            ofs.vy = EGSMathFIXMul(D_801456C0.vy, 0x1900);
-            ofs.vz = EGSMathFIXMul(D_801456C0.vz, 0x1900);
-            D_801456B0.vx = D_801456A0.vx + ofs.vx;
-            D_801456B0.vy = D_801456A0.vy + ofs.vy;
-            D_801456B0.vz = D_801456A0.vz + ofs.vz;
+            iAimAhead(&ofs);
         } else {
             dir.vx = D_80145670.vx - aim.vx;
             dir.vy = D_80145670.vy - aim.vy;
@@ -1219,12 +1222,7 @@ static void func_80143B88(u8 visible) {
         }
     } else {
         D_80145564 = 0;
-        ofs.vx = EGSMathFIXMul(D_801456C0.vx, 0x1900);
-        ofs.vy = EGSMathFIXMul(D_801456C0.vy, 0x1900);
-        ofs.vz = EGSMathFIXMul(D_801456C0.vz, 0x1900);
-        D_801456B0.vx = D_801456A0.vx + ofs.vx;
-        D_801456B0.vy = D_801456A0.vy + ofs.vy;
-        D_801456B0.vz = D_801456A0.vz + ofs.vz;
+        iAimAhead(&ofs);
     }
     EGSFrameLookAtPoint(D_80145558, 0, &D_801456B0, 0);
     if (D_80145566 && visible) {
@@ -1246,13 +1244,7 @@ static void func_80143B88(u8 visible) {
             D_80145690.vy = look.vy + ofs.vy;
             D_80145690.vz = look.vz + ofs.vz;
         } else {
-            ofs.vx = EGSMathFIXMul(D_80145680.vx, 0xC80);
-            ofs.vy = EGSMathFIXMul(D_80145680.vy, 0xC80);
-            ofs.vz = EGSMathFIXMul(D_80145680.vz, 0xC80);
-            D_80145690.vx = chopperPos.vx + ofs.vx;
-            D_80145690.vy = chopperPos.vy + ofs.vy;
-            D_80145690.vz = chopperPos.vz + ofs.vz;
-            D_80145690.vy = D_80145670.vy;
+            iLookAhead(&ofs);
         }
         track = 0;
     }
@@ -1262,9 +1254,6 @@ static void func_80143B88(u8 visible) {
     }
     EGSFrameLookAtPoint(D_80145554, 0, &D_80145690, 0);
 }
-#else
-INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_80143B88);
-#endif
 
 /* `full` gets a3 through global.c expand_preferences: dmg = full >> k shares dmg's a3 preference
  * (from the DamageGOBJ arg). The terrain path's id must be its own variable, or dmg also
