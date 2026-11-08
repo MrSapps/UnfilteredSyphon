@@ -104,7 +104,7 @@ extern void (*gSysMovieDoneCallback)(void);
 /* TODO: string literals; addressed directly until system.c's data moves to C */
 extern char D_8010F634[]; /* "%s.OVL" (.sdata) */
 extern char D_8010F63C[]; /* "MENU" (.sdata) */
-extern char D_80010078[]; /* "\\BIN\\%s;1", owned by asm SysLoadOverlay */
+extern char D_80010078[]; /* "\\BIN\\%s;1", used by SysLoadOverlay */
 extern u8 gStallLoaded;
 extern u8 gStallFaded;
 extern u8 gPlayerRadioFlag;
