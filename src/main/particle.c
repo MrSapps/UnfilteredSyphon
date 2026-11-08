@@ -2943,7 +2943,11 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
     }
     ParticleInitEmitterXZPlane(min, max, &size);
     ParticleInitAngle(0x555, 0, 0);
-    ParticleInitLifeColor(1, textured == 0 ? 0xEF9F9F : 0x3F3F3F);
+    if (textured == 0) {
+        ParticleInitLifeColor(1, 0xEF9F9F);
+    } else {
+        ParticleInitLifeColor(1, 0x3F3F3F);
+    }
     D_801100B4 = textured | 0x202;
     ParticleInitDirection(&push, 0x1FF, 0);
     n = (rows + cols) * 2;
@@ -2963,20 +2967,20 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
         ParticleInitDirection(&push, 0, 0);
         dust = ParticlePoolAllocate(6, NULL);
         if (dust != NULL) {
+            dust->unk23 = size.vy >> 3;
             dust->wind = -0x2996;
             dust->unk1C = floor;
             dust->updateType = 10;
             dust->drawType = 0;
-            dust->unk23 = size.vy >> 3;
             ParticleStart(dust, 6);
         }
         dust = ParticlePoolAllocate(6, NULL);
         if (dust != NULL) {
+            dust->unk23 = size.vy >> 3;
             dust->wind = -0x2816;
             dust->unk1C = floor;
             dust->updateType = 10;
             dust->drawType = 0;
-            dust->unk23 = size.vy >> 3;
             ParticleStart(dust, 6);
         }
     }
@@ -2997,7 +3001,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             p->vel.vy = ((rand() & 0xF) + 1) << 11;
             s = spin >> (r & 1);
             p->unk64 = s;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3007,7 +3011,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
             pos.vy += stepY;
             p->unk64 = s;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3028,7 +3032,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             s = spin >> (r & 1);
             p->unk64 = s;
             pos.vy = max->vy;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
@@ -3037,7 +3041,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             pos.vx += stepX;
             pos.vz += stepZ;
             p->unk64 = s;
-            i = p->next;
+            i = D_80119040[i].next;
             if (i < 0) {
                 return g;
             }
