@@ -1614,6 +1614,26 @@ static inline s32 GrenadeFuzzyLength(s32 x, s32 y, s32 z) {
     VECTOR32 a;
     s32 t;
 
+    a.vx = abs(x);
+    a.vy = abs(y);
+    a.vz = abs(z);
+    if (a.vx < a.vy) {
+        t = a.vx;
+        a.vx = a.vy;
+        a.vy = t;
+    }
+    if (a.vx < a.vz) {
+        t = a.vx;
+        a.vx = a.vz;
+        a.vz = t;
+    }
+    return a.vx + ((a.vy + a.vz) >> 2);
+}
+
+static inline s32 GrenadeFuzzyLengthZ(s32 x, s32 y, s32 z) {
+    VECTOR32 a;
+    s32 t;
+
     a.vz = abs(z);
     a.vx = abs(x);
     a.vy = abs(y);
@@ -1663,13 +1683,13 @@ static inline void GrenadeFixDiv(s32 a, s32 b, s32 *out) {
 }
 
 #ifdef NON_MATCHING
-/* 31 lines. (1) The window path keeps a dead `ret = 1` in the j slot: ours threads the jump
+/* 10 lines. (1) The window path keeps a dead `ret = 1` in the j slot: ours threads the jump
  * past the !ret test only in jump2 (after flow), the original earlier. Hand-inlining the LOS
- * call with `if (losWindowCount) Damage...; else if (!noHit) {...}` fixes that and the dot/ratio
- * slots (0x104/0x108), but then GrenadeFuzzyLength's `a` no longer reuses req's inline slot
- * (0xC8), so req must stay an inline local. Variants of the inline's return (early
- * `if (!losWindowCount) return noHit;`, u8 return, noHit = 1) don't help.
- * (2) The two fuzzy lengths' abs/compare blocks are scheduled differently. */
+ * call fixes that but breaks req's inline slot reuse (0xC8) for the length helper.
+ * (2) First fuzzy-length block: original stores a.vz right after abs(z) and loads
+ * move->friction last before the beqz (sched1 birthing boost: friction's pseudo is set once;
+ * a separate `friction` local did not get it). abs order x,y,z for the vel length and z,x,y
+ * for the norm length (two helpers) and `scale = -restitution; scale -= 0x1000` fixed the rest. */
 /* Per-tick grenade update: fly, bounce off what it hits, explode after 60 ticks. */
 void iWeaponGrenadeCB(Gobj *grenade) {
     VECTOR32 pos;
@@ -1754,7 +1774,7 @@ void iWeaponGrenadeCB(Gobj *grenade) {
             tang.vy = vel.vy - norm.vy;
             tang.vz = vel.vz - norm.vz;
             scale = ((PlayerMoveInfo *)gobj->move)->friction;
-            GrenadeFixDiv(GrenadeFuzzyLength(norm.vx, norm.vy, norm.vz), GrenadeFuzzyLength(vel.vx, vel.vy, vel.vz) + 1, &ratio);
+            GrenadeFixDiv(GrenadeFuzzyLengthZ(norm.vx, norm.vy, norm.vz), GrenadeFuzzyLength(vel.vx, vel.vy, vel.vz) + 1, &ratio);
             scale *= ratio;
             scale = GRENADE_FIX(scale);
             scale = -scale;
@@ -1764,7 +1784,9 @@ void iWeaponGrenadeCB(Gobj *grenade) {
             ((PlayerMoveInfo *)gobj->move)->impulse.vx += tang.vx;
             ((PlayerMoveInfo *)gobj->move)->impulse.vy += tang.vy;
             ((PlayerMoveInfo *)gobj->move)->impulse.vz += tang.vz;
-            scale = -((PlayerMoveInfo *)gobj->move)->restitution - 0x1000;
+            scale = ((PlayerMoveInfo *)gobj->move)->restitution;
+            scale = -scale;
+            scale -= 0x1000;
             norm.vx = EGSMathFIXMul(norm.vx, scale);
             norm.vy = EGSMathFIXMul(norm.vy, scale);
             norm.vz = EGSMathFIXMul(norm.vz, scale);
