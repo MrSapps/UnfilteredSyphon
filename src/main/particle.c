@@ -2886,20 +2886,15 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             D_801100F4 = 0x7A30;
         }
     }
-    dx = max->vx - min->vx;
-    if (dx < 0) {
-        dx = -dx;
-    }
+    dx = __builtin_abs(max->vx - min->vx);
     dy = max->vy - min->vy;
     if (GOBJ_TYPE(id) == GOBJ_TYPE_GLASS_FIXED) {
         floor = dy > 0 ? min->vy : max->vy;
     } else {
-        floor = ParticleFindFloor(dy > 0 ? min->vy : max->vy);
+        floor = dy > 0 ? min->vy : max->vy;
+        floor = ParticleFindFloor(floor);
     }
-    dz = max->vz - min->vz;
-    if (dz < 0) {
-        dz = -dz;
-    }
+    dz = __builtin_abs(max->vz - min->vz);
     size.vx = func_80052D90(dx);
     size.vy = func_80052D90(dy);
     size.vz = func_80052D90(dz);
@@ -3093,18 +3088,9 @@ ParticleGroup *ParticleGlassPaneCeiling(s32 unused, s32 id, VECTOR32 *min, VECTO
         textured = 0x8000;
         floor = -0x1BC;
     }
-    dx = max->vx - min->vx;
-    if (dx < 0) {
-        dx = -dx;
-    }
-    dy = max->vy - min->vy;
-    if (dy < 0) {
-        dy = -dy;
-    }
-    dz = max->vz - min->vz;
-    if (dz < 0) {
-        dz = -dz;
-    }
+    dx = __builtin_abs(max->vx - min->vx);
+    dy = __builtin_abs(max->vy - min->vy);
+    dz = __builtin_abs(max->vz - min->vz);
     size.vx = func_80052D90(dx);
     size.vy = func_80052D90(dy);
     size.vz = func_80052D90(dz);
