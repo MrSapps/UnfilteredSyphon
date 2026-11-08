@@ -59,7 +59,7 @@ extern u8 gEliminateRhoemerMsg[];
 
 static void func_801412D0();
 static void func_80141400(s16 id, s16 by);
-static void func_8014145C(s32 id, s16 by);
+static void func_8014145C(s16 id, s16 by);
 static s32 func_801415A0();
 static void func_80141624(void);
 static void func_8014165C(s16 id);
@@ -105,23 +105,20 @@ static void func_80141400(s16 id, s16 by) {
     }
 }
 
-#ifdef NON_MATCHING
-/* Right length and logic; register allocation of the id copy differs.
- * An `s16 id` parameter reproduces the entry (copy to a3, sext in place in a0) but then
- * ObjectBombDeath(..., id) gets a sll/sra the original lacks (prototype casts don't help). */
-static void func_8014145C(s32 id, s16 by) {
+/* The original calls ObjectBombDeath with only three arguments ($a3 still holds the id copy). */
+static void func_8014145C(s16 id, s16 by) {
     GameObjectRuntime *rt;
     s16 type;
 
-    rt = gameObjectsInfo[(s16)id].runtime;
-    type = GOBJ_TYPE((s16)id);
+    rt = gameObjectsInfo[id].runtime;
+    type = GOBJ_TYPE(id);
     if (type == GOBJ_TYPE_COP) {
         if (!gDeviceDetonated) {
-            NPCCopKilledWashington(id, by, (s16)gameObjectsInfo[(s16)id].refId, 0, 1);
+            NPCCopKilledWashington(id, by, (s16)gameObjectsInfo[id].refId, 0, 1);
         }
     } else if (type == GOBJ_TYPE_BOMB) {
         if (!(rt->flags1 & 0x80)) {
-            ObjectBombDeath(1, 0x82, 0, id);
+            ((void (*)(s32, s32, s32))ObjectBombDeath)(1, 0x82, 0);
         }
     } else if (type == SUBWAY2_TYPE_BOMB) {
         if (rt->flags0 & 0x20) {
@@ -129,9 +126,6 @@ static void func_8014145C(s32 id, s16 by) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/subway2/nonmatchings/subway2", func_8014145C);
-#endif
 
 static s32 func_801415A0(s32 arg0, s32 arg1, s32 arg2, s32 id) {
     s32 ret;
