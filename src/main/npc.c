@@ -2720,15 +2720,18 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
 }
 
 #ifdef NON_MATCHING
-/* draft: right shape (912 vs 906 insns); script-step loads and flag-update scheduling differ */
+/* 90 lines. step/kind/mode are s32 (orig re-reads step unmasked, kind with lh, mode with lh).
+ * Left: the kind == 0 flag update reloads npc->flags after the &= ~0x400 store and keeps
+ * ~0x80000 and ~0x2000 as two unfolded ands (a volatile access gives the reload but not the
+ * rest); several level-18 / target blocks schedule differently; orig saves one more s-reg. */
 void NPCIQEveryFrame(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
-    u8 mode = npc->unk46;
+    s32 mode = npc->unk46;
     VECTOR32 pt;
     VECTOR32 pos;
     VECTOR32 off;
-    u8 step;
-    s16 kind;
+    s32 step;
+    s32 kind;
     s32 flags;
     u32 k;
     VECTOR32 *dir;
