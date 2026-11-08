@@ -1180,15 +1180,16 @@ INCLUDE_PART1("asm/main/nonmatchings/egsdisp", iEGSDisplaySort)
 s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     DR_TPAGE tpage;
     GsBOXF box;
+    u8 *end;
     EGSListNode *sprites = camera->sprites;
     EGSListNode *polys = camera->polys;
     EGSListNode *glines = camera->glines;
     EGSListNode *anims;
     u8 skip = 0;
-    u8 transp;
-    u32 maxDepth;
-    u8 *end;
+    u32 maxDepth = 1 << camera->otShift;
+    u8 transp = camera->flags & 0x10;
     u8 *pkt;
+    u8 *spkt;
     EGSSprite *sp;
     EGSPrim *prim;
     s32 len;
@@ -1202,18 +1203,16 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     gGameTick = tick;
     camera->polysSorted = 0;
     camera->unkA2 = 0;
-    transp = camera->flags & 0x10;
     end = (&gOutPacket)[gCurrentDrawBuffer] + gPacketAreaSize;
     gPacketAreaEnd = end;
-    maxDepth = 1 << camera->otShift;
     anims = camera->anims;
     if (camera->index == 0) {
         skip = gCameraArray[3].flags & 1;
     }
     for (; sprites != NULL && !skip; sprites = sprites->next) {
-        pkt = GsOUT_PACKET_P;
+        spkt = GsOUT_PACKET_P;
         sp = sprites->data;
-        if (end < pkt + 0x40) {
+        if (end < spkt + 0x40) {
             gPacketAreaFull = 1;
             break;
         }
@@ -1224,10 +1223,10 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
             if (camera->index == 1) {
                 GsSortFastSprite(sp, &gOtbl[gSortBuffer], sp->pri);
             } else {
-                pkt[3] = 1;
-                ((u32 *)pkt)[1] = 0xE1000200;
-                a_prim((u32 *)gOtbl[gSortBuffer].org + sp->pri, pkt);
-                GsOUT_PACKET_P = pkt + 8;
+                spkt[3] = 1;
+                ((u32 *)spkt)[1] = 0xE1000200;
+                a_prim((u32 *)gOtbl[gSortBuffer].org + sp->pri, spkt);
+                GsOUT_PACKET_P = spkt + 8;
                 GsSortSprite(sp, &gOtbl[gSortBuffer], sp->pri);
             }
         }
@@ -1244,17 +1243,19 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
         }
         SortEMDs(camera, anims, gSortBuffer);
         sortBuffer = gSortBuffer;
-        SPAD_STACK_ENTER();
+        __asm__ volatile("sw $29, 0x1F800000\n\tli $29, 0x1F8003E0" : : : "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$10", "$11", "$12", "$13", "$14", "$15", "$24", "$25");
         SortGs(camera, anims, sortBuffer);
         SPAD_STACK_LEAVE();
     }
     camera->polysSorted += gSubsectorPolysSorted;
     for (; glines != NULL; glines = glines->next) {
+        void *line = glines->data;
+
         if (end < GsOUT_PACKET_P + 0x20) {
             gPacketAreaFull = 1;
             break;
         }
-        GsSortGLine(glines->data, &gOtbl[gSortBuffer], 1);
+        GsSortGLine(line, &gOtbl[gSortBuffer], 1);
     }
     pkt = GsOUT_PACKET_P;
     for (; polys != NULL && !skip; polys = polys->next) {
