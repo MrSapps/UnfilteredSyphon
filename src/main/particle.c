@@ -4123,6 +4123,12 @@ typedef struct ParticlePolyFT3 {
 
 #ifdef NON_MATCHING
 /* regalloc: prev is spilled instead of &v (the target spills &v and &w) */
+/* r6E (77 -> 3): each `goto free` is an inline ParticleFree + goto (the duplicate calls, later
+ * cross-jumped, give prev the refs to beat &v/&w), and case 6 computes xy0 before its vz test.
+ * Left: after the fade join the original issues lw color, lbu unk25, li 3 (beqz slot stays nop);
+ * ours puts li 3 first (reorg then steals it into the slot) because sched1 birthing-boosts the
+ * single-set color load to the block end. `color` set twice (dead init, if/else reload) doesn't
+ * survive flow/cse. */
 /* World-space triangles (debris) spinning in the XY (type 3) or ZY (type 6) plane */
 void ParticleDisplayPolyWorld(ParticleGroup *g) {
     VECTOR32 screen;
@@ -4159,7 +4165,8 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                 v.vz = p->pos.vz + TRI(p)->verts[0].offset;
                 EGSDisplayTransformWorldToScreen(&v, &screen);
                 if (screen.vz <= 0) {
-                    goto free;
+                    ParticleFree(g, p, prev, i);
+                    goto done;
                 }
                 xy0 = (u16)screen.vx - (screen.vy << 16);
                 v.vx = p->pos.vx + ((TRI(p)->verts[1].radius * rcos(angle + TRI(p)->verts[1].angle)) >> 12);
@@ -4167,7 +4174,8 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                 v.vz = p->pos.vz + TRI(p)->verts[1].offset;
                 EGSDisplayTransformWorldToScreen(&v, &screen);
                 if (screen.vz <= 0) {
-                    goto free;
+                    ParticleFree(g, p, prev, i);
+                    goto done;
                 }
                 xy1 = (u16)screen.vx - (screen.vy << 16);
                 v.vx = p->pos.vx + ((TRI(p)->verts[2].radius * rcos(angle + TRI(p)->verts[2].angle)) >> 12);
@@ -4175,7 +4183,8 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                 v.vz = p->pos.vz + TRI(p)->verts[2].offset;
                 EGSDisplayTransformWorldToScreen(&v, &screen);
                 if (screen.vz <= 0) {
-                    goto free;
+                    ParticleFree(g, p, prev, i);
+                    goto done;
                 }
                 prev = i;
                 xy2 = (u16)screen.vx - (screen.vy << 16);
@@ -4184,16 +4193,18 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                 w.vy = p->pos.vy + ((TRI(p)->verts[0].radius * rsin(angle + TRI(p)->verts[0].angle)) >> 12);
                 w.vx = p->pos.vx + TRI(p)->verts[0].offset;
                 EGSDisplayTransformWorldToScreen(&w, &screen);
-                if (screen.vz <= 0) {
-                    goto free;
-                }
                 xy0 = (u16)screen.vx - (screen.vy << 16);
+                if (screen.vz <= 0) {
+                    ParticleFree(g, p, prev, i);
+                    goto done;
+                }
                 w.vz = p->pos.vz + ((TRI(p)->verts[1].radius * rcos(angle + TRI(p)->verts[1].angle)) >> 12);
                 w.vy = p->pos.vy + ((TRI(p)->verts[1].radius * rsin(angle + TRI(p)->verts[1].angle)) >> 12);
                 w.vx = p->pos.vx + TRI(p)->verts[1].offset;
                 EGSDisplayTransformWorldToScreen(&w, &screen);
                 if (screen.vz <= 0) {
-                    goto free;
+                    ParticleFree(g, p, prev, i);
+                    goto done;
                 }
                 xy1 = (u16)screen.vx - (screen.vy << 16);
                 w.vz = p->pos.vz + ((TRI(p)->verts[2].radius * rcos(angle + TRI(p)->verts[2].angle)) >> 12);
@@ -4201,13 +4212,13 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
                 w.vx = p->pos.vx + TRI(p)->verts[2].offset;
                 EGSDisplayTransformWorldToScreen(&w, &screen);
                 if (screen.vz <= 0) {
-                free:
                     ParticleFree(g, p, prev, i);
                 } else {
                     prev = i;
                     xy2 = (u16)screen.vx - (screen.vy << 16);
                 }
             }
+        done:
             if (xy2 != 0x7FFFFFFF) {
                 if (g->flags & 0x8000) {
                     polyT = (ParticlePolyFT3 *)p->prim;
