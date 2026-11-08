@@ -516,7 +516,10 @@ static void func_8014196C(s32 id) {
  * sched2 ties: both loads priority 1, luid order decides (ours has 282=D_8014574C before 249=pos.vy
  * after sched1). 60 random orders of the store statements, no-r, r-first and a y local: none better.
  * Not fixed by: moving any one statement of the block, 300 random statement orders, a twice-set h temp,
- * reading D_8014574C directly instead of r, D_80145750 = D_80145754 - (r >> 3). */
+ * reading D_8014574C directly instead of r, D_80145750 = D_80145754 - (r >> 3).
+ * r5C: root cause is sched1 luid order: a1 = r>>3 (insn 307) is placed right above the low-priority a1 arg copy
+ * (birthing_insn_p boost), near the top, so sched2's luid tie-break puts sra a1 / lw 574C early. The original's
+ * sched1 had 307 after the r>>1 sra. Twice-set temps for r>>3 (h = r; h >>= 3) don't change it. */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;
@@ -1142,6 +1145,10 @@ INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_801421D8);
  * replaces the symbol in one later `D_801456B0.vx = ...` store reached on the same cse path,
  * so the pseudo lives across calls. Moving `aim = D_801456B0;` after `track = 1;` gives 22
  * (fixes the D_80145565 load order) but the cse reuse remains.
+ * r5C: the original's copy is movstrsi with a CONSTANT source (output_block_move does `la a2,sym` itself and
+ * has only 3 temps left: 3 lw/sw + 1 lw/sw), i.e. combine folded the address pseudo into the movstr because cse
+ * never reused it. The reused store is the else-branch one (D_80145565 == 0), reached by cse follow-jumps
+ * (taken beqz, label preceded by BARRIER); a goto/if(0) layout of the else body is followed the same way.
  */
 /* Swing the gun and searchlight toward their targets. */
 static void func_80143B88(u8 visible) {

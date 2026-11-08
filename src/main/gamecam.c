@@ -1562,7 +1562,11 @@ void func_8001D89C(VECTOR32 *pos) {
  * the original has neg in a0. Tried (r2C): up=0 inside the if, inverted if, neg as lim/fov/
  * down/up/diff.vz/cur.vz, -fov repeated, cur.vx + (diff.vx - down) order: all 11-16.
  * r4G: `up = neg * 3; up /= 64;` raises up's refs so it is allocated first (neg a0, up v1 as in
- * the original, 8 lines) but then the *3 lands in up instead of a v0 temp. */
+ * the original, 8 lines) but then the *3 lands in up instead of a v0 temp.
+ * r5C (greg): neg (297) conflicts only with up(75), 302 and v0, so it takes v1 in pass 0. To land in a0 it needs
+ * a conflicting pseudo with a v1 hard preference (regs_someone_prefers) - up has none, since set_preference only
+ * looks at the FIRST operand of an arithmetic src (diff.vx - up gives diff.vx the pref). Nested do{}while(0)
+ * around the compare only adds +1 per ref (up 4 -> 6 refs, pri 7500), not enough. */
 /* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
  * scaled by the fov. The fov fetch copies a whole vector into one word (as the
  * original does, spilling over the saved registers above it). */
