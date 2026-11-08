@@ -4121,14 +4121,6 @@ typedef struct ParticlePolyFT3 {
 
 #define TRI(p) ((ParticleTriView *)(p))
 
-#ifdef NON_MATCHING
-/* regalloc: prev is spilled instead of &v (the target spills &v and &w) */
-/* r6E (77 -> 3): each `goto free` is an inline ParticleFree + goto (the duplicate calls, later
- * cross-jumped, give prev the refs to beat &v/&w), and case 6 computes xy0 before its vz test.
- * Left: after the fade join the original issues lw color, lbu unk25, li 3 (beqz slot stays nop);
- * ours puts li 3 first (reorg then steals it into the slot) because sched1 birthing-boosts the
- * single-set color load to the block end. `color` set twice (dead init, if/else reload) doesn't
- * survive flow/cse. */
 /* World-space triangles (debris) spinning in the XY (type 3) or ZY (type 6) plane */
 void ParticleDisplayPolyWorld(ParticleGroup *g) {
     VECTOR32 screen;
@@ -4158,7 +4150,11 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
             if (p->state < g->unk22) {
                 p->color -= g->fade;
             }
-            color = p->color;
+            /* do-while(0) keeps its loop notes: a sched barrier that keeps the color load ahead
+             * of the unk25 test (else the birthing boost sinks it and reorg steals li 3) */
+            do {
+                color = p->color;
+            } while (0);
             if (g->unk25 == 3) {
                 v.vx = p->pos.vx + ((TRI(p)->verts[0].radius * rcos(angle + TRI(p)->verts[0].angle)) >> 12);
                 v.vy = p->pos.vy + ((TRI(p)->verts[0].radius * rsin(angle + TRI(p)->verts[0].angle)) >> 12);
@@ -4267,9 +4263,6 @@ void ParticleDisplayPolyWorld(ParticleGroup *g) {
         D_80110080++;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyWorld);
-#endif
 
 /* View of MoveInfo's velocity */
 typedef struct MoveVelView {
