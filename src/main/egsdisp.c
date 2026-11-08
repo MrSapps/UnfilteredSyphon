@@ -1203,8 +1203,8 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     gGameTick = tick;
     camera->polysSorted = 0;
     camera->unkA2 = 0;
-    end = (&gOutPacket)[gCurrentDrawBuffer] + gPacketAreaSize;
-    gPacketAreaEnd = end;
+    gPacketAreaEnd = (&gOutPacket)[gCurrentDrawBuffer] + gPacketAreaSize;
+    end = gPacketAreaEnd;
     anims = camera->anims;
     if (camera->index == 0) {
         skip = gCameraArray[3].flags & 1;
@@ -1258,11 +1258,11 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
         GsSortGLine(line, &gOtbl[gSortBuffer], 1);
     }
     pkt = GsOUT_PACKET_P;
-    for (; polys != NULL && !skip; polys = polys->next) {
+    while (polys != NULL && !skip) {
         prim = polys->data;
         len = ((u8 *)&prim->len)[3];
-        code = ((s8 *)&prim->code)[3] & 0xFD;
         words = len + 1;
+        code = ((s8 *)&prim->code)[3] & 0xFD;
         if (end < pkt + 0x28) {
             gPacketAreaFull = 1;
             break;
@@ -1270,6 +1270,7 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
         if ((len == 2 && code != 0x68) || (len == 3 && code != 0x40) || (len == 6 && code != 0x30) ||
             (len == 4 && code != 0x20 && code != 0x50) || code == 0 || len <= 0 || (code & 0x80)) {
             *(Str8 *)gErrorString = *(Str8 *)D_8010FE38;
+            polys = polys->next;
             continue;
         }
         EGSMiscMemcpy(pkt, &prim->len, words);
@@ -1290,6 +1291,7 @@ s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
             a_prim(gOtbl[gSortBuffer].org, pkt);
             pkt += 0x20;
         }
+        polys = polys->next;
     }
     GsOUT_PACKET_P = pkt;
     if (GetVideoMode() != 0) {
