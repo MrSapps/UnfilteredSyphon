@@ -1228,6 +1228,11 @@ typedef struct FootAnimView {
 
 #ifdef NON_MATCHING
 /* callee-saved register assignment and some load scheduling differ (630 vs 634 insns) */
+/* r6E (62 -> 37): shots is `__builtin_abs(load)` (abssi2 copy-then-negate: bgez/move/negu) and
+ * line->state is set after wz. Left: the original keeps light9 >> 8 in light's reg (s4, sra after
+ * the 2nd rand) and light9 in s6, &D_80118FD0 in s7 (one more saved reg). `light = light9 >> 8`
+ * anywhere is 85 (light set twice: no sched1 birthing boost, sra floats to the top; it also lifts
+ * &D_80118FC0 above gobj); a fresh `l8 = light9 >> 8` is 34 but boosted to the block end. */
 /* A tracer line from gobj's gun to target (every few NPC shots), and an ejected shell for the player. */
 void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     void *display;
@@ -1289,10 +1294,7 @@ void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     if (gobj->npc != NULL) {
         info = &gameObjectsInfo[gobj->id];
         weapon = GOBJINFO_WEAPON(info);
-        shots = ((NPCShotView *)gobj->npc)->shots;
-        if (shots < 0) {
-            shots = -shots;
-        }
+        shots = __builtin_abs(((NPCShotView *)gobj->npc)->shots);
         rate = (D_80105F58[weapon                                 ? weapon
                            : (GOBJINFO_FLAGS(info) & 0x3000) == 0x1000 ? 19
                            : (GOBJINFO_FLAGS(info) & 0x3000) == 0x2000 ? 20
@@ -1320,8 +1322,8 @@ void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
             D_80118FD0.vz = target->vz - steps * D_80118FC0.vz;
             line->wx = D_80118FD0.vx - D_80118FC0.vx;
             line->wy = D_80118FD0.vy - D_80118FC0.vy;
-            line->state = steps + 2;
             line->wz = D_80118FD0.vz - D_80118FC0.vz;
+            line->state = steps + 2;
             line->pos = D_80118FD0;
             line->color = 0x96C8;
             prim = line->prim;
@@ -2806,7 +2808,30 @@ void ParticleBuildGlass(GlassShard *shard, VECTOR32 *a, VECTOR32 *b, VECTOR32 *c
     shard->spin = 0;
 }
 
+#ifdef NON_MATCHING
+/* Bit-length mask of |x| via the GTE leading-zero counter (the mfc2 result is an input
+ * operand, as in ParticleInitLifeColorFade, so the shift folds to 0).
+ * r6E: only the shift register differs (ours v0, original v1): local-alloc gives the
+ * block-local shift the first free reg (v0); same under ccpsx. Early `return`s, ret set
+ * before the asm, `"=r"/"0"` operands and a register-asm v1 var are all worse. */
+s32 func_80052D90(s32 x) {
+    s32 ret = 0;
+    s32 shift;
+
+    if (x < 0) {
+        x = -x;
+    }
+    if (x > 0) {
+        shift = 0;
+        __asm__ volatile("mtc2 %0, $30" : : "r"(x));
+        __asm__ volatile("nop\n\tnop\n\tmfc2 %0, $31" : : "r"(shift));
+        ret = 0x7FFFFFFF >> shift;
+    }
+    return ret;
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/particle", func_80052D90);
+#endif
 
 u16 GetTPage(int tp, int abr, int x, int y);
 void ParticleInitEmitterXZPlane(VECTOR32 *min, VECTOR32 *max, VECTOR32 *size);
@@ -4262,7 +4287,10 @@ typedef struct MoveVelView {
 } MoveVelView;
 
 #ifdef NON_MATCHING
-/* half/quarter shifts scheduled one slot off (sra s2 before the and; sra s1 in bgez delay slot) */
+/* r6E: the bgez/nop/negu is the abssi2 pattern (`vy >= 0 ? vy : -vy`), fixing the quarter sra.
+ * Left (1 line): the vel.vx lw must follow the and. sched2 priority = depth from block start:
+ * the and is 2 (lhu->sll latency 2), the lw only 1 (anti dep on the call), so backward sched
+ * always places the and last. Needs either the and at prio 1 or the lw at prio 2. */
 /* r4I: a do-while(0) is a sched barrier (sched_analyze_insn flushes at loop notes), but it also
  * weights refs inside it (local-alloc priorities) and ends a cse1 block. `r1 = rand() & life;
  * do { vy = p->vel.vx; } while (0); half = ..` gets the first block's insn order exactly but
@@ -4324,16 +4352,14 @@ s32 ParticleUpdateMovement(ParticleGroup *g, Particle *p) {
             alive = 0;
         } else if (flags & 0x40) {
             life = p->state;
-            half = life >> 1;
-            p->vel.vx = (p->vel.vx >> 1) + (rand() & life) - half;
+            { s32 rnd = rand() & life; half = life >> 1; vy = p->vel.vx;
+            p->vel.vx = (vy >> 1) + rnd - half; }
             p->vel.vz = (p->vel.vz >> 1) + (rand() & life) - half;
             r0 = rand();
             r1 = rand() & half;
             quarter = life >> 2;
             vy = p->vel.vy >> ((r0 & 1) + 1);
-            if (vy < 0) {
-                vy = -vy;
-            }
+            vy = vy >= 0 ? vy : -vy;
             vy += r1;
             vy -= quarter;
             p->vel.vy = vy;
