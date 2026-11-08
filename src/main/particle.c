@@ -2839,8 +2839,6 @@ void ParticleInitEmitterXZPlane(VECTOR32 *min, VECTOR32 *max, VECTOR32 *size);
 /* glass object type that is not pushed out along its normal */
 #define GOBJ_TYPE_GLASS_FIXED 0x31
 
-#ifdef NON_MATCHING
-/* register allocation: max is spilled instead of living in fp, one fewer spill slot */
 ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR32 *max, VECTOR32 *dir) {
     VECTOR32 center;
     VECTOR32 size;
@@ -2865,6 +2863,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
     s32 n;
     s32 r;
     s32 s;
+    s32 s2;
     GameObjectRuntime *gobj;
 
     if (gSysInfo.level == 0) {
@@ -2950,15 +2949,14 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
     }
     D_801100B4 = textured | 0x202;
     ParticleInitDirection(&push, 0x1FF, 0);
-    n = (rows + cols) * 2;
-    g = ParticlePoolAllocate(n, NULL);
+    g = ParticlePoolAllocate((rows + cols) * 2, NULL);
     if (g != NULL) {
         g->unk23 = 16;
         g->wind = -0x2916;
         g->updateType = 4;
         g->unk1C = floor;
         g->drawType = 1;
-        ParticleStart(g, n);
+        ParticleStart(g, (rows + cols) * 2);
     }
     if (D_8011007C + 12 < 0x78) {
         ParticleInitEmitterMask(&center, &size);
@@ -2987,8 +2985,8 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
     if (g != NULL && (i = g->head) >= 0) {
         g->unk25 = plane;
         spin = (rand() & 0x3F) - 0x1F;
-        pos.vy = min->vy;
         stepY = (max->vy - min->vy) / rows;
+        pos.vy = min->vy;
         for (n = 0; n < rows; n++) {
             p = &D_80119040[i];
             r = (rand() & 7) + 7;
@@ -3021,16 +3019,16 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
         pos.vx = min->vx;
         pos.vz = min->vz;
         for (n = 0; n < cols; n++) {
+            p = &D_80119040[i];
             pos.vy = min->vy;
             r = (rand() & 7) + 7;
-            p = &D_80119040[i];
             edge.vy = 0;
             edge.vx = r * stepX >> 4;
             edge.vz = r * stepZ >> 4;
             ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
             p->vel.vy = ((rand() & 0xF) + 1) << 11;
-            s = spin >> (r & 1);
-            p->unk64 = s;
+            s2 = spin >> (r & 1);
+            p->unk64 = s2;
             pos.vy = max->vy;
             i = D_80119040[i].next;
             if (i < 0) {
@@ -3040,7 +3038,7 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
             ParticleBuildGlass((GlassShard *)p, &pos, &edge, &center, plane, textured);
             pos.vx += stepX;
             pos.vz += stepZ;
-            p->unk64 = s;
+            p->unk64 = s2;
             i = D_80119040[i].next;
             if (i < 0) {
                 return g;
@@ -3049,9 +3047,6 @@ ParticleGroup *ParticleGlassPaneWall(s32 shooter, s32 id, VECTOR32 *min, VECTOR3
     }
     return g;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleGlassPaneWall);
-#endif
 
 /* glass object type with a textured ceiling pane */
 #define GOBJ_TYPE_GLASS_CEILING 0x56
