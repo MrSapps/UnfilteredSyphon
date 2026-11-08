@@ -606,9 +606,39 @@ void SniperUpdate(void) {
                                                          : 0)                                \
          : gCurrentWeapon)
 
+/* MoveInfo as used here */
+typedef struct SniperMove {
+    /* 0x00 */ VECTOR32 pos;
+    /* 0x10 */ VECTOR32 unk10;
+    /* 0x20 */ VECTOR32 head;
+} SniperMove;
+
+typedef struct SniperFrame {
+    /* 0x00 */ s16 m[3][3];
+    /* 0x12 */ s16 pad;
+    /* 0x14 */ s32 t[3];
+} SniperFrame;
+
+typedef struct SniperAnimFrame {
+    /* 0x00 */ u8 unk00[0xC];
+    /* 0x0C */ SniperFrame *frame;
+} SniperAnimFrame;
+
+#if !defined(_PSYQ) && !defined(NON_MATCHING)
+/* SniperShoot (still INCLUDE_ASM) addresses these through their splat labels */
+__asm__(
+        ".set D_801156DC, D_801156D8+0x4\n"
+        ".set D_801156E0, D_801156D8+0x8\n"
+        ".set D_80115700, D_801156F8+0x8\n"
+        ".set D_80115740, D_801156F8+0x48\n");
+#endif
+
 #ifdef NON_MATCHING
-/* Logic complete; differs in register allocation (rt/damage/i get $s0/$s2/$s1 instead of
- * $s1/$s0/$s2) and a few scheduling/delay-slot choices (446 vs 442 instructions). */
+/* 28 masked lines left. The do { } while (0) around the kind == 1 branch doubles its refs
+ * (flow.c loop weight) and fixed damage/rt/i -> $s0/$s1/$s2. Left: at.vy temp gets v1 not v0
+ * (local-alloc), the dist if/else delay slot (orig repeats `sll` in the else arm), radius not
+ * computed straight into a2, fx/who s-reg swap, and the GrenadeLauncher/Tracer arg order
+ * (orig sets a2 / la a1 first; ternary/cast-prototype variants did not change it). */
 void SniperShoot(void) {
     VECTOR32 from;
     VECTOR32 at;
@@ -639,60 +669,62 @@ void SniperShoot(void) {
             return;
         }
         if (D_801156F8.kind == 1) {
-            rt = gameObjectsInfo[SNIPER_HIT_ID(&D_801156F8)].runtime;
-            if (rt->npcState == 2) {
-                if (gSniperBonesHit) {
-                    if (rt->healthInfo->health != 0x7FFF) {
-                        ((SniperShooter *)gObjPlayer->target)->hitPos = *SniperGetTarget(NULL);
-                        if (gHitNPCCallback != NULL) {
-                            gHitNPCCallback(rt->id, gSniperBonesHit);
-                        }
-                        bones = gSniperBonesHit;
-                        if (bones & 1) {
-                            damage = (D_80105F60[weapon][0] >> 1) & 0x7FE0;
-                        } else if (bones & 0x6000) {
-                            damage = D_80105F60[weapon][0] >> 6;
-                            damage &= 0x3FF;
-                            if (rt->id == gPlayerOffset || (GOBJ_INFO_W(rt->id).flags & 0x4000)) {
-                                damage = -damage;
+            do {
+                rt = gameObjectsInfo[SNIPER_HIT_ID(&D_801156F8)].runtime;
+                if (rt->npcState == 2) {
+                    if (gSniperBonesHit) {
+                        if (rt->healthInfo->health != 0x7FFF) {
+                            ((SniperShooter *)gObjPlayer->target)->hitPos = *SniperGetTarget(NULL);
+                            if (gHitNPCCallback != NULL) {
+                                gHitNPCCallback(rt->id, gSniperBonesHit);
+                            }
+                            bones = gSniperBonesHit;
+                            if (bones & 1) {
+                                damage = (D_80105F60[weapon][0] >> 1) & 0x7FE0;
+                            } else if (bones & 0x6000) {
+                                damage = D_80105F60[weapon][0] >> 6;
+                                damage &= 0x3FF;
+                                if (rt->id == gPlayerOffset || (GOBJ_INFO_W(rt->id).flags & 0x4000)) {
+                                    damage = -damage;
+                                }
+                            } else {
+                                damage = 0;
+                                if (bones & 0x8000) {
+                                    ParticleHitWall(gPlayerOffset, &D_801156D8, &D_801156E8, 0xC0FFFF);
+                                }
                             }
                         } else {
                             damage = 0;
-                            if (bones & 0x8000) {
-                                ParticleHitWall(gPlayerOffset, &D_801156D8, &D_801156E8, 0xC0FFFF);
-                            }
                         }
-                    } else {
-                        damage = 0;
+                    } else if (gSniperGobjBoxHit >= 0) {
+                        NPCSoundGobj(1, gPlayerOffset, gameObjectsInfo[gSniperGobjBoxHit].runtime->move, 0x1E0);
                     }
-                } else if (gSniperGobjBoxHit >= 0) {
-                    NPCSoundGobj(1, gPlayerOffset, gameObjectsInfo[gSniperGobjBoxHit].runtime->move, 0x1E0);
-                }
-            } else {
-                at.vx = ((SniperAnimFrame *)rt->anim)->frame->t[0];
-                at.vy = ((SniperAnimFrame *)rt->anim)->frame->t[1];
-                at.vz = ((SniperAnimFrame *)rt->anim)->frame->t[2];
-                at.vy = -at.vy;
-                EGSGeometry_GetFuzzyDistancePoint2Point(&from, &at, &dist);
-                if (dist < 0x3C1) {
-                    damage = D_80105F60[weapon][0] >> 6;
                 } else {
-                    damage = D_80105F62[weapon][0];
+                    at.vx = ((SniperAnimFrame *)rt->anim)->frame->t[0];
+                    at.vy = ((SniperAnimFrame *)rt->anim)->frame->t[1];
+                    at.vy = -at.vy;
+                    at.vz = ((SniperAnimFrame *)rt->anim)->frame->t[2];
+                    EGSGeometry_GetFuzzyDistancePoint2Point(&from, &at, &dist);
+                    if (dist < 0x3C1) {
+                        damage = D_80105F60[weapon][0] >> 6;
+                    } else {
+                        damage = D_80105F62[weapon][0];
+                    }
+                    damage &= 0x3FF;
                 }
-                damage &= 0x3FF;
-            }
-            if (damage == 0) {
-                return;
-            }
-            if ((s32)((D_80105F60[weapon][0] >> 6) & 0x3FF) < damage) {
-                DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, 0x7FFF, 0x58);
-            } else {
-                DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, damage, WeaponGetDeathAction(weapon));
-            }
-            if (rt->npcState != 2) {
-                return;
-            }
-            gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits < 0 ? 1 : gPlayerNumConsecutiveHits + 1;
+                if (damage == 0) {
+                    return;
+                }
+                if ((s32)((D_80105F60[weapon][0] >> 6) & 0x3FF) < damage) {
+                    DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, 0x7FFF, 0x58);
+                } else {
+                    DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, damage, WeaponGetDeathAction(weapon));
+                }
+                if (rt->npcState != 2) {
+                    return;
+                }
+                gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits < 0 ? 1 : gPlayerNumConsecutiveHits + 1;
+            } while (0);
             return;
         } else {
             VECTOR32 dir;
@@ -739,14 +771,6 @@ void SniperShoot(void) {
     gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
 }
 #else
-#ifndef _PSYQ
-/* SniperShoot (still INCLUDE_ASM) addresses these through their splat labels */
-__asm__(
-        ".set D_801156DC, D_801156D8+0x4\n"
-        ".set D_801156E0, D_801156D8+0x8\n"
-        ".set D_80115700, D_801156F8+0x8\n"
-        ".set D_80115740, D_801156F8+0x48\n");
-#endif
 INCLUDE_ASM("asm/main/nonmatchings/sniper", SniperShoot);
 #endif
 
