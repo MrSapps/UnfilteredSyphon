@@ -2460,15 +2460,11 @@ s32 EGSFrameLinkParent(EGSFrame *frame, EGSFrame *parent) {
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* 7 diff lines, prologue order only. Plain for loops over frames[j] (instead of do/while + fp++)
- * give the original's frame size (0x78: reload's extra spill slots), the numBlocks reloads and
- * the loop-exit delay slots; `(s32)hmd` gives the addu off,base order. Left: the original
- * schedules the anims (a2) and hmd/copies param copies late in block 0 (sw a2,0x30(sp) lands in
- * the beqz delay slot, root's lw/sw come first). sched1 never schedules the leading run of
- * hard-reg param copies (sched.c schedule_block, b == 0), so in the original something that is
- * not a plain hard-reg copy (or a deleted-insn note) must follow the a0 copy. */
-void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
+/* model arrives as void * and is copied into the typed local: combine folds the a1 param copy
+ * into that local's set, which ends sched1's untouchable run of leading hard-reg param copies
+ * (sched.c schedule_block, b == 0), so the anims/copies copies get scheduled like the original. */
+void EGSAnimHMDLink(EGSAnim *anim, void *model, void *anims, s32 copies) {
+    HMDHeader *hmd = model;
     EGSFrame *root = anim->frame;
     MATRIX m;
     HMDCacheList *list;
@@ -2540,9 +2536,6 @@ void EGSAnimHMDLink(EGSAnim *anim, HMDHeader *hmd, void *anims, s32 copies) {
     anim->model->anims = anims;
     anim->haList = NULL;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSAnimHMDLink);
-#endif
 
 void InitPointSources(void *anim) {
     EGSListNode *node = gPointSourceList;
