@@ -272,6 +272,8 @@ u8 GameCameraCheckMode(s32 mode);
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 #define FIX12(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
+/* folds to MAX_EXPR (not distributed into enclosing arithmetic like MAX's COND_EXPR) */
+#define MAX2(a, b) ((a) > (b) ? (a) : (b))
 
 /* Axis-aligned box. */
 typedef struct GameCamBox {
@@ -2032,7 +2034,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
     }
 
 #ifdef NON_MATCHING
-/* scheduling/regalloc in the distance-fade block (d.vx kept live in a1). The original's d.vx/
+/* r6H: rumble tail matches with a block-local `u8 inRange` (28 left, all in the src/d/a block below).
+ * The original keeps BOTH src.vy stores (raw, then negated), so a frame->pos.vz load sat between
+ * them in the source (GET_POS order: vx, vy, vz, vy = -vy); flow kills the raw store otherwise.
+ * GET_POS order + `s32 *pa = &a.vx` gives 25 but the d/a store order still differs.
+ * scheduling/regalloc in the distance-fade block (d.vx kept live in a1). The original's d.vx/
  * d.vy and the negated src.vy stores sit in the block after abs(d.vy), and src.vz is loaded
  * before that abs, so the source order there differs. The 0x38 rumble case is laid out last:
  * `if (!inRange || r >= 0x39) { v = inRange ? r : 0xFF; } else { v = 0x38; }` fixes the
@@ -2059,7 +2065,6 @@ void func_8001EF10(void) {
     GameCamShake *shake;
     s32 len;
     u8 any;
-    s32 inRange;
     s32 v;
     s32 r;
 
@@ -2198,11 +2203,14 @@ void func_8001EF10(void) {
         EGSMath_VectorModulus(&offset, &len);
         r = SquareRoot0(len);
         len = r;
-        inRange = r < 0x100;
-        if (inRange && r < 0x39) {
-            v = 0x38;
-        } else {
-            v = inRange ? r : 0xFF;
+        {
+            u8 inRange = r < 0x100;
+
+            if (!inRange || r >= 0x39) {
+                v = inRange ? r : 0xFF;
+            } else {
+                v = 0x38;
+            }
         }
         len = v;
         EGSDeviceControllerVibrate(1, (u8)v, 2);
@@ -2671,10 +2679,10 @@ static inline s32 iEdgeLength(GameCamPlane *plane, s32 i, s32 j, VECTOR32 *d, VE
     s32 t;
 
     d->vx = plane->verts[j]->vx - plane->verts[i]->vx;
-    a->vx = abs(d->vx);
     d->vy = plane->verts[j]->vy - plane->verts[i]->vy;
-    a->vy = abs(d->vy);
+    a->vx = abs(d->vx);
     d->vz = plane->verts[j]->vz - plane->verts[i]->vz;
+    a->vy = abs(d->vy);
     a->vz = abs(d->vz);
     if (a->vx < a->vy) {
         t = a->vx;
@@ -2697,7 +2705,11 @@ static inline void iDotSV(GameCamSVec *a, VECTOR32 *b, s32 *out) {
 }
 
 #ifdef NON_MATCHING
-/* the clamp folds differently (orig keeps 0x1000 in fp), the edge loop gets strength-reduced */
+/* 10 lines left (r6H): MAX2 (`a > b ? a : b` -> MAX_EXPR, not distributed into the FIX12 arithmetic
+ * like MAX's COND_EXPR), `-FIX12` split in two statements, `(u32)face < 0x80000000` (a GEU test cse
+ * can't use to fold the loop's NULL test), count = 0 at the loop top, r computed in both track arms.
+ * Left: loop.c hoists the track.plane load out of the edge loop (no aliasing store in the loop:
+ * edge/a stores are sp-fixed), the original reloads it per iteration -> plane/i regs shift. */
 /* Moves a sphere from cur by d against the collision faces (static, then the player's),
  * leaving the result in pos; a second pass pushes pos out of whatever it still touches.
  * Returns whether anything was hit. */
@@ -2717,8 +2729,8 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
     hit = 0;
     GTEMath_VectorNormal(d, &ndir);
     pass = 0;
-    count = 0;
     do {
+        count = 0;
         push.vx = 0;
         push.vy = 0;
         push.vz = 0;
@@ -2748,8 +2760,9 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
             track.vel.vy = 0;
             track.vel.vz = 0;
             track.unk34 = 0;
-            func_80020BB8(&track.pos, track.unk10, track.pos.vy - 0x50, track.pos.vy + 0x50, &track.vel,
-                          0x20000, 0x20000, &box);
+            r = MAX(abs(track.unk28), MAX(abs(track.unk2C), abs(track.unk30)));
+            func_80020BB8(&track.pos, track.unk10, track.pos.vy - track.unk10, track.pos.vy + track.unk10, &track.vel,
+                          r, r, &box);
         }
         for (list = 0; list < 2; list++) {
             if (pass == 1 && list == pass && !GameCameraCheckMode(0xE) && !GameCameraCheckMode(0xF) &&
@@ -2764,7 +2777,7 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
                     face = D_80113B2C.primary->anim->faceList;
                 }
             }
-            if ((s32)face >= 0) {
+            if ((u32)face < 0x80000000) {
                 continue;
             }
             for (; face != NULL; face = face->next) {
@@ -2782,23 +2795,25 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
                 if (pass == 1) {
                     iDotSV(track.plane->normal, dir, &dot);
                     dot = FIX12(dot);
-                    track.unk10 = FIX12((0x1000 - MAX(dot, -0x1000)) * 0x48);
+                    track.unk10 = FIX12((0x1000 - MAX2(dot, -0x1000)) * 0x48);
                     iDotSV(track.plane->normal, &ndir, &dot);
-                    dot = -FIX12(dot);
-                    track.unk2C = FIX12((MAX(dot, -0x1000) + 0x199) * 0xE8B) << 5;
+                    dot = FIX12(dot);
+                    dot = -dot;
+                    track.unk2C = FIX12((MAX2(dot, -0x1000) + 0x199) * 0xE8B) << 5;
                 }
                 func_80020B58(&track);
                 if (track.moving == 1) {
                     VECTOR32 edge;
                     VECTOR32 a;
                     s32 i;
+                    GameCamPlane *plane;
 
-                    for (i = 0; i < track.plane->count; i++) {
+                    for (i = 0; i < (plane = track.plane)->count; i++) {
                         s32 next;
                         s32 t;
 
                         next = i == track.plane->count - 1 ? 0 : i + 1;
-                        t = iEdgeLength(track.plane, i, next, &edge, &a);
+                        t = iEdgeLength(plane, i, next, &edge, &a);
                         if (t > 0 && t < 0x18) {
                             track.moving = 0;
                             break;
@@ -2832,7 +2847,6 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
         pos->vy += push.vy;
         pos->vz += push.vz;
         pass++;
-        count = 0;
     } while (pass < 2);
     return hit;
 }
