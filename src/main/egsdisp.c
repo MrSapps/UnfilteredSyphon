@@ -715,6 +715,7 @@ __asm__(".set D_801225E8, D_801225E8_bss\n"
         ".set D_80122600, D_801225E8_bss+0x18\n");
 #endif
 
+/* hand-written: break 0, then returns through gEmergencyRA via $at */
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSEmergencyBreak);
 
 s32 EGSDisplayInit(void) {
@@ -1521,7 +1522,10 @@ void EGSDisplaySortFogScrim(GsOT *ot) {
 INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
 
 #ifdef NON_MATCHING
-/* first draft: run/movie flags are kept on the stack in the original, many spill/scheduling differences */
+/* first draft: run/movie flags are kept on the stack in the original, many spill/scheduling differences.
+ * r6D: the original's u8 run/movie are global-alloc spills reloaded through $t3 (first unused
+ * call-used reg after block temps in t0-t2), i.e. more call-crossing pseudos competed for s-regs
+ * than in this draft. */
 INCLUDE_PART1("asm/main/nonmatchings/egsdisp", EGSDisplaySort)
 
 s32 EGSDisplaySort(u8 run, s32 tick) {
@@ -2872,7 +2876,10 @@ void InitDamagePolys(void) {
  * Remaining: sched1 puts `v = py & 0xFF` (+ v << 8) at the top of the block (both are
  * birthing insns, 7f000001) where the original computes them inside the uv[0] chain; moving
  * v after the cy/cx part (`t = A << 16; v = ...; t = t + (v << 8) + u * 2`) fixes that but
- * then the uv[2]/uv[1] interleave and t0..t3 numbering differ. */
+ * then the uv[2]/uv[1] interleave and t0..t3 numbering differ. r6D: with v after the clut part
+ * (30 lines) the original's px reload (lhu a3) and (s16)w (t0) are live across the uv[2] store,
+ * so local-alloc numbering shifts by one; the original computes uv[3] = uv[2] + (s16)w in the
+ * uv[2] register before storing uv[2]. */
 void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTexture *tex, s32 owner) {
     VECTOR a;
     VECTOR b;
@@ -3334,10 +3341,15 @@ s32 FuzzyXZDistancePoint2Point(VECTOR *a, VECTOR *b) {
     return sum;
 }
 
+/* cc1 output (0x178 frame, GTE back-color ctc2 asm blocks); no C yet. An m2c draft is the
+ * starting point; its per-anim flashlight loop, TMD on-screen test and the sort-depth
+ * bias (D_80137714[sortBuffer]) need EGSAnim's 0x14..0x1B fields typed first. */
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", SortGs);
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDSetupGTE);
 
+/* EGSDisplayTMDSetupGTE / TMDOnScreen / SortGMD are hand-written GTE asm (add/sub/addi,
+ * $t8/$t9 temps, no $ra save, saves at 0($sp)) */
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
