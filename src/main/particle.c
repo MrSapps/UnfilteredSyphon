@@ -633,6 +633,8 @@ void EGSDisplayAddPoly(void *display, void *prim);
                                                 : -(-((base) + ((D_801100C4 & rand()) << 8)) >> (12 - D_801100C8)))
 
 #ifdef NON_MATCHING
+/* r6E: a second pointer for part of the body (q = p from statement k on) splits p's refs but the
+ * copy stays and p's first half still outranks i/prim (36-60 lines over 9 cut points). */
 /* Register allocation only: the original gives i/prim (sharing one reg) $s0 and p $s1; ours
  * ranks p first (refs 78, live 240, pri 19500) over i (16/42, 15238) and prim (12/25, 14400).
  * r4I: from the flow dump i is p77 (refs 12, live 25) and prim p76 (16/42). Both need > p: i 16
@@ -2230,7 +2232,14 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * r4I: the vz frame reload ties to a2 in the original because v0 is busy with D_80110088 (pos.vy)
  * in its sched1 order; moving `pos.vy = D_80110088` (or a local copy of it) earlier in the source
  * does not change ours (5). Empty do-while(0) sched barriers between the statements are 34-43
- * lines: the LOOP_END note also ends the cse1 block, so *D_8011008C/pos.vx stop being CSE'd. */
+ * lines: the LOOP_END note also ends the cse1 block, so *D_8011008C/pos.vx stop being CSE'd.
+ * r6E (sched1 dumps): with the flag store before vel.vz (5 lines) the pos.vx addu (and its sra 18)
+ * is birthing-boosted (single-set pseudo) and sinks next to the pos.vx store; the original keeps
+ * it right after the vel.vx extension, so its pseudo is not single-set. A user var for pos.vx
+ * (x = (*D)->pos.vx; pos.vx = x; ... x += vel.vx >> 2; pos.vx = x;) stops the boost but
+ * shifts local-alloc (21); the D_80110088 load must also issue between the vz frame reload and
+ * its lhu (it is boosted and LUID-tied with the lhu: needs a lower LUID, but moving pos.vy =
+ * D_80110088 earlier is 32+). */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
@@ -3334,6 +3343,8 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
 
 #ifdef NON_MATCHING
 /* regalloc: prev and p swap s0/s1; min-loop head lands in a0 */
+/* r6E: p (128 refs) is allocated first and so always gets s0; prev (7 refs) can only reach s0 if
+ * p is split or loses priority. A separate block-local pointer for the min loop is worse (113). */
 /* Explosion fireballs: animated sprites respawned around the (drifting) group centre */
 void ParticleUpdateExplosion(ParticleGroup *g) {
     VECTOR32 cam;
