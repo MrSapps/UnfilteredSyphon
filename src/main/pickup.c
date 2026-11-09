@@ -967,25 +967,6 @@ void func_8008C534(Gobj *obj, s32 type) {
     func_8008E418(obj, type);
 }
 
-#ifdef NON_MATCHING
-/* regalloc: the original loads the pickup byte into v0 and copies it to a2 (and info = off + base in v1).
- * Offset-first info fixes the addu order but moves info to v0; a separate byte local (s32/u8, copy
- * before or after the test, or an inline iPickupWeapon) always gets coalesced with data (a2).
- * r4B: cse's make_regs_eqv makes `data` the canonical reg (it lives past the block and longer
- * than the byte temp), so `b = byte; data = b; if (b == 0)` becomes `data = byte; if (data)`;
- * with the copy in an else arm global-alloc gives b and data the same reg (copy preference).
- * r4E: that is global.c expand_preferences: a copy whose source DIES in it (and doesn't conflict
- * with the dest) merges the source's hard-reg preferences with the dest's, so the byte temp inherits
- * data's a2 (the PlayerUseCAS arg). The original's byte stays v0 = it is live after the copy (the
- * copy precedes the bnez on the byte: copy-before-test), which needs cse not to make data canonical
- * (make_regs_eqv: data wins whenever it outlives the byte past the cse block). `if (INFO_PICKUP(info)
- * == 0) {..} else data = INFO_PICKUP(info);` with info as array-ref or offset-first: still 4-5 lines.
- * r4I (4 -> 1): offset-first info + `s32 b = byte; data = (u8)b; if (b == 0)` - the and is not a
- * reg copy, so cse keeps b (v0) for the test and data gets a2: the only diff left is `andi a2,v0,0xFF`
- * vs the original's `move a2,v0` in the bnez slot. A plain copy needs make_regs_eqv (cse.c) to
- * keep b canonical, i.e. b's last use at or after data's; `? 0x14 : b` (b known 0 there) and
- * u8/u32 casts don't do it. r5A: reusing i/type as the byte var (to outlive data) makes it global and
- * it coalesces with data (5-11); ?: forms (`data = b != 0 ? b : ...`) 5-7. */
 s32 UseLevelSpecificObject(void) {
     s32 data;
     s32 i;
@@ -995,7 +976,12 @@ s32 UseLevelSpecificObject(void) {
         GameObjectInfo *info = (GameObjectInfo *)(gObjPlayer->id * sizeof(GameObjectInfo) + (u32)gameObjectsInfo);
         s32 b = INFO_PICKUP(info);
 
-        data = (u8)b;
+        /* through a u8 temp: cse sees `data = c`, so b stays canonical for the test (v0);
+         * combine then folds c's zero_extend of the byte into a plain copy to data (a2) */
+        {
+            u8 c = b;
+            data = c;
+        }
         if (b == 0) {
             s32 kind = INFO_WORD24(info) & 0x3000;
             if (kind != 0x1000) {
@@ -1018,9 +1004,6 @@ s32 UseLevelSpecificObject(void) {
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/pickup", UseLevelSpecificObject);
-#endif
 
 void *UseSetLevSpecObjCallback(void (*cb)()) {
     void *old = gObjectInteractionCallback;
