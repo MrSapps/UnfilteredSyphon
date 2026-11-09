@@ -1769,9 +1769,16 @@ extern InitAnimSlot gCASAnimInfo[];
  * follows the path) rewrites it as s0+k via use_related_value; while `cas[k].f` MEMs get
  * folded back to constants by cse2. So constant-address stores (.active, copy sources) come
  * out s0-relative and cas[] ones (fields, copy dests) absolute, as in the original. Before the
- * break everything is absolute (cse2 folds). Left: const 2 is in a1 (orig a2), so block-move
- * scratches use a2 for the dst address (orig a1); const 1/0x1000000/scratch qty order in
- * local-alloc. Also two small store-order swaps at [75] and [83]/[84]. */
+ * break everything is absolute (cse2 folds).
+ * r14AL: 207 -> 12. The a1/a2 swap was local-alloc priority (floor_log2(n)*n/life): const 2
+ * (9 refs over 112 insns, .1205) beat the split lui/ori consts 0x82000/0x882000 (3 refs; split
+ * insns have n_sets 2 so no sched1 birthing boost: they float up to the last barrier and their
+ * life was 14 insns, .107). A second do-while(0) after [83].active is a sched barrier that
+ * shortens their life to 12 (.125), so they take a1/v1 first and 2 lands in a2 (gdb trace of
+ * find_free_reg: scratchpad/AL/la.sh). Left: [83]/[84].active are s0-relative (orig absolute;
+ * cas[84].active blows up cse for the following .active run, cas[83].active must then sit
+ * before the barrier and lands ahead of la Pul4); sched2 sinks [75].unk14 below .unk04; and
+ * la iCallbackWK/ShimR store hoisted above [111].unk04/08 in sched2. */
 /* Sets up the per-animation callbacks and timing of the CAS animation table. */
 void CASAnimInit(void) {
     InitAnimSlot *cas = gCASAnimInfo;
@@ -1889,6 +1896,8 @@ void CASAnimInit(void) {
     cas[132].unk08 = 0x80;
     cas[77] = gCASAnimInfo[132];
     gCASAnimInfo[83].active = 1;
+    do {
+    } while (0);
     cas[83].unk1C = iCallbackPul4;
     cas[84].unk1C = iCallbackPul8;
     cas[83].unk04 = 0x82000;
@@ -1997,10 +2006,10 @@ void CASAnimInit(void) {
     cas[8] = gCASAnimInfo[127];
     cas[8].unk1C = iCallbackReloadSnd_CW2RLD;
     cas[44].unk1C = iCallbackIdle13;
-    gCASAnimInfo[44].active = 1;
+    cas[44].active = 1;
     gCASAnimInfo[110].active = 1;
-    cas[110].unk1C = iCallbackShimL;
     cas[110].unk04 = 0x20000;
+    cas[110].unk1C = iCallbackShimL;
     cas[110].unk08 = 0x20000;
     cas[110].unk18 = 0x80000000;
     cas[110].unk14 = 1;
