@@ -391,6 +391,12 @@ static const s32 D_80141610[14][2] = {
  * (3) line init before the blez (orig: giv init after it). */
 /* r8R: first build loop regs: orig pt s6, poly s7, edge s2, line s5, counter s3 (the same s3 as the later
  * loops, so one i across them), pt+4 s4; ours puts n in s7 and line in s3. */
+/* r14AL: 69 -> 6. One `i` for the build loop too (s3); the first grid loop's x is a giv
+ * (`x = i * 12 - 118`, init lands after the hoisted consts); the add loop's lines go through a
+ * local base `lines[i]` (giv init after the blez). Left: (1) sym+24 for &D_80144B1C[i][1] is
+ * still "move-insn savings 1 not desirable" (orig: edges reg + 0x18 hoisted, s7); (2) second
+ * grid loop: orig puts `li 7` before `x = -37` (biv x: n_sets 2, no birthing boost; a giv x
+ * fixes the order but loop.c then reduces x << 16). */
 /*
  * Builds (frame 0) and shows/hides the memory card drawing a piece at a time;
  * frame counts up to 12.
@@ -406,10 +412,9 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
         const s32 (*pt)[2] = D_80141610;
         TitlePolyF4 *poly = D_80144948;
         TitleLineF2 *edge = D_80144B1C[0];
-        u32 n;
 
         line = D_80144D8C;
-        for (n = 0; n < ARRAY_COUNT(D_80144948); n++, pt++) {
+        for (i = 0; i < ARRAY_COUNT(D_80144948); i++, pt++) {
             s32 nextOuter, nextInner;
 
             nextOuter = pt[1][0];
@@ -424,7 +429,8 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
             edge->type = 1;
             edge++;
         }
-        for (i = 0, x = -118; i < 20; i++, x += 12) {
+        for (i = 0; i < 20; i++) {
+            x = i * 12 - 118;
             EGSDisplayBuildLineF(line, 0x461E28, XY(x, -42), XY(x, 38));
             line->type = 7;
             line++;
@@ -459,12 +465,15 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
                 }
             }
         }
-        line = D_80144D8C;
-        for (i = 0; i < nLines; i++, line++) {
-            if (line->next == NULL) {
-                EGSDisplayAddPoly(gTextCamera, line);
-            } else {
-                D_80144D8C[i].rgbc = 0x40461E28;
+        {
+            TitleLineF2 *lines = D_80144D8C;
+
+            for (i = 0; i < nLines; i++) {
+                if (lines[i].next == NULL) {
+                    EGSDisplayAddPoly(gTextCamera, &lines[i]);
+                } else {
+                    D_80144D8C[i].rgbc = 0x40461E28;
+                }
             }
         }
     } else {
