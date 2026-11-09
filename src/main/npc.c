@@ -2720,10 +2720,15 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
 }
 
 #ifdef NON_MATCHING
-/* 90 lines. step/kind/mode are s32 (orig re-reads step unmasked, kind with lh, mode with lh).
- * Left: the kind == 0 flag update reloads npc->flags after the &= ~0x400 store and keeps
- * ~0x80000 and ~0x2000 as two unfolded ands (a volatile access gives the reload but not the
- * rest); several level-18 / target blocks schedule differently; orig saves one more s-reg. */
+/* 36 lines (r7L: 90 -> 36). step/kind/mode are s32 (orig re-reads step unmasked, kind with lh,
+ * mode with lh). r7L fixes: `kind` is reused for the later npc->flags re-reads (s0, saves s4 for
+ * the shared constant 5), ?: threat split into if/else (cross-jumped store tail), lastSeen - 0x10
+ * as `x - (0x10 - r)`, dir = &D_8011D210 at the top of the targetId >= 0 arm (vx stored through
+ * it), pos.vz before the D_8011D210 stores, volatile + block-local f for the kind == 0 flags
+ * (reload + unfolded ands; a non-volatile form that reloads was not found).
+ * Left: unk2C is loaded before the moveMode store in the original (a3/a2 swap); the original
+ * sets dir per arm (la a0 in each), ours hoists it before the branch; level-18 sb/sw and the
+ * mode-5 arg order. */
 void NPCIQEveryFrame(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     s32 mode = npc->unk46;
@@ -2732,7 +2737,6 @@ void NPCIQEveryFrame(Gobj *obj) {
     VECTOR32 off;
     s32 step;
     s32 kind;
-    s32 flags;
     u32 k;
     VECTOR32 *dir;
     Gobj *t;
@@ -2754,8 +2758,14 @@ void NPCIQEveryFrame(Gobj *obj) {
             if (kind == 0) {
                 npc->unk2C = 0;
                 npc->unk42 = 0;
-                npc->flags &= ~0x400;
-                npc->flags = ((npc->flags | 0x800) & ~0x80000) & ~0x2000;
+                *(volatile s32 *)&npc->flags &= ~0x400;
+                {
+                    s32 f = npc->flags;
+                    f |= 0x800;
+                    f &= ~0x80000;
+                    f &= ~0x2000;
+                    npc->flags = f;
+                }
             } else {
                 npc->unk2C = npc->script[step].duration;
                 if (npc->script[step].unk04 != 0) {
@@ -2782,9 +2792,9 @@ void NPCIQEveryFrame(Gobj *obj) {
             npc->lastSeenPos.vy = -0x3F7;
             npc->lastSeenPos.vz = -0x2BE7;
             obj->target->targetId = -1;
-            TARGET_AIM(obj->target)->vx = npc->lastSeenPos.vx - 0x10 + ((rand() & 0x1F) << 5);
+            TARGET_AIM(obj->target)->vx = npc->lastSeenPos.vx - (0x10 - ((rand() & 0x1F) << 5));
             TARGET_AIM(obj->target)->vy = npc->lastSeenPos.vy;
-            TARGET_AIM(obj->target)->vz = npc->lastSeenPos.vz - 0x10 + ((rand() & 0x1F) << 5);
+            TARGET_AIM(obj->target)->vz = npc->lastSeenPos.vz - (0x10 - ((rand() & 0x1F) << 5));
             obj->target->unk58 = 200;
             if (--npc->unk2C <= 0) {
                 npc->unk38 = 0;
@@ -2808,19 +2818,23 @@ void NPCIQEveryFrame(Gobj *obj) {
             } else {
                 npc->unk2C--;
                 npc->unk38 = 100;
-                obj->target->threat = npc->unk2C < 16 ? 0x1000 : 0xE65;
+                if (npc->unk2C < 16) {
+                    obj->target->threat = 0x1000;
+                } else {
+                    obj->target->threat = 0xE65;
+                }
             }
         }
         D_80110138 = obj->id;
     }
-    flags = npc->flags;
-    if (!(flags & 0x400)) {
+    kind = npc->flags;
+    if (!(kind & 0x400)) {
         if (D_80110134 == NULL) {
             mode = 5;
         } else {
-            if ((flags & 0x800000) || (NPC_OF(obj)->flags & 0x1000000) || (flags & 0x10000)) {
+            if ((kind & 0x800000) || (NPC_OF(obj)->flags & 0x1000000) || (kind & 0x10000)) {
                 mode = 5;
-            } else if (!(flags & 0x800)) {
+            } else if (!(kind & 0x800)) {
                 pt.vx = D_80110134[npc->curPoint].x;
                 pt.vy = D_80110134[npc->curPoint].y;
                 pt.vz = D_80110134[npc->curPoint].z;
@@ -2829,9 +2843,9 @@ void NPCIQEveryFrame(Gobj *obj) {
                 off.vz = FIX_TO_INT(NPC_MOVE(obj)->unk50.vz);
                 pos.vx = NPC_MOVE(obj)->unk40.vx + off.vx;
                 pos.vy = NPC_MOVE(obj)->unk40.vy + off.vy;
+                pos.vz = NPC_MOVE(obj)->unk40.vz + off.vz;
                 D_8011D210.vx = pt.vx - pos.vx;
                 D_8011D210.vy = 0;
-                pos.vz = NPC_MOVE(obj)->unk40.vz + off.vz;
                 D_8011D210.vz = pt.vz - pos.vz;
                 if (npc->dir.vx * D_8011D210.vx + npc->dir.vz * D_8011D210.vz <= 0) {
                     npc->flags &= ~0x4000000;
@@ -2841,7 +2855,7 @@ void NPCIQEveryFrame(Gobj *obj) {
                         initPointAction(D_80110134, obj, 6);
                     }
                 } else {
-                    if (flags & 0x4000000) {
+                    if (kind & 0x4000000) {
                         NPCRethinkNextPoint(obj);
                         npc->flags &= ~0x4000000;
                     }
@@ -2858,7 +2872,8 @@ void NPCIQEveryFrame(Gobj *obj) {
                     }
                 }
             }
-            if (mode != 5 && (npc->flags & 0x800)) {
+            kind = npc->flags;
+            if (mode != 5 && (kind & 0x800)) {
                 if (!(npc->unk45 & 0x1F)) {
                     pt.vx = D_80110134[npc->curPoint].x;
                     pt.vy = D_80110134[npc->curPoint].y;
@@ -2909,11 +2924,12 @@ void NPCIQEveryFrame(Gobj *obj) {
             }
         }
     }
-    if (npc->flags & 0x10000) {
+    kind = npc->flags;
+    if (kind & 0x10000) {
         NPCFaceDirection(obj, &npc->dir);
     } else if (mode == 5) {
         dir = NULL;
-        if (npc->awareness == 2 && !(npc->flags & 0x2000) && !(obj->cas->flags & 0x20000000)
+        if (npc->awareness == 2 && !(kind & 0x2000) && !(obj->cas->flags & 0x20000000)
             && (obj->target->flags & 8)) {
             if (obj->target->targetId < 0) {
                 if (gSysInfo.level == 0) {
@@ -2925,6 +2941,7 @@ void NPCIQEveryFrame(Gobj *obj) {
                 }
                 D_8011D210.vy = 0;
             } else {
+                dir = &D_8011D210;
                 if (obj->target->targetId != gPlayerOffset) {
                     t = gameObjectsInfo[obj->target->targetId].runtime;
                     D_8011D210.vx = t->move->pos.vx - D_8011E8B8.vx;
