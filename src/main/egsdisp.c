@@ -450,7 +450,7 @@ typedef struct EGSImage {
 } EGSImage; /* size 0x44 */
 extern EGSImage gImages[5];
 extern u32 D_80107B1C[];
-extern VECTOR D_80013740; /* up vector */
+extern const VECTOR D_80013740; /* up vector */
 s32 gSubsectorsSorted; /* common, $gp */
 SDATA_LOCAL(gSubsectorsSorted)
 s32 gSubsectorPolysSorted; /* common, $gp */
@@ -1522,21 +1522,9 @@ void EGSDisplaySortFogScrim(GsOT *ot) {
 
 INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
 
-#ifdef NON_MATCHING
-/* first draft: run/movie flags are kept on the stack in the original, many spill/scheduling differences.
- * r6D: the original's u8 run/movie are global-alloc spills reloaded through $t3 (first unused
- * call-used reg after block temps in t0-t2), i.e. more call-crossing pseudos competed for s-regs
- * than in this draft.
- * r14AI (168 -> 5): run/movie spills now match. Keys: c0 is fd reused (stack 0x30; c1 0x60, c2 0x70);
- * tags is D_80107B1C[i - 1] (loop.c makes the fp biv + s6 copy); camera loop and image loop share `i`
- * and `j` is both the % 5 index and the level index (one var, two roles -> s-reg order); 2nd flashlight
- * loop has a block-local fl and a `gFlashlightList != NULL` guard (lw v0; beqz; move s1); movie is
- * re-tested before the !gRunFlag tail; dir.vy/fd.vy raw stores survive because the vz load sits between.
- * e->z is written before e->y = -e->y (fixes the gFLCount/reload order); `e = gFLArray; n = gFLCount;
- * e += n;` gives la/n the orig a1/a0 (la qty born first). Left (5 lines, the angle store): orig does
- * andi a0,angle,0xFFFF before the color test, then `lui v0; or v0,a0,v0` / `move v0,a0` arms with one
- * cross-jumped store; a shared `v` gives the reorg cmov shape, per-arm stores let combine fold the move. */
-INCLUDE_PART1("asm/main/nonmatchings/egsdisp", EGSDisplaySort)
+/* Keys: c0 is fd reused (stack 0x30); tags is D_80107B1C[i - 1]; camera and image loops share `i`,
+ * `j` is both the % 5 index and the level index; `e = gFLArray; n = gFLCount; e += n;` order. */
+const VECTOR D_80013740 = {0, 0x1000, 0, 0}; /* up vector */
 
 s32 EGSDisplaySort(u8 run, s32 tick) {
     VECTOR dir;
@@ -1612,10 +1600,12 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
             gFLCount = n + 1;
             e->z = fl->frame->matrix.t[2];
             e->y = -e->y;
-            if (fl->color == 0xFF) {
-                gFLArray[n].angle = (angle & 0xFFFF) | 0x80000000;
-            } else {
-                gFLArray[n].angle = angle & 0xFFFF;
+            {
+                /* ?: with different arm trees: expand_expr's `X ? A|B : A` singleton path would
+                 * copy A first; here the else arm is cse'd to a copy of a (move v0,a0) */
+                s32 a = angle & 0xFFFF;
+
+                gFLArray[n].angle = (fl->color == 0xFF) ? a | 0x80000000 : angle & 0xFFFF;
             }
         }
         if (gTextureAnimationList != NULL && run) {
@@ -1777,9 +1767,6 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
     dTicks++;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySort);
-#endif
 
 s32 EGSDisplayFlush(void) {
     ResetGraph(1);
