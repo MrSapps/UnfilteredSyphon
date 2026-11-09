@@ -1989,7 +1989,7 @@ extern const s32 D_80011BD4, D_80011BD8, D_80011BDC; /* meter colours */
 extern char *gHealthMsg, *gArmorMsg, *gTargetMsg, *gDangerMsg;
 
 /* Moves a meter quad's left or right edge (xy[0]/xy[2] or xy[1]/xy[3]). */
-static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
+static inline void iMeterEdge(IfacePoint *xy, s16 top, s16 bottom) {
     xy[0].vx = top;
     xy[2].vx = bottom;
 }
@@ -2019,7 +2019,11 @@ static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
  * accesses to it (lh 0(tp)); after `shown =` same; before `level = -1` (separate EBB) tp gets
  * s3 and all edge accesses use it (0x4/0xC(tp)). The orig's per-block lui/addiu at the edge
  * label + a2 = P+4 + `8(a2)` looks like a pseudo that cse never saw as constant (update_equiv_regs
- * single-use replacement after cse2, or a reload rematerialisation), not yet reproduced. */
+ * single-use replacement after cse2, or a reload rematerialisation), not yet reproduced.
+ * (r14AJ) iMeterEdge takes s16 top/bottom: the orig loads the edges with lhu (HImode add).
+ * Tried for the edges: block/inline `e = &xy[1]; e[0].vx = xy[0].vx + n` (absolute as before).
+ * iBlendColor's `addiu v0,sp,0x20; addu v1,v0` (mix base pseudo + giv copy) not reproduced by
+ * *(mix+i), p = mix, IfaceColor mix / m = &mix (105). */
 /* Status meters: armor/health, target health and danger, each with its caption. The bars
  * move at most 5 pixels a frame toward their value; an empty armor bar or a full danger
  * bar pulses. */
