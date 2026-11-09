@@ -632,31 +632,6 @@ void EGSDisplayAddPoly(void *display, void *prim);
     ((base) + ((D_801100C4 & rand()) << 8) >= 0 ? ((base) + ((D_801100C4 & rand()) << 8)) >> (12 - D_801100C8) \
                                                 : -(-((base) + ((D_801100C4 & rand()) << 8)) >> (12 - D_801100C8)))
 
-#ifdef NON_MATCHING
-/* r7J (54 -> 1): regalloc fixed by loop-depth ref weights (nested do-while(0)): i x4 around
- * `i = p->next` (16 refs: 25600, takes s0 first), AddPoly x4 + the Poly3F/Poly3FT calls x1 lift
- * prim (22/42: 20952) over p (82/240: 20500), so prim shares s0 with i and p gets s1.
- * Left: drawType 2 arg order, original `li a2,0x190` before `lw a1,D_801100BC` (ours after).
- * sched1 ties all four arg sets at priority 1 and takes LUID order (a0..a3); the original needs
- * the a1 load picked first (higher priority/LUID). prim = p->prim after the call, a local for
- * the color, a call-through cast, volatile load and barriers around it change nothing.
- * r8O (-dr/-dS): expand_call precomputes the color into a pseudo (lw P; a1 = P) and combine
- * merges it into `lw a1` (nothing between them sets memory/calls). Poly3F keeps P because the
- * stack-arg store sits between (use_crosses_set_p). With P kept, sched1's birthing boost on
- * `lw P` would issue it right after a2 (the original order); need a natural way to keep P.
- * r9V: confirmed -- `c = D_801100BC; <any store>; LineF(prim, c, ..)` gives a0, a2, lw a1, a3.
- * combine.c can_combine_p only refuses that merge for a store/call/volatile insn between the lw
- * and the a1 copy (mem_last_set / last_call_cuid) or if P stays live past the copy; the original
- * arm has none of those, so the color arg must come from some other shape.
- * r10Z (-dS): with the merged `lw a1` all four arg sets are prio 1 and the lw is queued a cycle (load
- * latency) so a3 goes first, then a2 wins the LUID tie; no rank_for_schedule class difference applies.
- * r14AK: prototypes match egsdisp.c. The order needs P (expand_call's copy_to_mode_reg of the color;
- * preserve_subexpressions_p is always 1 at -O2) to survive combine: then a1=P gets prio 2 (load
- * latency) and lw P the birthing boost -> a0 a2 lw a3. combine keeps P only with a store/call/
- * volatile insn between or P used before/after the a1 copy (LOG_LINK goes to P's first use).
- * Still 1: inline helpers (color / xy / prim params), K&R, varargs and s16 prototypes, `c = ..`
- * block local, `prim = p->prim` inside the arg, basic `asm("")` in an arg (ASM_INPUT is not
- * volatile_insn_p), `asm volatile("" : :)` (keeps P but is a sched barrier: lw hoists above). */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -724,8 +699,12 @@ void ParticleStart(ParticleGroup *g, s32 count) {
             *(s32 *)p->prim &= ~0x40;
             goto next;
         } else if (g->drawType == 2) {
+            s32 c = D_801100BC;
+            /* FAKE: an empty asm that "stores" display keeps combine from merging the color
+             * load into `lw a1` (mem_last_set), so sched1 births it after a2 as in the original. */
+            __asm__("" : "=m"(display));
             prim = p->prim;
-            EGSDisplayBuildLineF(prim, D_801100BC, 0x190, 0x190);
+            EGSDisplayBuildLineF(prim, c, 0x190, 0x190);
         } else if (g->drawType == 3) {
             prim = p->prim;
             p->color = D_801100BC;
@@ -754,9 +733,6 @@ void ParticleStart(ParticleGroup *g, s32 count) {
         } while (0);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleStart);
-#endif
 
 void ParticleInitBreath(void) {
     particleBreathFlag = 1;
