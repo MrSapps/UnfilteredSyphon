@@ -3203,7 +3203,10 @@ extern char *D_80107818, *D_8010781C, *D_80107820;
  * x=a1 y=a2 x2=t1 y2=t0 x3=a0 y3=a3 with the block-local p base in v1; ours gives y3 v1 (prio
  * y3 > x3 > y2 > x2 > y > x) and p a1. Direct mSniperPolys[i*2] stores, a block-local p, decl order
  * and computing the XY32s first change nothing. Second region: reg numbers off by one around the
- * /10 and /5 magic-constant divides in the rangefinder tick loop. */
+ * /10 and /5 magic-constant divides in the rangefinder tick loop.
+ * (r8T) the corner-loop order is decided by local-alloc, not global: &mSniperPolys is hoisted,
+ * spilled and rematerialised by reload into p's reg, and the globals x/y/x3/y3/... just follow the
+ * hard regs local-alloc gave the XY32 temps (set_preference). Orig p = v1, ours y3<<16 takes v1 first. */
 /* Sniper view (mode 2): one zoom step of the scope frame, rangefinder and sprites. */
 u8 func_80041BCC(u8 active) {
     s32 *level;
