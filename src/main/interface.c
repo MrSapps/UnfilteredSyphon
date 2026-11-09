@@ -1040,11 +1040,11 @@ static inline void iPointAdd(IfacePointW *pt, IfacePointW *d) {
 /* Offsets a packed screen point to the radar centre. */
 static inline s32 iRadarXY(s32 xy) {
     IfacePointW pt;
-    IfacePointW center;
+    s32 center;
 
-    center.w = 0x50FF67;
     pt.w = xy;
-    iPointAdd(&pt, &center);
+    center = 0x50FF67;
+    iPointAdd(&pt, (IfacePointW *)&center);
     {
         u8 unused[8]; /* leftover: inlined, it still takes 8 bytes of the caller's frame */
     }
@@ -1352,11 +1352,6 @@ INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D3C);
 
 int rsin(int a);
 
-#ifdef NON_MATCHING
-/* (r6F, 117 -> 41) threat loop is `for (i = 0; i < 2; i++)` over p[i] (loop.c eliminates the biv into
- * the p pointer: signed slt against p+8, beq vs p for i != 0) which also stops the +-24/+-20 hoisting;
- * clamps as `?:`; p[2] from s32 copies with x >= 0 ? x : -x abs; a dead 32-byte block pads the frame.
- * Left: iRadarXY centre constant lui/ori split; kx/ky regs + in-place abs; p[2] copies of x0/x1. */
 /* Radar blip for NPC slot at radar-space pos (vx, vy): corner box, target box, threat arrow. */
 void func_8003C724(s32 slot, VECTOR32 *pos) {
     s32 w;
@@ -1444,13 +1439,10 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
     }
     if (D_80117C58[slot] >= 0xE66) {
         IfacePoint p[3];
-        IfacePoint *pp;
         s32 angle;
         s32 a;
         s32 s;
         s32 c;
-        s32 kx;
-        s32 ky;
 
         angle = ratan2(y, x);
         D_80117B38[slot].xy0 = iRadarXY(0);
@@ -1469,17 +1461,13 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
                 p[i].vx = 0;
                 p[i].vy = s > 0 ? 20 : -20;
             } else {
-                kx = 0x18000 / c;
-                ky = 0x14000 / s;
-                if (kx < 0) {
-                    kx = -kx;
-                }
-                if (ky < 0) {
-                    ky = -ky;
-                }
-                if (kx < ky) {
+                if (__builtin_abs(0x18000 / c) < __builtin_abs(0x14000 / s)) {
                     p[i].vy = FIX12(s * 31);
-                    p[i].vx = c > 0 ? 24 : -24;
+                    if (c > 0) {
+                        p[i].vx = 24;
+                    } else {
+                        p[i].vx = -24;
+                    }
                 } else {
                     p[i].vx = FIX12(c * 31);
                     p[i].vy = s > 0 ? 20 : -20;
@@ -1493,22 +1481,18 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
             s32 a0 = p[0].vx;
             s32 a1 = p[1].vx;
 
-            p[2].vx = (a0 >= 0 ? a0 : -a0) < (a1 >= 0 ? a1 : -a1) ? a1 : a0;
-            a0 = p[0].vy;
-            a1 = p[1].vy;
-            p[2].vy = (a0 >= 0 ? a0 : -a0) < (a1 >= 0 ? a1 : -a1) ? a1 : a0;
+            p[2].vx = (a0 >= 0 ? a0 : -a0) < (a1 >= 0 ? a1 : -a1) ? p[1].vx : p[0].vx;
+            if (__builtin_abs(p[0].vy) < __builtin_abs(p[1].vy)) {
+                p[2].vy = p[1].vy;
+            } else {
+                p[2].vy = p[0].vy;
+            }
         }
         D_80117B38[slot].xy1 = iRadarXY(XY(p[0].vx, p[0].vy));
         D_80117B38[slot].xy2 = iRadarXY(XY(p[1].vx, p[1].vy));
         D_80117B38[slot].xy3 = iRadarXY(XY(p[2].vx, p[2].vy));
-        {
-            u8 pad[32]; /* leftover locals: the original frame is 0x20 bigger */
-        }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003C724);
-#endif
 
 void iInterfaceRadarRemove(void) {
     s32 i;
