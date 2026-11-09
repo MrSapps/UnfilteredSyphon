@@ -3727,15 +3727,10 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDOnScreen);
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
 
-#ifdef NON_MATCHING
-/* one insn off: the original keeps the dead ret=0 in s2 but returns a literal 0 on the count path (ours copies s2).
- * Returning 0/ret swapped just moves the s2 copy into the bnez slot: both original returns are literal 0, so
- * s2's last use must vanish after global-alloc (no-op move / jump2); if/else + one shared return is worse (14).
- * r5A: not REG_EQUIV: ret set once (no in-loop set, `return ret` twice) gets REG_EQUIV 0, but reload only
- * substitutes it for unallocated pseudos (alter_reg renumbers allocated ones first) -> both returns copy s3 (8).
- * r8Q: s2's only remaining use here is the loop-hoisted `ret = 0` that cse2 turns into `s2 = s2` (deleted in
- * final). Dead counters (`ret++` in the loop / for-increment) and in-loop `ret = ret` are deleted (7). Untested
- * idea: a combine-emitted (use) at a CODE_LABEL (distribute_notes) also keeps a reg alive with no code. */
+/* The original keeps a dead ret=0 in s2 but returns a literal 0 on both paths: s2 needs a use that survives
+ * flow/global-alloc but emits no code. Tried (r5A..r9W): REG_EQUIV single-set ret, dead counters, in-loop
+ * `ret = ret`, ret placed after the loop's first branch (not hoisted -> real addu), combine-folded uses
+ * (`ret & count`, `ret != 0`: ret is set twice so combine's nonzero_bits is unknown). */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
@@ -3765,14 +3760,14 @@ s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVEC
         out->vx = acc.sum[0] / count * 16;
         out->vy = acc.sum[1] / count * 16;
         out->vz = acc.sum[2] / count * 16;
-        return ret;
+        /* FAKE: an empty asm use of ret stands in for whatever kept ret (s2) live in the original;
+         * the in-loop `ret = 0` is hoisted and turned into a no-op `s2 = s2` deleted in final. */
+        __asm__("" : : "r"(ret));
+        return 0;
     }
     out->vx = out->vy = out->vz = 450;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayCalculateHMDTerrainLighting);
-#endif
 
 EGSAnim *EGSDisplayGetHMDSector(EGSAnim *anim) {
     VECTOR pos;
