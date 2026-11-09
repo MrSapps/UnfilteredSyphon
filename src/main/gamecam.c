@@ -1568,7 +1568,11 @@ void func_8001D89C(VECTOR32 *pos) {
  * r5C (greg): neg (297) conflicts only with up(75), 302 and v0, so it takes v1 in pass 0. To land in a0 it needs
  * a conflicting pseudo with a v1 hard preference (regs_someone_prefers) - up has none, since set_preference only
  * looks at the FIRST operand of an arithmetic src (diff.vx - up gives diff.vx the pref). Nested do{}while(0)
- * around the compare only adds +1 per ref (up 4 -> 6 refs, pri 7500), not enough. */
+ * around the compare only adds +1 per ref (up 4 -> 6 refs, pri 7500), not enough.
+ * r7M: one function-scope `neg` also holding diff.vx (`neg = -fov; ... neg = diff.vx; if (neg >= up)`,
+ * second arm `(neg - down) + cur.vx`) gives the original's regs (neg/diff a0, up v1; 6 lines), but then
+ * neg outlives expand_divmod's copy for /8, so cse (make_regs_eqv) makes neg the class head and tests
+ * bgez a0 instead of the copy; also a beqz delay-slot fill in the lim block changes. */
 /* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
  * scaled by the fov. The fov fetch copies a whole vector into one word (as the
  * original does, spilling over the saved registers above it). */
@@ -2046,7 +2050,10 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * r4G: abs is __builtin_abs (one abssi2 insn), so src/d/a is a single sched block. The
  * shake->frame reloads (in-struct, varying address) depend on every in-struct stack store;
  * in the original they pass the d.vx/d.vy stores, so those were probably scalar stores
- * (`s32 *pd = &d.vx; pd[0] = ...`): d/a via pointers gives 25-27, order still differs. */
+ * (`s32 *pd = &d.vx; pd[0] = ...`): d/a via pointers gives 25-27, order still differs.
+ * r7M: GET order (src.vx/vy/vz loads, then src.vy = -src.vy) + iEdgeLength order (d.vx, d.vy, a.vx,
+ * d.vz, a.vy, a.vz) with `s32 *pa = &a.vx` = 25; orig keeps d.vz live past abs (abs into a new reg,
+ * d.vz stored after) and loads pos.vz first. */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
