@@ -1252,7 +1252,11 @@ typedef struct FootAnimView {
  * line->state is set after wz. Left: the original keeps light9 >> 8 in light's reg (s4, sra after
  * the 2nd rand) and light9 in s6, &D_80118FD0 in s7 (one more saved reg). `light = light9 >> 8`
  * anywhere is 85 (light set twice: no sched1 birthing boost, sra floats to the top; it also lifts
- * &D_80118FC0 above gobj); a fresh `l8 = light9 >> 8` is 34 but boosted to the block end. */
+ * &D_80118FC0 above gobj); a fresh `l8 = light9 >> 8` is 34 but boosted to the block end.
+ * r7J: sched1 lets a pseudo set cross calls when the pseudo already crosses one (sched.c
+ * reg_n_calls_crossed), so `light = light9 >> 8` (priority 1) floats above all three rands. The
+ * original keeps it right after rand #2: `do { light = light9 >> 8; } while (0);` after the vz
+ * statement reproduces that (57) but the loop note ends cse1 so every D_80118FC0 store re-lui's. */
 /* A tracer line from gobj's gun to target (every few NPC shots), and an ejected shell for the player. */
 void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     void *display;
@@ -2257,7 +2261,11 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * (x = (*D)->pos.vx; pos.vx = x; ... x += vel.vx >> 2; pos.vx = x;) stops the boost but
  * shifts local-alloc (21); the D_80110088 load must also issue between the vz frame reload and
  * its lhu (it is boosted and LUID-tied with the lhu: needs a lower LUID, but moving pos.vy =
- * D_80110088 earlier is 32+). */
+ * D_80110088 earlier is 32+).
+ * r7J: from the sched1 trace, the original needs the vel.vx >> 2 sra (p 10) placed before the
+ * vel.vx store (p 10): with equal priority that needs a lower LUID, i.e. the shift emitted before
+ * the store; and the pos.vx addu not birthing-boosted. User vars x/t/vx (set twice), shift
+ * before the store via `t = (*D)->m[0][2] >> 2` and flag-before-vel.vz orders are 5-35. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
