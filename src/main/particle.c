@@ -633,15 +633,13 @@ void EGSDisplayAddPoly(void *display, void *prim);
                                                 : -(-((base) + ((D_801100C4 & rand()) << 8)) >> (12 - D_801100C8)))
 
 #ifdef NON_MATCHING
-/* r6E: a second pointer for part of the body (q = p from statement k on) splits p's refs but the
- * copy stays and p's first half still outranks i/prim (36-60 lines over 9 cut points). */
-/* Register allocation only: the original gives i/prim (sharing one reg) $s0 and p $s1; ours
- * ranks p first (refs 78, live 240, pri 19500) over i (16/42, 15238) and prim (12/25, 14400).
- * r4I: from the flow dump i is p77 (refs 12, live 25) and prim p76 (16/42). Both need > p: i 16
- * refs, prim 21 (or p below 64 refs). do-while(0) around `i = p->next` adds loop-depth weight
- * (+1 per level) but also to p; around `p = &D_80119040[i]` at the loop top it adds nothing.
- * Per-branch `i = p->next; continue;` copies (5 sites, cross-jumped later) give p 86, prim 20/39
- * (20512), i 20/44: still under p (20890). Best seen: 48 lines (nested do-while on both). */
+/* r7J (54 -> 1): regalloc fixed by loop-depth ref weights (nested do-while(0)): i x4 around
+ * `i = p->next` (16 refs: 25600, takes s0 first), AddPoly x4 + the Poly3F/Poly3FT calls x1 lift
+ * prim (22/42: 20952) over p (82/240: 20500), so prim shares s0 with i and p gets s1.
+ * Left: drawType 2 arg order, original `li a2,0x190` before `lw a1,D_801100BC` (ours after).
+ * sched1 ties all four arg sets at priority 1 and takes LUID order (a0..a3); the original needs
+ * the a1 load picked first (higher priority/LUID). prim = p->prim after the call, a local for
+ * the color, a call-through cast, volatile load and barriers around it change nothing. */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -695,9 +693,13 @@ void ParticleStart(ParticleGroup *g, s32 count) {
             p->unk64 = (D_801100B0 & rand()) - (D_801100B0 >> 1);
             prim = p->prim;
             if (g->flags & 0x8000) {
-                EGSDisplayBuildPoly3FT(prim, D_801100BC, 0x190, 0, 0x190, 0, 0x190, 0);
+                do {
+                    EGSDisplayBuildPoly3FT(prim, D_801100BC, 0x190, 0, 0x190, 0, 0x190, 0);
+                } while (0);
             } else {
-                EGSDisplayBuildPoly3F(prim, D_801100BC, 0x190, 0x190, 0x190);
+                do {
+                    EGSDisplayBuildPoly3F(prim, D_801100BC, 0x190, 0x190, 0x190);
+                } while (0);
             }
         } else if (g->drawType == 4) {
             EGSTextureCreateSprite(D_80105E1C.sprite, p->prim, 0x80, 0x80, 0, 0);
@@ -714,9 +716,25 @@ void ParticleStart(ParticleGroup *g, s32 count) {
         } else {
             goto next;
         }
-        EGSDisplayAddPoly(display, prim);
+        do {
+            do {
+                do {
+                    do {
+                        EGSDisplayAddPoly(display, prim);
+                    } while (0);
+                } while (0);
+            } while (0);
+        } while (0);
     next:
-        i = p->next;
+        do {
+            do {
+                do {
+                    do {
+                        i = p->next;
+                    } while (0);
+                } while (0);
+            } while (0);
+        } while (0);
     }
 }
 #else
