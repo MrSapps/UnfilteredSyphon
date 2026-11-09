@@ -2411,7 +2411,13 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
  * h2/6 after the len/8 branch.
  * r6F (201 -> 196): sibling shape `t = size * D / 4; prod = t * D; len = t;` puts D and the size*D
  * product where the original has them (a0/v0); still len is a copy in t1 (orig: the quotient itself
- * in a2) and prod takes a2 for 41 insns, so lines falls to t2. */
+ * in a2) and prod takes a2 for 41 insns, so lines falls to t2.
+ * r13AG (196 -> 35): `prod = len / 8` computed before `t = h2 / 6` (the orig's len/8 branch
+ * precedes the /6 mult) fixes the lines base (t1) and the tail; `q = t * D / 4` (no prod var)
+ * gives the in-place +3 adjust in D's register. Left: block-local q / len*2 / h4 take a0 in
+ * local-alloc (orig a1, so the global prod/temp, h2 sign, len/8 copy land a1/a1/t2 instead of
+ * a0/t2/a0). Tried len*2 / len / q as separate vars or reassignments, `q = t*D; q /= 4` (27 but
+ * adds a copy), D*t order. */
 void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
@@ -2447,9 +2453,8 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
             size = t;
         }
         t = size * D_8010FFEC / 4;
-        prod = t * D_8010FFEC;
+        q = t * D_8010FFEC / 4;
         len = t;
-        q = prod / 4;
         lines[0].xy0 = XY(scr->vx - len * 2, scr->vy);
         lines[0].xy1 = XY(scr->vx - len, scr->vy);
         lines[1].xy0 = XY(scr->vx + len, scr->vy);
@@ -2472,11 +2477,12 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
         lines[8].xy1 = XY(scr->vx + len, scr->vy - h4);
         lines[9].xy0 = XY(scr->vx + len, scr->vy + h2);
         lines[9].xy1 = XY(scr->vx + len, scr->vy + h4);
+        prod = len / 8;
         t = h2 / 6;
         lines[10].xy0 = XY(scr->vx, scr->vy - t);
         lines[10].xy1 = XY(scr->vx, scr->vy + t);
-        lines[11].xy0 = XY(scr->vx - len / 8, scr->vy);
-        lines[11].xy1 = XY(scr->vx + len / 8, scr->vy);
+        lines[11].xy0 = XY(scr->vx - prod, scr->vy);
+        lines[11].xy1 = XY(scr->vx + prod, scr->vy);
         for (i = 0; i < 12; i++) {
             lines[i].unk04 = (scr->vz >> 3) - 10;
         }
