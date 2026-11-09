@@ -879,7 +879,10 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
  * r7K: `lines = lines * scale + (u16)w->y - w->yAdjust;` (s32) is 1 line off: a3 + lhu, only
  * yAdjust is lb instead of lbu+sll/sra. mips.md extendqi* force_not_mem the QI operand (lbu, then
  * shifts); combine re-merges it into lb unless the extension is QI->HI (the narrowed form), and
- * any narrowing whose result reaches `lines` loses the extension in combine -> local temp in v0. */
+ * any narrowing whose result reaches `lines` loses the extension in combine -> local temp in v0.
+ * r8P: (u16)w->yAdjust keeps lbu+sll+sra but adds andi 0xFFFF; (s16) folds back to lb. s16 locals
+ * here are non-promoted HI pseudos; an unused named label before `*y = h` is deleted, h stays local
+ * (v0). The result needs a pseudo that local-alloc skips (2 deaths or live across a real block). */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -1465,7 +1468,13 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * return x;` keeps lhu+andi, but combine puts the ior back into the v0 set and the and/sll temps
  * stay birthing-boosted (1). With a do {} while (0) before the store the order is right after
  * sched1, but the loop notes also pin sched2, so the sb can't move up past the id andi (1).
- * `id &= 0xFF` gets a fresh pseudo (still boosted); `sum &= 0xFF` forms move the andi (3). */
+ * `id &= 0xFF` gets a fresh pseudo (still boosted); `sum &= 0xFF` forms move the andi (3).
+ * r8P (-dS): the reload lhu 0x10(sp) can never pass the sb in sched2 (sched.c true/anti_dependence
+ * exempt struct-vs-scalar pairs only for non-QImode refs, and the store is a QI sb), so sched1 must
+ * already put the id andi above the sb. Boosted insns (7f000001) always beat the prio-1 sb, so the
+ * andi's dest must be set twice: combine always re-targets it to a fresh single-set temp (HI vars,
+ * `id &=`, `t = id; t &= 0xFF`), and SImode 2-set forms (`x = (u16)(id & 0xFF)`, x reused) get the
+ * right order (andi lbu sll sb or) but zero_extend:QI -> lbu (3). */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

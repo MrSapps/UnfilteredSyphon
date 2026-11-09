@@ -134,7 +134,11 @@ void WindowLOSLoop(LOSContext *ctx);
  * gGabeSector load (they share a sched block otherwise); `u16 s = gGabeSector; ctx.unk04 = 0;
  * ctx.sector = s;` puts the unk04 store in the lhu delay (the stack-struct store conflicts with
  * the global load in sched, so it must be emitted after it, with a lower LUID than the sh).
- * With f on top: 6 (only cam.vx a1 + the movstr through s0 left). */
+ * With f on top: 6 (only cam.vx a1 + the movstr through s0 left).
+ * r8P: the dead `addiu s0,sp,0x10` shares s0 with the later &ctx (sp+0x60) for SCRATCH_CALL1, so
+ * it is likely one pointer pseudo set twice whose first value's uses were all folded to sp+0x10 by
+ * combine (I2 kept while used later, so the set survives dead). cam.vx in a1 = local-alloc saw its
+ * qty overlap v0/v1 in the original's sched1 order (cam loads interleaved) - not tried yet. */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;

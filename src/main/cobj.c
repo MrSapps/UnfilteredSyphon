@@ -1002,7 +1002,14 @@ void EGSDisplayGetSectorRotBoxList(void *model, u32 *count, u32 **boxes);
  * ours duplicates the test and hoists count. links[i] is strength-reduced (links - 3) in ours.
  * r5B: jump.c duplicate_loop_exit_test only refuses for a CALL/CODE_LABEL/BLOCK or LOOP_CONT note in the test.
  * An explicit `goto test; next: ...; test: if (idx < count) goto next;` gives the j-test layout and the count
- * reload (44 lines) but no loop notes, so loop.c does not move the hit blocks next to the j (original does). */
+ * reload (44 lines) but no loop notes, so loop.c does not move the hit blocks next to the j (original does).
+ * r8P: a static inline in the for condition puts BLOCK notes in the exit test, so the test is not
+ * duplicated and the for keeps its loop notes (j-test layout + count reload, 49 -> 47). The hit blocks
+ * still sit inside the loop: loop.c find_and_verify_loops only moves code that is OUTSIDE the loop and
+ * jumps back in to the barrier after the entry jump, so the original's hit handling was probably
+ * written after the box loop (break out, then set unk0C/unk08 and jump back to the found code).
+ * `goto hit0/hit4` with the hit blocks after the for gives 51 (fewer bad immediates, 16 -> 9). The
+ * prologue (links = gLevData+..+0x80 kept in fp, i/ts) also differs independently. */
 static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
     CobjTerrSector *ts;
 
@@ -1012,6 +1019,10 @@ static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
         ts = NULL;
     }
     return ts;
+}
+
+static inline s32 CobjIdxValid(u32 idx, u32 count) {
+    return idx < count;
 }
 
 /* Run a collision query over the dummy sectors (game objects, rotated boxes), the query's
@@ -1082,7 +1093,7 @@ s32 CobjLoop(CobjQuery *q) {
                 do {
                     done = 0;
                     if (hasList) {
-                        for (; idx < count; idx++, off += 0x48) {
+                        for (; CobjIdxValid(idx, count); idx++, off += 0x48) {
                             box = (u32 *)((u8 *)boxes + off);
                             node.gobj = (Gobj *)box;
                             if (kind == 0 && (*box & 1)) {
