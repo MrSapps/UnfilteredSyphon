@@ -2728,9 +2728,16 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
  * as `x - (0x10 - r)`, dir = &D_8011D210 at the top of the targetId >= 0 arm (vx stored through
  * it), pos.vz before the D_8011D210 stores, volatile + block-local f for the kind == 0 flags
  * (reload + unfolded ands; a non-volatile form that reloads was not found).
- * Left: unk2C is loaded before the moveMode store in the original (a3/a2 swap); the original
- * sets dir per arm (la a0 in each), ours hoists it before the branch; level-18 sb/sw and the
- * mode-5 arg order. */
+ * r8S (36 -> 8): the targetId >= 0 arms each end in their own `v = &D_8011D210` +
+ * GTEMath_VectorNormal(v, v) (block-local v gets a0 via local-alloc suggestions; jump2
+ * cross-jumps the identical tails), and the mode-5 path calls MovementGobjRegister... in both
+ * arms (&D_8011D210 / NULL); NPCRethinkNextPoint is called with (obj, D_80110134);
+ * `kind & 0x400` instead of re-reading npc->flags; npc->dir.vy = 0 after .vx.
+ * Left (8): npc->unk2C is loaded before the script address in the original. Its load is
+ * sched1-birthing-boosted (dest set once) so it lands late; `s16 c = npc->unk2C; ... c--;`
+ * (c set twice) fixes the load slot but the decrement then stays in place (orig: v0 = c - 1),
+ * and s32/u32 forms (`k`, a new s32) shrink the frame by 8 (0x60 vs 0x68; the original has an
+ * unused 16-byte gap at sp+0x40 that ours also has only by accident). */
 void NPCIQEveryFrame(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     s32 mode = npc->unk46;
@@ -2740,7 +2747,6 @@ void NPCIQEveryFrame(Gobj *obj) {
     s32 step;
     s32 kind;
     u32 k;
-    VECTOR32 *dir;
     Gobj *t;
 
     if (npc->awareness != 0 && !((gExeTick + obj->id) & 0x1F)) {
@@ -2858,7 +2864,7 @@ void NPCIQEveryFrame(Gobj *obj) {
                     }
                 } else {
                     if (kind & 0x4000000) {
-                        NPCRethinkNextPoint(obj);
+                        ((void (*)(Gobj *, PathPoint *))NPCRethinkNextPoint)(obj, D_80110134);
                         npc->flags &= ~0x4000000;
                     }
                     k = (D_80110134[npc->curPoint].flags & 0xF00) >> 8;
@@ -2888,8 +2894,8 @@ void NPCIQEveryFrame(Gobj *obj) {
                         NPC_MOVE(obj)->pathCtrl->active = 1;
                         NPC_MOVE(obj)->pathCtrl->from = pt;
                         NPC_MOVE(obj)->pathCtrl->to = pos;
-                        npc->dir.vy = 0;
                         npc->dir.vx = pos.vx - D_8011E8B8.vx;
+                        npc->dir.vy = 0;
                         npc->dir.vz = pos.vz - D_8011E8B8.vz;
                         npc->unk2E = pt.vy;
                         obj->move->unk12C = pt.vy;
@@ -2930,7 +2936,6 @@ void NPCIQEveryFrame(Gobj *obj) {
     if (kind & 0x10000) {
         NPCFaceDirection(obj, &npc->dir);
     } else if (mode == 5) {
-        dir = NULL;
         if (npc->awareness == 2 && !(kind & 0x2000) && !(obj->cas->flags & 0x20000000)
             && (obj->target->flags & 8)) {
             if (obj->target->targetId < 0) {
@@ -2942,25 +2947,31 @@ void NPCIQEveryFrame(Gobj *obj) {
                     D_8011D210.vz = 0;
                 }
                 D_8011D210.vy = 0;
-            } else {
-                dir = &D_8011D210;
-                if (obj->target->targetId != gPlayerOffset) {
-                    t = gameObjectsInfo[obj->target->targetId].runtime;
-                    D_8011D210.vx = t->move->pos.vx - D_8011E8B8.vx;
-                    D_8011D210.vy = t->move->pos.vy - D_8011E8B8.vy;
-                    D_8011D210.vz = t->move->pos.vz - D_8011E8B8.vz;
-                } else {
-                    D_8011D210.vx = npc->lastSeenPos.vx - D_8011E8B8.vx;
-                    D_8011D210.vy = npc->lastSeenPos.vy - D_8011E8B8.vy;
-                    D_8011D210.vz = npc->lastSeenPos.vz - D_8011E8B8.vz;
-                }
+            } else if (obj->target->targetId != gPlayerOffset) {
+                VECTOR32 *v;
+
+                t = gameObjectsInfo[obj->target->targetId].runtime;
+                v = &D_8011D210;
+                v->vx = t->move->pos.vx - D_8011E8B8.vx;
+                D_8011D210.vy = t->move->pos.vy - D_8011E8B8.vy;
+                D_8011D210.vz = t->move->pos.vz - D_8011E8B8.vz;
                 D_8011D210.vy = 0;
-                GTEMath_VectorNormal(&D_8011D210, &D_8011D210);
+                GTEMath_VectorNormal(v, v);
+            } else {
+                VECTOR32 *v;
+
+                v = &D_8011D210;
+                v->vx = npc->lastSeenPos.vx - D_8011E8B8.vx;
+                D_8011D210.vy = npc->lastSeenPos.vy - D_8011E8B8.vy;
+                D_8011D210.vz = npc->lastSeenPos.vz - D_8011E8B8.vz;
+                D_8011D210.vy = 0;
+                GTEMath_VectorNormal(v, v);
             }
-            dir = &D_8011D210;
+            MovementGobjRegisterCharacterMovement(obj, &D_8011D210, 5);
+        } else {
+            MovementGobjRegisterCharacterMovement(obj, NULL, 5);
         }
-        MovementGobjRegisterCharacterMovement(obj, dir, 5);
-        if (npc->awareness == 2 && !(npc->flags & 0x400) && npc->casAction == 0) {
+        if (npc->awareness == 2 && !(kind & 0x400) && npc->casAction == 0) {
             NPCRandomActions(obj);
         }
     } else {
@@ -2969,7 +2980,7 @@ void NPCIQEveryFrame(Gobj *obj) {
         pt.vy = obj->anim->frame->m[1][2];
         pt.vz = obj->anim->frame->m[2][2];
         pt.vy = -pt.vy;
-        if (mode == 7 && (obj->cas->flags & 2) && !(npc->flags & 0x400) && NPC_OF(obj)->casAction == 0) {
+        if (mode == 7 && (obj->cas->flags & 2) && !(kind & 0x400) && NPC_OF(obj)->casAction == 0) {
             CASRequestAction(obj->id, 0x47);
             npc->casAction = 0x47;
         }
