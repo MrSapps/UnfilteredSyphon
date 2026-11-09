@@ -2704,14 +2704,6 @@ static inline void iDotSV(GameCamSVec *a, VECTOR32 *b, s32 *out) {
     *out = a->vx * b->vx + a->vy * b->vy + a->vz * b->vz;
 }
 
-#ifdef NON_MATCHING
-/* 10 lines left (r6H): MAX2 (`a > b ? a : b` -> MAX_EXPR, not distributed into the FIX12 arithmetic
- * like MAX's COND_EXPR), `-FIX12` split in two statements, `(u32)face < 0x80000000` (a GEU test cse
- * can't use to fold the loop's NULL test), count = 0 at the loop top, r computed in both track arms.
- * Left: loop.c hoists the track.plane load out of the edge loop (no aliasing store in the loop:
- * edge/a stores are sp-fixed), the original reloads it per iteration -> plane/i regs shift.
- * With `(plane = track.plane)->count` + `plane->count` in the body the load stays in the loop
- * but cse_around_loop then shares the exit test's count with the body (orig reloads it). */
 /* Moves a sphere from cur by d against the collision faces (static, then the player's),
  * leaving the result in pos; a second pass pushes pos out of whatever it still touches.
  * Returns whether anything was hit. */
@@ -2814,7 +2806,10 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
                         s32 next;
                         s32 t;
 
-                        next = i == track.plane->count - 1 ? 0 : i + 1;
+                        /* the empty loop's LOOP_END stops cse_around_loop sharing the exit test's count */
+                        do {
+                        } while (0);
+                        next = i == plane->count - 1 ? 0 : i + 1;
                         t = iEdgeLength(plane, i, next, &edge, &a);
                         if (t > 0 && t < 0x18) {
                             track.moving = 0;
@@ -2852,9 +2847,6 @@ u8 func_80021230(VECTOR32 *cur, VECTOR32 *d, VECTOR32 *dir, VECTOR32 *pos) {
     } while (pass < 2);
     return hit;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_80021230);
-#endif
 
 /* The rotation is iAngleDir (its locals share the inline slot area with scale);
  * frame/which are assigned per arm so gCamera loads once in the shared call tail. */
