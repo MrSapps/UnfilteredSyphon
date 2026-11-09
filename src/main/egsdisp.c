@@ -3363,7 +3363,12 @@ s32 FuzzyXZDistancePoint2Point(VECTOR *a, VECTOR *b) {
  * 0x90.. = declaration order below). Left: anim gets s2 (orig s1, shared with sortBuffer), the
  * sortBuffer*0x14 / camera spill schedule at entry, and reload-register (t1-t3) choices that stop
  * jump2 cross-jumping the bias stores (-72/-10). A while loop whose run test does its own
- * advance (as the original layout suggests) scores worse (274). */
+ * advance (as the original layout suggests) scores worse (274).
+ * r14AI (228 -> 178): anim now gets s1 (the bias magnitude uses `v`, not `d`, so d's priority drops below
+ * anim's); angle is s32 (lh into fp, no sll/sra); the wide range test is an if/else into a block-local
+ * `in` (bnez; slti 0x501 in the slot; slti 0x821; beqz); 600 - a is computed before the sh clamp.
+ * Left: angle (fp in orig) still outranks sumG/sumB (s6/s7), frame is 8 bytes smaller (one spill slot
+ * fewer: offset spill at 0x138, orig 0x140), entry schedule of the camera spill / sortBuffer*5. */
 extern s32 gInfraredColorNoGp[] __asm__("gInfraredColor+0+0");
 extern s32 gInfraredColorSnifferNoGp[] __asm__("gInfraredColorSniffer+0+0");
 extern s32 gTerrainFogNoGp[] __asm__("gTerrainFog+0+0");
@@ -3537,6 +3542,8 @@ void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
             dist = 4500;
         }
         for (i = 0; i < gFLCountNoGp[0]; i++) {
+            s32 in;
+
             e = &gFLArray[i];
             angle = *(s16 *)&e->angle;
             pos.vx = anim->frame->matrix.t[0];
@@ -3545,7 +3552,12 @@ void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
             pos.vy = -pos.vy;
             pos.vz = anim->frame->matrix.t[2];
             d = FuzzyXZDistancePoint2Point(&pos, (VECTOR *)e);
-            if (!wide ? d < 0x821 : d < 0x501) {
+            if (wide) {
+                in = d < 0x501;
+            } else {
+                in = d < 0x821;
+            }
+            if (in) {
                 pos.vx -= e->x;
                 pos.vy -= e->y;
                 pos.vz -= e->z;
@@ -3558,10 +3570,11 @@ void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
                 }
                 if (a < 600) {
                     sh = d >> 9;
+                    v = 600 - a;
                     if (sh < 2) {
                         sh = 2;
                     }
-                    v = (600 - a) >> sh;
+                    v >>= sh;
                     if (!wide) {
                         sum += v;
                         sumG += v;
