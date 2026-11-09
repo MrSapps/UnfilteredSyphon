@@ -928,27 +928,11 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
 
 #define OBJ_CLASS(id) (*(u8 *)&gameObjectsInfo[id].flags24)
 #define OBJ_SEX(id) (gameObjectsInfo[id].flags24 & 0x3000)
+/* Weapon an object holds: its class byte, else by the 0x3000 bits (0x1000 -> 0x13, 0x2000 -> 0x14) */
+#define OBJ_WEAPON(id)                                                                                 \
+    (OBJ_CLASS(id) != 0 ? OBJ_CLASS(id) : OBJ_SEX(id) != 0x1000 ? (OBJ_SEX(id) == 0x2000 ? 0x14 : 0) : 0x13)
 
-#ifdef NON_MATCHING
-/*
- * Logically equivalent; cse folds the original's redundant third
- * "(sex == 0x1000)" test of the first class switch, so this is one insn short.
- * The fold happens in cse (the test is still present after jump1); splitting the third test
- * into its own if, a user label before it, or a switch on the sex bits do not stop it.
- * r4F: cse records both the `== 0x1000` fall-through (as a known-false comparison) and the
- * `!= 0x2000` fall-through (x == 0x2000) and folds the third test from either; (u16)/(s16)/u32
- * casts, a do-while(0) around the first two tests, a `sex` local with `else sex = sex;` and a
- * volatile local do not keep it.
- * r4J: `if (==0x1000) goto third; if (!=0x2000) goto two; third: if (==0x1000) goto two;`
- * does not help either: cse's follow_jumps path takes the first jump to `third`, folds the test
- * and rethreads the jump straight to two_handed.  (x ^ 0x2000) != 0 / (x - 0x1000) == 0 forms
- * fold too (cse knows x != 0x1000 from the first test's fall-through).
- * r8S: a do-while(0) between test 2 and 3 only moves the fold from cse1 to cse2. Note the
- * original's test 3 compares against the SAME reg as test 1 (a1 = 0x1000), so a cse pass did
- * see both constants yet did not fold: fold_rtx needs `sex` to carry the 0x2000 constant
- * (record_jump_equiv merge) or test 1's NE in qty_comparison; a mode/subreg mismatch
- * (record_jump_cond only records REG op0 in `mode`) is the remaining candidate.
- */
+/* Sets the slot's aim type / two-handedness from the character state and held weapon; 0 if it can't aim. */
 u8 func_8007D120(AnimSlot *slot) {
     AnimCharState *state;
     AnimCharState *pose;
@@ -972,23 +956,10 @@ u8 func_8007D120(AnimSlot *slot) {
             slot->aimTwoHanded = 0;
         }
     } else {
-        switch (OBJ_CLASS(slot->gobj->objId)) {
-        case 0:
-            if (OBJ_SEX(slot->gobj->objId) == 0x1000 || OBJ_SEX(slot->gobj->objId) != 0x2000 ||
-                OBJ_SEX(slot->gobj->objId) == 0x1000) {
-                goto two_handed;
-            }
-            break;
-        case 0x13:
+        if (OBJ_WEAPON(slot->gobj->objId) == 0 || OBJ_WEAPON(slot->gobj->objId) == 0x13) {
             goto two_handed;
         }
-        switch (OBJ_CLASS(slot->gobj->objId)) {
-        case 0:
-            if (OBJ_SEX(slot->gobj->objId) != 0x1000 && OBJ_SEX(slot->gobj->objId) == 0x2000) {
-                goto two_handed;
-            }
-            break;
-        case 0x14:
+        if (OBJ_WEAPON(slot->gobj->objId) == 0x14) {
         two_handed:
             if (slot->gobj->state->action == 2 && !(slot->gobj->state->flags & 2)) {
                 slot->aimType = 0;
@@ -1023,9 +994,6 @@ done:
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/animate", func_8007D120);
-#endif
 
 /* Calls made on the scratchpad stack (SCRATCH_CALL1, scratch.h): the original leaves
  * the jal delay slot empty.  A second spelling of the same asm keeps jump.c from
