@@ -1052,7 +1052,13 @@ static inline s32 iRadarXY(s32 xy) {
 }
 
 #ifdef NON_MATCHING
-/* loop induction variables and the frame (0x88 vs 0x90) differ throughout */
+/* (r6F, 132 -> 54) icon defs through a def pointer (no address giv), the background sprite through
+ * a block pointer (orig keeps &D_801174E8 in s5), inner sprite loop on block-local copies, and
+ * `(&D[i])->unk04 = k` in the prim loops (an ADDR_EXPR deref makes the unk04 address a giv of the
+ * &D[i] call-arg pointer, so it combines with it: orig sw 0x4(s0); addiu s0, 0x24).
+ * Frame: the pad local fixes the size, but the offsets fit better if this call's iRadarXY had
+ * unused[16] (func_8003C724 needs 8). Left: the n copy (a1) for the inner bound; the meter loop
+ * (D_801175CC base/offset givs); the -2 spill slot. */
 INCLUDE_PART1("asm/main/nonmatchings/interface", InterfaceSetup)
 
 extern const VECTOR32 D_80011D2C;
@@ -1080,6 +1086,7 @@ void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2
 
 void InterfaceSetup(void) {
     VECTOR32 pos;
+    u8 pad[8]; /* unused: the original frame is 8 bytes bigger */
     u16 w;
     u16 h;
     s32 i;
@@ -1096,25 +1103,37 @@ void InterfaceSetup(void) {
     EGSCameraCreate(0, &pos, 1, D_8010F8C8, 3, 3, 0x12C, &gInterfaceWindow);
     ((u16 *)gInterfaceWindow)[3] |= 1;
     for (i = 1; i < 23; i++) {
-        spr = SpriteGet(D_80011BA0[i].first);
-        n = D_80011BA0[i].count;
+        const IfaceIconDef *def = &D_80011BA0[i];
+
+        spr = SpriteGet(def->first);
+        n = def->count;
         SpriteSuperSetXY(spr, n, 400, 400);
         SpriteCreateMulti(&D_80117514[i], n, spr);
-        for (j = 0; j < n; j++) {
-            spr[j].unk24 = 0;
-            spr[j].unk28 = 0;
+        {
+            IfaceSprite *s = spr;
+            s32 c = n;
+            s32 k;
+
+            for (k = 0; k < c; k++) {
+                s[k].unk24 = 0;
+                s[k].unk28 = 0;
+            }
         }
     }
-    D_801174E8 = *SpriteGet(0);
-    D_801174E8.unk24 = 7;
-    EGSTextureSetSpriteTransparency(&D_801174E8, 1);
-    EGSDisplayAddSprite(gInterfaceWindow, &D_801174E8);
-    D_801174E8.h = 1;
-    D_801174E8.w = 1;
+    {
+        IfaceSprite *bg = &D_801174E8;
+
+        *bg = *SpriteGet(0);
+        bg->unk24 = 7;
+        EGSTextureSetSpriteTransparency(bg, 1);
+        EGSDisplayAddSprite(gInterfaceWindow, bg);
+        bg->h = 1;
+        bg->w = 1;
+    }
 
     for (i = 0; i < 2; i++) {
         EGSDisplayBuildPoly4F(&D_80117C70[i], 0x503028, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
-        D_80117C70[i].unk04 = 3;
+        (&D_80117C70[i])->unk04 = 3;
         SET_SEMI_TRANS(&D_80117C70[i].tag);
         D_80117C70[i].link = 0;
     }
@@ -1124,7 +1143,7 @@ void InterfaceSetup(void) {
     SET_SEMI_TRANS(&D_80117D00.tag);
     for (i = 0; i < 5; i++) {
         EGSDisplayBuildLineF(&D_80117D24[i], 0xE77E6B, OFFSCREEN, OFFSCREEN);
-        D_80117D24[i].unk04 = 2;
+        (&D_80117D24[i])->unk04 = 2;
         SET_SEMI_TRANS(&D_80117D24[i].tag);
         D_80117D24[i].link = 0;
     }
@@ -1135,7 +1154,7 @@ void InterfaceSetup(void) {
     }
     for (i = 0; i < 4; i++) {
         EGSDisplayBuildLineF(&D_80117D9C[i], 0xE77E6B, OFFSCREEN, OFFSCREEN);
-        D_80117D9C[i].unk04 = 2;
+        (&D_80117D9C[i])->unk04 = 2;
         SET_SEMI_TRANS(&D_80117D9C[i].tag);
         D_80117D9C[i].link = 0;
     }
@@ -1144,7 +1163,7 @@ void InterfaceSetup(void) {
         D_80117A30[i].link = 0;
         D_80117B2C[i] = -1;
         EGSDisplayBuildPoly4G(&D_80117B38[i], 0x400040, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF);
-        D_80117B38[i].unk04 = 3;
+        (&D_80117B38[i])->unk04 = 3;
         SET_SEMI_TRANS(&D_80117B38[i].tag);
         D_80117C58[i] = 0;
     }
