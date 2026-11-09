@@ -865,32 +865,10 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
     return D_8010FA4C | (sum << 8);
 }
 
-#ifdef NON_MATCHING
-/* Only the final subtract's result register differs (a3 in the original, the add's v0 here).
- * local-alloc can't pick a3 over v0/a0 (a0-a2 are still pseudos then), so in the original the
- * result was a global-alloc pseudo (reg_n_deaths != 1 or used in two blocks). Tried: s16 lines
- * (still 2; the loop needs no extension), lines/scale/h/r as the result holder, h += / -=
- * splits, (s16) casts on parts, *y = ...; *y -= ... (all 2 or worse).
- * r4G: `lines = lines * scale + w->y - w->yAdjust; *y = lines;` (s32) does give a3, but the
- * loads are no longer narrowed (lh/lb instead of lhu/lbu+sll/sra); with s16 lines the
- * promoted var forces a sign extension. The result needs a non-promoted global pseudo.
- * r5A: one-member struct/union HImode temps and `lines = (s16)(...)` all still subu into v0
- * (local-alloc ties the dest to the dying addu input).
- * r7K: `lines = lines * scale + (u16)w->y - w->yAdjust;` (s32) is 1 line off: a3 + lhu, only
- * yAdjust is lb instead of lbu+sll/sra. mips.md extendqi* force_not_mem the QI operand (lbu, then
- * shifts); combine re-merges it into lb unless the extension is QI->HI (the narrowed form), and
- * any narrowing whose result reaches `lines` loses the extension in combine -> local temp in v0.
- * r8P: (u16)w->yAdjust keeps lbu+sll+sra but adds andi 0xFFFF; (s16) folds back to lb. s16 locals
- * here are non-promoted HI pseudos; an unused named label before `*y = h` is deleted, h stays local
- * (v0). The result needs a pseudo that local-alloc skips (2 deaths or live across a real block).
- * r9W: the narrowing is tree-level (expand emits HI plus/minus); assigning to a var narrows only with an
- * explicit (s16) cast, and then the result goes temp -> var copy that combine folds into the sh (v0).
- * A compound op on s16/u16 `lines` (global, a3) writes (subreg:SI lines) directly (subu a3 ok) but is
- * not narrowed (lb + sll/sra 16 of lines, 4). Local HI vars with compound ops still fold to v0. */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
-    s32 lines;
-    s32 scale;
+    s16 lines;
+    s16 scale;
 
     lines = 0;
     for (node = w->strings; node != NULL; node = node->next) {
@@ -900,16 +878,12 @@ void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     if (w != NULL && (w->flags & 0x10)) {
         scale = 6;
     }
-    {
-        s16 h = lines * scale;
-
-        *y = h + w->y - w->yAdjust;
-    }
+    lines *= scale;
+    lines += w->y;
+    lines -= w->yAdjust;
+    *y = lines;
     *x = w->x;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/text", iTextGetWindowOffsets);
-#endif
 
 u16 TextAddString(u8 window, char *str, s32 ticks, TextChar *sprites) {
     TextWindow *w;
