@@ -643,7 +643,11 @@ void EGSDisplayAddPoly(void *display, void *prim);
  * r8O (-dr/-dS): expand_call precomputes the color into a pseudo (lw P; a1 = P) and combine
  * merges it into `lw a1` (nothing between them sets memory/calls). Poly3F keeps P because the
  * stack-arg store sits between (use_crosses_set_p). With P kept, sched1's birthing boost on
- * `lw P` would issue it right after a2 (the original order); need a natural way to keep P. */
+ * `lw P` would issue it right after a2 (the original order); need a natural way to keep P.
+ * r9V: confirmed -- `c = D_801100BC; <any store>; LineF(prim, c, ..)` gives a0, a2, lw a1, a3.
+ * combine.c can_combine_p only refuses that merge for a store/call/volatile insn between the lw
+ * and the a1 copy (mem_last_set / last_call_cuid) or if P stays live past the copy; the original
+ * arm has none of those, so the color arg must come from some other shape. */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -1271,14 +1275,17 @@ typedef struct FootAnimView {
  * D_80118FC0.vz = (c & 0x1FFF) - ...` (asm = sched barrier without ending cse) gives the exact
  * placement (37 -> 29) but is not plausible source. Left after that: steps s5 (ours s0), light9 s6,
  * &D_80118FD0 s7 (ours one lower each): nothing visible conflicts with steps in s0/s1, so global
- * pass 0 must avoid them (copy preferences of conflicting allocnos?). */
+ * pass 0 must avoid them (copy preferences of conflicting allocnos?).
+ * r9V (37 -> 29): the rate index is GOBJ_NPC_WEAPON(gobj) (`&gameObjectsInfo[id]` per use, no
+ * `info` local) -> the original's offset+base `addu` and temps. With the asm barrier above this is
+ * 21: only steps s0 (orig s5), light9 s5 (s6), &D_80118FD0 s6 (s7) left. In ours prim (s0) and
+ * steps share s0 without conflicting; in the original steps avoids s0/s1, so it must conflict with
+ * the prim and &D_80118FD0/p pseudos (longer steps life or earlier prim set at global time). */
 /* A tracer line from gobj's gun to target (every few NPC shots), and an ejected shell for the player. */
 void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     void *display;
     s32 dist;
     s32 id = gobj->id;
-    GameObjectInfo *info;
-    s32 weapon;
     s32 steps;
     s32 shots;
     s32 rate;
@@ -1331,16 +1338,8 @@ void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     D_80118FC0.vz = -D_80118FC0.vz >> 3;
     steps = (dist - 0x200) >> 9;
     if (gobj->npc != NULL) {
-        info = &gameObjectsInfo[gobj->id];
-        weapon = GOBJINFO_WEAPON(info);
         shots = __builtin_abs(((NPCShotView *)gobj->npc)->shots);
-        rate = (D_80105F58[weapon                                 ? weapon
-                           : (GOBJINFO_FLAGS(info) & 0x3000) == 0x1000 ? 19
-                           : (GOBJINFO_FLAGS(info) & 0x3000) == 0x2000 ? 20
-                                                                       : 0]
-                    .flags >>
-                11) &
-               7;
+        rate = (D_80105F58[GOBJ_NPC_WEAPON(gobj)].flags >> 11) & 7;
     } else {
         rate = (D_80105F58[gCurrentWeapon].flags >> 11) & 7;
         shots = ((NPCShotView *)gobj->npc)->shots; /* NULL here */
@@ -2280,7 +2279,12 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * r7J: from the sched1 trace, the original needs the vel.vx >> 2 sra (p 10) placed before the
  * vel.vx store (p 10): with equal priority that needs a lower LUID, i.e. the shift emitted before
  * the store; and the pos.vx addu not birthing-boosted. User vars x/t/vx (set twice), shift
- * before the store via `t = (*D)->m[0][2] >> 2` and flag-before-vel.vz orders are 5-35. */
+ * before the store via `t = (*D)->m[0][2] >> 2` and flag-before-vel.vz orders are 5-35.
+ * r9V: brute-forced all 840 orders of the 8 statements vel.vx/vy/vz, vel.vy = -, pos.vx +=,
+ * flag, pos.vy, pos.vz += (vel loads kept in x,y,z order): best is 4 (this one), then 5.
+ * `vx`/`t` locals so the >>2 is emitted before the vel.vx store still get both the sra (single-set
+ * t: birthing boost) and the addu glued to the pos.vx store (5-12); a user var x for pos.vx
+ * (x += t; two sets, no boost) is 21. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;

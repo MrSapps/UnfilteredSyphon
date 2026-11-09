@@ -1378,6 +1378,9 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
  * at 0x88..0xB8, so the then-branch must already have reached 0xB8 (ours stops at 0x98 after
  * diff) -- 32 more bytes of then-branch locals, or these slots are function-scope vars shared by
  * both branches (0x48 bonePos/rot/X, 0x58 delta+ang/m, 0x78 cur/ang, 0x88 diff/u).
+ * r9V: recoil/hit /10: the original's product is not tied to the dying -k (mflo v1; quotient a0,
+ * as in the head block where `rt * k` ties to rt). `k = -k; (k * rt) / 10` (k global, no local
+ * tie) unties it but k then loses a0 (45); `rt * -k` and `-= (k * rt) / 10` are 45 too.
  */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
