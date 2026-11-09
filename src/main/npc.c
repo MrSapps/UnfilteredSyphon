@@ -3526,34 +3526,14 @@ void NPCDoAction(Gobj *obj) {
          ? *(u8 *)&gameObjectsInfo[id].flags24                                         \
          : ((f = GOBJ_INFO_FLAGS(&gameObjectsInfo[id]) & 0x3000) == 0x1000 ? 19 : (f == 0x2000 ? 20 : 0)))
 
-/* First neighbour of cur (not itself) whose point action kind is 'kind', or -1 */
-static inline s32 NPCKillFindLink(PathPoint *pts, PathPoint *cur, s32 kind) {
-    s32 link = -1;
-    s32 i;
-
-    for (i = 0; i < 3; i++) {
-        if (cur->links[i] != i && cur->links[i] >= 0 && ((pts[cur->links[i]].flags & 0xF00) >> 8) == kind) {
-            link = cur->links[i];
-            break;
-        }
-    }
-    return link;
-}
-
-#ifdef NON_MATCHING
-/* 15 lines, all in the first link search: the original sets link = -1, i = 0 before the
- * pts/cur copies and kind = 7 in the preheader and loads D_80110134 into a1, not a0 (an inline
- * with an expression cur arg gave the copies; local/param order variants did not reorder them).
- * Fixed so far: off+base cur, type = GOBJ_TYPE() kept unfolded, NPC_WEAPON_ID arm order, and
- * `ret = 17` after the DamageGOBJ call so jump2 cross-jumps only the call tail. */
+/* ((s8 *)p->links)[i]: the cast makes the address i + p, as the original has it. */
 s32 NPCKill(s32 id, VECTOR32 *dir) {
     Gobj *obj = gameObjectsInfo[id].runtime;
     NPC *npc = NPC_OF(obj);
     s32 start;
-    VECTOR32 a;
-    VECTOR32 b;
     s32 ret;
     s32 i;
+    s32 k;
     s32 link;
     s32 found;
     PathPoint *cur;
@@ -3575,10 +3555,23 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
             obj->target->targetId = -1;
         }
     }
-    cur = (PathPoint *)(npc->curPoint * sizeof(PathPoint) + (u32)D_80110134);
+    /* the do-while(0) doubles cur's ref weight so it outranks found in global alloc */
+    do {
+        cur = (PathPoint *)(npc->curPoint * sizeof(PathPoint) + (u32)D_80110134);
+    } while (0);
     found = -1;
     if (((cur->flags & 0xF00) >> 8) == 7) {
-        link = NPCKillFindLink(D_80110134, &D_80110134[npc->curPoint], 7);
+        VECTOR32 a;
+        VECTOR32 b;
+
+        link = -1;
+        for (k = 0; k < 3; k++) {
+            if (((s8 *)D_80110134[npc->curPoint].links)[k] != k && ((s8 *)D_80110134[npc->curPoint].links)[k] >= 0
+                && ((D_80110134[((s8 *)D_80110134[npc->curPoint].links)[k]].flags & 0xF00) >> 8) == 7) {
+                link = ((s8 *)D_80110134[npc->curPoint].links)[k];
+                break;
+            }
+        }
         if (link >= 0) {
             b.vx = D_80110134[link].x;
             b.vy = D_80110134[link].y;
@@ -3603,11 +3596,14 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
             }
         }
     } else {
+        VECTOR32 a;
+        VECTOR32 b;
+
         for (i = 0; i < 3; i++) {
-            if (cur->links[i] != i && cur->links[i] >= 0
-                && ((D_80110134[cur->links[i]].flags & 0xF00) >> 8) == 1
-                && (D_80110134[cur->links[i]].flags & 0xF) == ((D_80110134[cur->links[i]].flags & 0xF00) >> 8)) {
-                found = cur->links[i];
+            if (((s8 *)cur->links)[i] != i && ((s8 *)cur->links)[i] >= 0
+                && ((D_80110134[((s8 *)cur->links)[i]].flags & 0xF00) >> 8) == 1
+                && (D_80110134[((s8 *)cur->links)[i]].flags & 0xF) == ((D_80110134[((s8 *)cur->links)[i]].flags & 0xF00) >> 8)) {
+                found = ((s8 *)cur->links)[i];
                 break;
             }
         }
@@ -3640,9 +3636,6 @@ s32 NPCKill(s32 id, VECTOR32 *dir) {
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCKill);
-#endif
 
 void NPCDropGun(s32 id) {
     s32 start;
