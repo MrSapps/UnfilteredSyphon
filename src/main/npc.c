@@ -2713,23 +2713,13 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
     return ret;
 }
 
-#ifdef NON_MATCHING
-/* 36 lines (r7L: 90 -> 36). step/kind/mode are s32 (orig re-reads step unmasked, kind with lh,
- * mode with lh). r7L fixes: `kind` is reused for the later npc->flags re-reads (s0, saves s4 for
- * the shared constant 5), ?: threat split into if/else (cross-jumped store tail), lastSeen - 0x10
- * as `x - (0x10 - r)`, dir = &D_8011D210 at the top of the targetId >= 0 arm (vx stored through
- * it), pos.vz before the D_8011D210 stores, volatile + block-local f for the kind == 0 flags
- * (reload + unfolded ands; a non-volatile form that reloads was not found).
- * r8S (36 -> 8): the targetId >= 0 arms each end in their own `v = &D_8011D210` +
- * GTEMath_VectorNormal(v, v) (block-local v gets a0 via local-alloc suggestions; jump2
- * cross-jumps the identical tails), and the mode-5 path calls MovementGobjRegister... in both
- * arms (&D_8011D210 / NULL); NPCRethinkNextPoint really takes (obj, path) (passes a1 on to NPCPointIQ);
- * `kind & 0x400` instead of re-reading npc->flags; npc->dir.vy = 0 after .vx.
- * Left (8): npc->unk2C is loaded before the script address in the original. Its load is
- * sched1-birthing-boosted (dest set once) so it lands late; `s16 c = npc->unk2C; ... c--;`
- * (c set twice) fixes the load slot but the decrement then stays in place (orig: v0 = c - 1),
- * and s32/u32 forms (`k`, a new s32) shrink the frame by 8 (0x60 vs 0x68; the original has an
- * unused 16-byte gap at sp+0x40 that ours also has only by accident). */
+/* Levers that matched it: step/mode are s32 and `kind` is reused for the npc->flags re-reads,
+ * but the script action is its own s32 (set once, so sched1's birthing boost orders its load
+ * after moveMode's and leaves the unk2C load early); ?: threat split into if/else; the
+ * targetId >= 0 arms each end in their own `v = &D_8011D210` + GTEMath_VectorNormal(v, v)
+ * (jump2 cross-jumps them); the mode-5 path calls MovementGobjRegister.. in both arms;
+ * NPCRethinkNextPoint takes (obj, path). The volatile flags re-read in the kind == 0 arm is
+ * the one form found that reloads with unfolded ands. */
 void NPCIQEveryFrame(Gobj *obj) {
     NPC *npc = NPC_OF(obj);
     s32 mode = npc->unk46;
@@ -2739,6 +2729,7 @@ void NPCIQEveryFrame(Gobj *obj) {
     s32 step;
     s32 kind;
     u32 k;
+    s32 action;
     Gobj *t;
 
     if (npc->awareness != 0 && !((gExeTick + obj->id) & 0x1F)) {
@@ -2746,7 +2737,7 @@ void NPCIQEveryFrame(Gobj *obj) {
     }
     if (npc->flags & 0x400) {
         step = npc->unk42;
-        kind = npc->script[step].kind;
+        action = npc->script[step].kind;
         pointActionMoveMode = npc->script[step].moveMode;
         if (npc->unk2C == 0x7FFF) {
             doPointAction(obj, npc->script[step].kind);
@@ -2755,7 +2746,7 @@ void NPCIQEveryFrame(Gobj *obj) {
         }
         if (npc->unk2C <= 0) {
             step++;
-            if (kind == 0) {
+            if (action == 0) {
                 npc->unk2C = 0;
                 npc->unk42 = 0;
                 *(volatile s32 *)&npc->flags &= ~0x400;
@@ -2988,9 +2979,6 @@ void NPCIQEveryFrame(Gobj *obj) {
         ParticleBreath(obj->id);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCIQEveryFrame);
-#endif
 
 void NPCGenDispatch(SysMsg *msg) {
     s32 id = msg->to;
