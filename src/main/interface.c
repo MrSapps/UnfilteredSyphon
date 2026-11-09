@@ -2397,27 +2397,6 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc (lines base in t2 instead of t1), same code otherwise; sibling of func_8003EF48.
- * r4A: in the original len lives in a2 and a copy of it (a0) is made right after q/h2, then used
- * for lines[9].xy1 and the len / 8; D_8010FFEC is loaded into a0 and the len * D product lands
- * in a0 too. Moving q = prod / 4 before the lines[0] stores or adding a `prod = len` copy for the
- * tail did not change the allocation.
- * r4G: most of the 201 lines are the lines base (t1 vs t2). alloc.py: len (refs 21) loses a2
- * to prod (refs 6, live 24), whose /4 makes a copy (ours: addu a1,a2; addiu a1,3). In the
- * original the /4 adjusts prod in place in a0 (D's register) and the sra result goes to a new
- * reg, so the division had no var target (expand_divmod's copy_to_suggested_reg), and the
- * h2 = q/2 sign comes from the adjusted prod. Also the /4 branch sits before lines[0] and
- * h2/6 after the len/8 branch.
- * r6F (201 -> 196): sibling shape `t = size * D / 4; prod = t * D; len = t;` puts D and the size*D
- * product where the original has them (a0/v0); still len is a copy in t1 (orig: the quotient itself
- * in a2) and prod takes a2 for 41 insns, so lines falls to t2.
- * r13AG (196 -> 35): `prod = len / 8` computed before `t = h2 / 6` (the orig's len/8 branch
- * precedes the /6 mult) fixes the lines base (t1) and the tail; `q = t * D / 4` (no prod var)
- * gives the in-place +3 adjust in D's register. Left: block-local q / len*2 / h4 take a0 in
- * local-alloc (orig a1, so the global prod/temp, h2 sign, len/8 copy land a1/a1/t2 instead of
- * a0/t2/a0). Tried len*2 / len / q as separate vars or reassignments, `q = t*D; q /= 4` (27 but
- * adds a copy), D*t order. */
 void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
@@ -2426,7 +2405,6 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     s32 prod;
     s32 q;
     s32 h2;
-    s32 h4;
     s32 t;
 
     for (i = 29; i >= 18; i--) {
@@ -2452,31 +2430,31 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
         if (t >= 4) {
             size = t;
         }
-        t = size * D_8010FFEC / 4;
-        q = t * D_8010FFEC / 4;
-        len = t;
-        lines[0].xy0 = XY(scr->vx - len * 2, scr->vy);
+        len = size * D_8010FFEC / 4;
+        q = len * 2;
+        t = len * D_8010FFEC / 4;
+        lines[0].xy0 = XY(scr->vx - q, scr->vy);
         lines[0].xy1 = XY(scr->vx - len, scr->vy);
         lines[1].xy0 = XY(scr->vx + len, scr->vy);
-        lines[1].xy1 = XY(scr->vx + len * 2, scr->vy);
-        h2 = q / 2;
-        lines[2].xy0 = XY(scr->vx, scr->vy - q);
+        lines[1].xy1 = XY(scr->vx + q, scr->vy);
+        h2 = t / 2;
+        lines[2].xy0 = XY(scr->vx, scr->vy - t);
         lines[2].xy1 = XY(scr->vx, scr->vy - h2);
         lines[3].xy0 = XY(scr->vx, scr->vy + h2);
-        lines[3].xy1 = XY(scr->vx, scr->vy + q);
+        lines[3].xy1 = XY(scr->vx, scr->vy + t);
         lines[4].xy0 = XY(scr->vx - len, scr->vy - h2);
         lines[4].xy1 = XY(scr->vx + len, scr->vy - h2);
         lines[5].xy0 = XY(scr->vx - len, scr->vy + h2);
         lines[5].xy1 = XY(scr->vx + len, scr->vy + h2);
-        h4 = h2 / 2;
+        t = h2 / 2;
         lines[6].xy0 = XY(scr->vx - len, scr->vy - h2);
-        lines[6].xy1 = XY(scr->vx - len, scr->vy - h4);
+        lines[6].xy1 = XY(scr->vx - len, scr->vy - t);
         lines[7].xy0 = XY(scr->vx - len, scr->vy + h2);
-        lines[7].xy1 = XY(scr->vx - len, scr->vy + h4);
+        lines[7].xy1 = XY(scr->vx - len, scr->vy + t);
         lines[8].xy0 = XY(scr->vx + len, scr->vy - h2);
-        lines[8].xy1 = XY(scr->vx + len, scr->vy - h4);
+        lines[8].xy1 = XY(scr->vx + len, scr->vy - t);
         lines[9].xy0 = XY(scr->vx + len, scr->vy + h2);
-        lines[9].xy1 = XY(scr->vx + len, scr->vy + h4);
+        lines[9].xy1 = XY(scr->vx + len, scr->vy + t);
         prod = len / 8;
         t = h2 / 6;
         lines[10].xy0 = XY(scr->vx, scr->vy - t);
@@ -2493,9 +2471,6 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
         lines[i].xy0 = 0x04000400;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003F3F8);
-#endif
 
 void func_8003F8A0(VECTOR32 *out) {
     Gobj *obj = gameObjectsInfo[gObjPlayer->target->targetId].runtime;
