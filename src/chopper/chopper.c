@@ -670,6 +670,12 @@ __asm__(".set D_80145578, D_80145578_s+0x0\n"
  * instead (ptr-to-field temp, inline setter, do{}while(0) barrier: no help). (2) the shared speed tail
  * `lw v0,574C; addu s1,v0` is cross-jumped with the load (ours loads straight into s1; `D_8014575C =
  * speed = D_8014574C` no change). (3) far/facing mflo order, later sched/regalloc in the inBoxA arm.
+ * r14AL: func_80141538's prototype is right (static, Vec4 *). Mechanism of (1): expand puts every
+ * global address in a pseudo; the .vx store's `r = &D_801456F0` survives cse1 (find_best_addr keeps
+ * the reg, cost 1 < symbol 2) and the call arg's lookup of the same constant finds r, so r lives to
+ * the call. The original's arg = p-4 needs no reg holding &D_801456F0 at the call: with a
+ * do{}while(0) before the .vy store and `s32 *p = &D_801456F0.vy`, cse1 does produce p-4, but cse2
+ * (path following) refolds it to r. Needs something that also hides r from cse2.
  */
 /* Per-frame flight logic: patrol, spotlight runs and strafing passes. */
 static void func_801421D8(u8 *facingOut) {
