@@ -147,7 +147,12 @@ void WindowLOSLoop(LOSContext *ctx);
  * path that folds a use yet keeps a still-live set, so the dead addiu needs p's uses in the length block.
  * r14AI: prototypes checked (GTELOSLoop takes u8 flags, harmless with constants). A set with no uses in
  * block 0 is birthing-boosted in sched1 and lands right before the bltz, which is where the dead addiu
- * sits, so it is set in block 0 and only used in later blocks (cse/flow would kill it if unused). */
+ * sits, so it is set in block 0 and only used in later blocks (cse/flow would kill it if unused).
+ * r15AN: cam.vx gets a1 when its pseudo is global with v0/v1/a0 in its conflict set: one `t` for
+ * half.vy and cam.vx (`t = half.vy; mid.vy = from.vy + t; ... t = ..->t[0]; cam.vx = t;`) gives
+ * exactly the original's regs (4), but t (n_sets 2) loses sched1's birthing boost, so the half.vy
+ * load sinks to the top of the join block; the original's half.vy load is boosted (n_sets 1), so
+ * cam.vx must be global some other way. Reusing t for later ctx fields (nearest/radius/length) 14-19. */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;

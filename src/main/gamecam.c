@@ -658,7 +658,13 @@ __asm__(".set D_80112DD0, D_80112DD0_bss\n"
  * the range[2] / range[1] tests (`u8 one`, then the dead param `on` reused), and the D_800101E4 copies go
  * through an inline (la per copy). Left: prologue only. sched1: `li a1,1` (prio 1) is ready from T-17 and
  * loses every tie until the block top; `s32 flag` + a separate one2 keeps `move s7,a2` in the leading
- * param run but scores 13 (on's dead copy note then no longer ends the run after the a0 copy). */
+ * param run but scores 13 (on's dead copy note then no longer ends the run after the a0 copy).
+ * r15AN: block 0 runs through both calls. Ours: the li a1/a2/a3 args (prio 1, no deps) fill load
+ * stalls in LUID order and the D40 const (`li s0,1`, n_sets 1) is birthing-boosted next to its sb.
+ * The original fills the same stalls with li a1 (right before the sb), li s0, li a2 (top), so its
+ * li s0 is NOT boosted (pseudo set twice) and li a1 outranks li a2 (prio >= the sb's 5, or a later
+ * LUID). Named `u8 c1` for the two top D40 stores (single or double set): no change (9);
+ * reusing `on` there: 222. */
 /* Loads a camera mode's view: lead/watch frames, offsets, limits and ranges. */
 static inline VECTOR32 iOnes(void) { return D_800101E4; }
 s32 func_8001B000(s32 mode, u8 on, u8 flag) {
@@ -2077,7 +2083,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * removes the boost but it still lands after the reload chain: 8).
  * r14AI: sched1 trace: the pos.vz load is alone in the ready list at T-13 (the vz frame reload waits on
  * the in-struct a.vy store), so even unboosted it is placed there; both issues are one: the reload must not
- * depend on the a.vy store. Twice-set `dist = pos.vz` unboosts it but dist then takes s0 (14). */
+ * depend on the a.vy store. Twice-set `dist = pos.vz` unboosts it but dist then takes s0 (14).
+ * r15AN: sched true_dependence exempts only in-struct-varying vs scalar-fixed pairs, so the reload
+ * (in-struct varying) can pass a.vy only if a.vy is a scalar store or follows SZ in source. Swept
+ * `*qy = abs(*py)` (scalar a.vy) over 358 of the 1440 orders with SX<SY<SZ: all >= 24 (the *px store
+ * floats to the top and a.vz's abs goes in place); SZ before AY with in-struct a.vy: 26-28. */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
