@@ -875,7 +875,11 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
  * loads are no longer narrowed (lh/lb instead of lhu/lbu+sll/sra); with s16 lines the
  * promoted var forces a sign extension. The result needs a non-promoted global pseudo.
  * r5A: one-member struct/union HImode temps and `lines = (s16)(...)` all still subu into v0
- * (local-alloc ties the dest to the dying addu input). */
+ * (local-alloc ties the dest to the dying addu input).
+ * r7K: `lines = lines * scale + (u16)w->y - w->yAdjust;` (s32) is 1 line off: a3 + lhu, only
+ * yAdjust is lb instead of lbu+sll/sra. mips.md extendqi* force_not_mem the QI operand (lbu, then
+ * shifts); combine re-merges it into lb unless the extension is QI->HI (the narrowed form), and
+ * any narrowing whose result reaches `lines` loses the extension in combine -> local temp in v0. */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -1454,7 +1458,14 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * r5A (-dS): the sb has no dest reg, so it is never birthing-boosted and keeps priority 1: it
  * always lands first after the call unless its LUID is after the v0 set. `x = sum<<8 | id&0xFF;
  * s->serial = sum; return x;` gives that order (2), but combine then splits the and out of the ior
- * as zero_extend:QI (make_compound_operation) and reload turns it into lbu 0x10(sp). */
+ * as zero_extend:QI (make_compound_operation) and reload turns it into lbu 0x10(sp).
+ * r7K (-dc): the return form keeps andi only because the u16 return type narrows the ior to HImode
+ * ((and:SI (subreg:SI (reg:HI id)) 255), id is a non-promoted HI pseudo); any SImode `id & 0xFF`
+ * becomes zero_extend:QI -> lbu. `x = (u16)(((u8)sum << 8) | (id & 0xFF)); s->serial = sum;
+ * return x;` keeps lhu+andi, but combine puts the ior back into the v0 set and the and/sll temps
+ * stay birthing-boosted (1). With a do {} while (0) before the store the order is right after
+ * sched1, but the loop notes also pin sched2, so the sb can't move up past the id andi (1).
+ * `id &= 0xFF` gets a fresh pseudo (still boosted); `sum &= 0xFF` forms move the andi (3). */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;
