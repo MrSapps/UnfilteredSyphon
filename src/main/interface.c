@@ -1353,7 +1353,10 @@ INCLUDE_RODATA("asm/main/nonmatchings/interface", D_80011D3C);
 int rsin(int a);
 
 #ifdef NON_MATCHING
-/* corner loop and switch match; the threat-arrow block hoists all four +-24/+-20 constants into s-registers (original keeps only 24 in s5) and the frame is 0x60 instead of 0x78 */
+/* (r6F, 117 -> 41) threat loop is `for (i = 0; i < 2; i++)` over p[i] (loop.c eliminates the biv into
+ * the p pointer: signed slt against p+8, beq vs p for i != 0) which also stops the +-24/+-20 hoisting;
+ * clamps as `?:`; p[2] from s32 copies with x >= 0 ? x : -x abs; a dead 32-byte block pads the frame.
+ * Left: iRadarXY centre constant lui/ori split; kx/ky regs + in-place abs; p[2] copies of x0/x1. */
 /* Radar blip for NPC slot at radar-space pos (vx, vy): corner box, target box, threat arrow. */
 void func_8003C724(s32 slot, VECTOR32 *pos) {
     s32 w;
@@ -1400,20 +1403,16 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
             if (w < cx) {
                 cx = w;
             }
-        } else if (x - d < -w) {
-            cx = -w;
         } else {
-            cx = x - d;
+            cx = x - d < -w ? -w : x - d;
         }
         if (i & 2) {
             cy = y + d;
             if (h < cy) {
                 cy = h;
             }
-        } else if (y - d < -h) {
-            cy = -h;
         } else {
-            cy = y - d;
+            cy = y - d < -h ? -h : y - d;
         }
         xy = iRadarXY(XY(cx, cy));
         switch (i) {
@@ -1455,8 +1454,8 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
 
         angle = ratan2(y, x);
         D_80117B38[slot].xy0 = iRadarXY(0);
-        for (pp = p; pp < &p[2]; pp++) {
-            if (pp != p) {
+        for (i = 0; i < 2; i++) {
+            if (i != 0) {
                 a = angle - 0xAA;
             } else {
                 a = angle + 0xAA;
@@ -1464,11 +1463,11 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
             s = rsin(a);
             c = rcos(a);
             if (s == 0) {
-                pp->vy = 0;
-                pp->vx = c > 0 ? 24 : -24;
+                p[i].vy = 0;
+                p[i].vx = c > 0 ? 24 : -24;
             } else if (c == 0) {
-                pp->vx = 0;
-                pp->vy = s > 0 ? 20 : -20;
+                p[i].vx = 0;
+                p[i].vy = s > 0 ? 20 : -20;
             } else {
                 kx = 0x18000 / c;
                 ky = 0x14000 / s;
@@ -1479,11 +1478,11 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
                     ky = -ky;
                 }
                 if (kx < ky) {
-                    pp->vy = FIX12(s * 31);
-                    pp->vx = c > 0 ? 24 : -24;
+                    p[i].vy = FIX12(s * 31);
+                    p[i].vx = c > 0 ? 24 : -24;
                 } else {
-                    pp->vx = FIX12(c * 31);
-                    pp->vy = s > 0 ? 20 : -20;
+                    p[i].vx = FIX12(c * 31);
+                    p[i].vy = s > 0 ? 20 : -20;
                 }
             }
         }
@@ -1491,12 +1490,20 @@ void func_8003C724(s32 slot, VECTOR32 *pos) {
             p[2].vx = (p[0].vx + p[1].vx) / 2;
             p[2].vy = (p[0].vy + p[1].vy) / 2;
         } else {
-            p[2].vx = ABS(p[0].vx) < ABS(p[1].vx) ? p[1].vx : p[0].vx;
-            p[2].vy = ABS(p[0].vy) < ABS(p[1].vy) ? p[1].vy : p[0].vy;
+            s32 a0 = p[0].vx;
+            s32 a1 = p[1].vx;
+
+            p[2].vx = (a0 >= 0 ? a0 : -a0) < (a1 >= 0 ? a1 : -a1) ? a1 : a0;
+            a0 = p[0].vy;
+            a1 = p[1].vy;
+            p[2].vy = (a0 >= 0 ? a0 : -a0) < (a1 >= 0 ? a1 : -a1) ? a1 : a0;
         }
         D_80117B38[slot].xy1 = iRadarXY(XY(p[0].vx, p[0].vy));
         D_80117B38[slot].xy2 = iRadarXY(XY(p[1].vx, p[1].vy));
         D_80117B38[slot].xy3 = iRadarXY(XY(p[2].vx, p[2].vy));
+        {
+            u8 pad[32]; /* leftover locals: the original frame is 0x20 bigger */
+        }
     }
 }
 #else
