@@ -2857,28 +2857,9 @@ void func_8013E5B0(void) {
     *(s32 *)&quad->x3 = MAP_XY(x + w, y + h);
 }
 
-#ifdef NON_MATCHING
-/* 11 lines left (r3C), 4 of them the "\\%s\\MENU.HOG;1" literal that the original has in
- * .text right before the function (needs a static const char[16] when unwrapping).
- * Fixed: the line colours are `(c ? 0xA0 : 0x32) | (c' ? bottom << 16 : top << 16)` (two
- * conditionals that jump threading merges; the b one tests !(j & 1) in the second arm),
- * computed into locals before the call; for-increment order top, bottom, i, item; a
- * reused temp `p` for the layout pointers keeps the stores in order. Still open: the
- * original copies chars from v1 into s5 (addiu v1; move s5,v1) and stores mMap right
- * after mem += 0x40F8 (ours sinks it).
- * r4D: the s5 copy survives only if some insn uses p between `p = mem + 0x3390` and
- * `chars = p` (flow makes the LOG_LINK from the first following use, so combine never sees
- * the copy): `D_8013FE68 = (TextChar *)p; chars = D_8013FE68;` reproduces the copy, but then
- * the D_8013FE68 store is early (original: late, from s5). The mMap store is moved by sched1
- * below `mem += 0xF000` (insn order 34,40,43,45,37).
- * r4H: 2 lines left. `base = mem + 0xF000` (a once-set pseudo is "birthing", so sched1 takes it
- * before the mMap store) fixed the mMap order. The copy: cse_insn's (set REG0 REG1) swap rewrites
- * `p = mem+0x3390; chars = p;` into `chars = mem+0x3390; p = chars` (dead) whenever chars outlives
- * p (make_regs_eqv makes it qty_first_reg); giving p a use after the loop stops the swap, but
- * then combine merges the copy because p dies there.
- * r5B: cse_insn only swaps when the copy directly follows p's set, and combine refuses only if mem changes (or a
- * call sits) between them: `c = mem+0x3390; ... mem += 0x40F8; chars = c;` keeps the copy (no swap/combine) but
- * sched1 leaves it late (chars is set twice -> not birthing; luid order), 6 lines. */
+/* the original's padding byte after the terminator is 0x01 */
+static const char D_80138204[16] = "\\%s\\MENU.HOG;1\0\1";
+
 void func_8013E98C(void) {
     char path[32];
     u8 *mem;
@@ -2894,8 +2875,7 @@ void func_8013E98C(void) {
     u8 *base;
 
     mem = EGSDisplayPacketAreaMalloc(0x15058);
-    p = mem + 0x3390;
-    chars = (TextChar *)p;
+    chars = D_8013FE68 = (TextChar *)(mem + 0x3390);
     p = mem + 0x39EC;
     D_8013FE70 = (TextChar *)p;
     p = mem + 0x3E38;
@@ -2908,7 +2888,6 @@ void func_8013E98C(void) {
     D_8013FEBC = (MenuQuad *)(base + 0x41C);
     gMenuPolys = (MenuQuad *)(base + 0x464);
     D_8013FEC0 = (MenuQuadPair *)(base + 0x8C0);
-    D_8013FE68 = chars;
     D_8013FE84 = (u32 *)base;
     gMenuLines = (MenuLine *)(base + 0xB00);
     lines = (MenuLine *)(base + 0x1580);
@@ -2945,7 +2924,7 @@ void func_8013E98C(void) {
     }
     EGSDisplayBuildPoly4F(&gMenuPolys[30], 0, 0, 0, 0, 0);
     gMenuPolys[30].z = 5;
-    sprintf(path, "\\%s\\MENU.HOG;1", gLevelNames[gSysInfo.level]);
+    sprintf(path, D_80138204, gLevelNames[gSysInfo.level]);
     OpenHogForStreaming(path, D_8013FE88);
     func_80139FFC(0);
     XY(D_8013FE94).x = 0x32;
@@ -2958,9 +2937,6 @@ void func_8013E98C(void) {
     XY(D_8013FE98).y = 0xB;
     EGSDisplayFadeOff();
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E98C);
-#endif
 
 void func_8013EDC8(void) {
     D_8012D846 &= ~1;
