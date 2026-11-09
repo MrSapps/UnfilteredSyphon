@@ -1527,13 +1527,13 @@ INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
  * r6D: the original's u8 run/movie are global-alloc spills reloaded through $t3 (first unused
  * call-used reg after block temps in t0-t2), i.e. more call-crossing pseudos competed for s-regs
  * than in this draft.
- * r14AI (168 -> 19): run/movie spills now match. Keys: c0 is fd reused (stack 0x30; c1 0x60, c2 0x70);
+ * r14AI (168 -> 5): run/movie spills now match. Keys: c0 is fd reused (stack 0x30; c1 0x60, c2 0x70);
  * tags is D_80107B1C[i - 1] (loop.c makes the fp biv + s6 copy); camera loop and image loop share `i`
  * and `j` is both the % 5 index and the level index (one var, two roles -> s-reg order); 2nd flashlight
  * loop has a block-local fl and a `gFlashlightList != NULL` guard (lw v0; beqz; move s1); movie is
  * re-tested before the !gRunFlag tail; dir.vy/fd.vy raw stores survive because the vz load sits between.
- * e->z is written before e->y = -e->y (fixes the gFLCount/reload order). Left (1st flashlight loop only):
- * gFLCount load gets a1 and the gFLArray la a0 (orig swapped), and the angle store: orig does
+ * e->z is written before e->y = -e->y (fixes the gFLCount/reload order); `e = gFLArray; n = gFLCount;
+ * e += n;` gives la/n the orig a1/a0 (la qty born first). Left (5 lines, the angle store): orig does
  * andi a0,angle,0xFFFF before the color test, then `lui v0; or v0,a0,v0` / `move v0,a0` arms with one
  * cross-jumped store; a shared `v` gives the reorg cmov shape, per-arm stores let combine fold the move. */
 INCLUDE_PART1("asm/main/nonmatchings/egsdisp", EGSDisplaySort)
@@ -1604,8 +1604,9 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
                 fd.vz = -fd.vz;
             }
             angle = ratan2(fd.vz, fd.vx);
+            e = gFLArray;
             n = gFLCount;
-            e = &gFLArray[n];
+            e += n;
             e->x = fl->frame->matrix.t[0];
             e->y = fl->frame->matrix.t[1];
             gFLCount = n + 1;
