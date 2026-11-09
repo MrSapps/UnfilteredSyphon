@@ -391,7 +391,14 @@ void EGSDisplayAnimateHMD(EGSHMD *hmd);
  * 0x58 index, 0x60 fogNear, 0x68 fogFar, 0x70 fogOn, 0x78 savedPacket, 0x80 infrared,
  * 0x88 sniffer, 0x90 snifferModel (pseudo = declaration order, now matched); fogRange lives in fp
  * and image in s6 there, ours spills fogRange (frame 0x120 vs 0x118). fogNear's initialiser goes
- * through a separate pseudo (andi -> 0xD8 slot -> copied to 0x60). */
+ * through a separate pseudo (andi -> 0xD8 slot -> copied to 0x60).
+ * r12AD: 434 -> 274 by giving the first loop its own anim pointer (one pseudo spanning both loops
+ * conflicted with everything). The 0xD8 slot is shared by the andi temp and the &sorted giv: both
+ * were global-alloc'd to s3 and kicked out when reload took s3 as a spill reg (alter_reg reuses
+ * spill_stack_slot[from_reg]), so the original's reload picks s3/s5/s7, ours s0/s5/s7. Tried with no
+ * gain: splitting isSniffer/z/dist per loop, a distinct i/t/d in the later loops, gabe/count/index
+ * assigned after the decls, (u16)/&= forms for fogNear. Forcing fogRange into $fp: 434 -> 365
+ * before the split, but 274 -> 307 after it, so the fp/s6 choice is not the main remaining cost. */
 void SortHMDs(HMDCamera *camera, EGSListNode *anims, s32 sortBuffer)
 {
     HMDSortAnim *sorted[SORT_MAX];
@@ -463,27 +470,29 @@ void SortHMDs(HMDCamera *camera, EGSListNode *anims, s32 sortBuffer)
     }
 
     for (; anims != NULL; anims = anims->next) {
-        anim = anims->data;
+        HMDSortAnim *a;
+
+        a = anims->data;
         isSniffer = 0;
         if (sniffer) {
-            isSniffer = anim->model == snifferModel;
+            isSniffer = a->model == snifferModel;
         }
-        if ((anim->model->flags & 0x400000) && anim->frames != NULL && anim->rotations != NULL &&
-            (!(anim->flags8 & 8) || isSniffer) && (!(anim->model->flags & 0x2000000) || isSniffer)) {
-            if (anim->flagsA & 0x40) {
+        if ((a->model->flags & 0x400000) && a->frames != NULL && a->rotations != NULL &&
+            (!(a->flags8 & 8) || isSniffer) && (!(a->model->flags & 0x2000000) || isSniffer)) {
+            if (a->flagsA & 0x40) {
                 dist = 20000;
             } else {
                 dist = 4500;
             }
-            EGSDisplaySetupGTE(anim->frame);
+            EGSDisplaySetupGTE(a->frame);
             if (!index && !isSniffer) {
-                EGSDisplayAnimateHMD((EGSHMD *)anim);
+                EGSDisplayAnimateHMD((EGSHMD *)a);
             }
             z = EGSDisplayOnScreen(dist, 0xF0);
             if (z > 1000 && !index) {
                 z = EGSDisplayOnScreen(dist, 0xCD);
             }
-            if (anim == gabe) {
+            if (a == gabe) {
                 gGabeZ = z;
                 if (index || (camera->flags & 0x10) || (D_8012DB22 & 1)) {
                     goto next;
@@ -493,19 +502,19 @@ void SortHMDs(HMDCamera *camera, EGSListNode *anims, s32 sortBuffer)
                 if (count >= SORT_MAX) {
                     count = SORT_MAX - 1;
                 }
-                sorted[count++] = anim;
+                sorted[count++] = a;
                 if (!isSniffer) {
                     depths[slot++] = z;
                 } else {
                     depths[slot++] = 200;
                 }
             } else {
-                anim->light->fog = 100;
+                a->light->fog = 100;
             }
         }
     next:
-        anim->flags8 &= ~0x40;
-        anim->flags9 &= ~0x20;
+        a->flags8 &= ~0x40;
+        a->flags9 &= ~0x20;
     }
 
     for (i = 0; i < count; i++) {
