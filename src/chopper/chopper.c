@@ -663,6 +663,13 @@ __asm__(".set D_80145578, D_80145578_s+0x0\n"
  * scheduling, register allocation and some cross-jumped tails still differ.
  * The original also keeps its zero-initialised Vec4s in a .rodata constant
  * (D_80141484), which this version would emit itself.
+ * r13AH (252 -> 170, stack layout now matches: rot is a block-scoped initialised Vec4 in the strafe
+ * block; SHR_TRUNC in `>= 0` form with the whole expression inline so the negative arm folds -(a-b)).
+ * Left: (1) the spotlight block stores D_801456F0.vy = D_80145738 through a reg holding &D_801456F0.vy
+ * and passes reg-4 to func_80141538 (cse related-value); ours materialises &D_801456F0 at the .vx store
+ * instead (ptr-to-field temp, inline setter, do{}while(0) barrier: no help). (2) the shared speed tail
+ * `lw v0,574C; addu s1,v0` is cross-jumped with the load (ours loads straight into s1; `D_8014575C =
+ * speed = D_8014574C` no change). (3) far/facing mflo order, later sched/regalloc in the inBoxA arm.
  */
 /* Per-frame flight logic: patrol, spotlight runs and strafing passes. */
 static void func_801421D8(u8 *facingOut) {
@@ -692,6 +699,7 @@ static void func_801421D8(u8 *facingOut) {
     s32 spot;
     s32 i;
     s32 lim;
+    s32 id;
     s32 turn;
     s32 x;
     ObjInfoXform *info;
@@ -735,8 +743,7 @@ static void func_801421D8(u8 *facingOut) {
                 D_8014556F = 0;
                 D_80145788 = 0;
                 for (i = 0; i < D_80145780; i++) {
-                    s32 id = D_8014560C[i];
-
+                    id = D_8014560C[i];
                     info = OBJ_XFORM((s16)id);
                     pt.vx = info->t[0];
                     pt.vy = info->t[1];
@@ -750,7 +757,8 @@ static void func_801421D8(u8 *facingOut) {
                         best2 = d[0];
                     }
                 }
-                info = OBJ_XFORM((s16)spot);
+                id = spot;
+                info = OBJ_XFORM((s16)id);
                 D_801456F0.vx = info->t[0];
                 D_801456F0.vy = info->t[1];
                 D_801456F0.vz = info->t[2];
@@ -759,7 +767,7 @@ static void func_801421D8(u8 *facingOut) {
                 D_801456F0.vy = D_80145738;
                 D_80145700.vz = info->m[2][2];
                 func_80141538(&D_801456F0);
-                D_80145784 = gameObjectsInfo[spot].refId;
+                D_80145784 = gameObjectsInfo[id].refId;
             } else if (!D_8014556B && D_80145790 == 2) {
                 D_8014561C->flags1 &= 0x80;
                 D_8014561C->flags1 |= 0x5A;
@@ -1000,12 +1008,7 @@ static void func_801421D8(u8 *facingOut) {
 
     if (D_80145790 == 0) {
         chopperPos.vy = D_8014572C + dist2 / 5;
-        if (facing) {
-            x = 0x1C71C7 - (ang.vx << 12);
-        } else {
-            x = -0x71C71 - (ang.vx << 12);
-        }
-        rotDelta.vx = SHR_TRUNC(x, 4);
+        rotDelta.vx = SHR_TRUNC((facing ? 0x1C71C7 : -0x71C71) - (ang.vx << 12), 4);
     } else {
         bank = 0;
         if (inBoxA) {
@@ -1101,8 +1104,7 @@ static void func_801421D8(u8 *facingOut) {
                 }
             }
         }
-        x = bank - (ang.vx << 12);
-        rotDelta.vx = SHR_TRUNC(x, 4);
+        rotDelta.vx = SHR_TRUNC(bank - (ang.vx << 12), 4);
     }
 
     move.vx = chopperPos.vx - savedPos.vx;
