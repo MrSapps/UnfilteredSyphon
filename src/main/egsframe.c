@@ -189,7 +189,11 @@ int EGSFrameAddNode(EGSFrame *frame, EGSFrame *parent)
  * r5A: thread_jumps can't do it: it needs identical operand order and no CODE_LABEL between b1's
  * target and b2 (the loop-top label sits there). `goto body;` before the while with `body:` at the
  * top of the body and `node = cur->node; prev = cur;` gives the entry + prev a1/node v1 (6 -> 2);
- * left: reorg puts the prev copy into the beqz slot (original: copy before the lw, slot = 0x2B). */
+ * left: reorg puts the prev copy into the beqz slot (original: copy before the lw, slot = 0x2B).
+ * r7N: the copy only stays out of the slot if a CODE_LABEL sits between it and the lw at reorg
+ * (fill_simple_delay_slots' backward scan, stop_search_p). `prev = cur; goto body; while (..) {
+ * prev = cur; body: ...}` has that label through sched2 (copy first, entry ok), but jump2
+ * cross-jumps the two copies and deletes it; with `pnode` reused for node the regs match (2). */
 int EGSFrameRemoveNode(EGSFrame *frame)
 {
     EGSFrameNode *pnode;
