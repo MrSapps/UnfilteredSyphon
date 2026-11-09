@@ -190,6 +190,14 @@ extern u32 D_80105F58[][8];  /* per-weapon info, 0x20 bytes each (+0x18) */
 extern u32 D_80105F60[][8];  /* per-weapon info +0x20: damage bits */
 extern u16 D_80105F62[][16]; /* per-weapon info +0x22: long-range damage */
 extern s32 gPlayerNumConsecutiveHits;
+typedef struct SniperWeaponDmg {
+    /* 0x00 */ u32 accuracy : 6;
+    /* 0x00 */ u32 damageNear : 10; /* within 0x3C0 */
+    /* 0x00 */ u32 damageFar : 10;
+    /* 0x00 */ u32 unk_26 : 6;
+    /* 0x04 */ u8 unk04[0x1C];
+} SniperWeaponDmg;
+#define WDMG(w) (((SniperWeaponDmg *)D_80105F60)[w])
 extern s16 gDefaultLevelDmgFX;
 extern void (*gHitNPCCallback)(s16 id, s32 bones);
 
@@ -210,8 +218,8 @@ void DamageRadius(s16 from, VECTOR32 *pos, s32 damage, s32 arg3, s32 arg4, s32 a
 void DamageTerrain(s32 from, VECTOR32 *pos, VECTOR32 *normal, VECTOR32 *dir, s32 fx);
 s32 WeaponGetDeathAction(s32 weapon);
 void ParticleHitWall(s32 from, VECTOR32 *pos, VECTOR32 *normal, s32 color);
-void ParticleGrenadeLauncher(s16 id, VECTOR32 *pos, s32 arg2);
-void ParticleTracer(GameObjectRuntime *rt, VECTOR32 *pos);
+void ParticleGrenadeLauncher(s16 id, VECTOR32 *pos);
+void ParticleTracer(GameObjectRuntime *rt, VECTOR32 *pos, s32 arg2);
 void NPCSoundGobj(s32 arg0, s32 from, void *move, s32 arg3);
 s32 BulletTextureGet(s32 fx);
 void EGSDisplayRegisterDamage(VECTOR32 *pos, VECTOR32 *normal, VECTOR32 *dir, s32 tex, s32 arg4);
@@ -641,7 +649,16 @@ __asm__(
  * (orig sets a2 / la a1 first; ternary/cast-prototype variants did not change it).
  * r7L: the original stores at.vy twice (t[1], then -vy after the t[2] load): `at.vz = ..;
  * at.vy = -at.vy;` gives that shape but swaps the v0/v1 temps (31). The arg order is a sched1
- * LUID tie (a1/a2 both priority 1, the later-emitted a2 lands next to the jal). */
+ * LUID tie (a1/a2 both priority 1, the later-emitted a2 lands next to the jal).
+ * r8S (28 -> 11): damage/radius are the weapon info's damageNear/damageFar bitfields (as in
+ * target.c; each arm ends in andi, jump2 cross-jumps it to the join, radius gets a2);
+ * ParticleGrenadeLauncher takes 2 args and ParticleTracer 3 (damage.c protos; the tracer's
+ * a2=0 is what reorg puts in the bne slot); 2 nested do-while(0) on `who` fix fx/who.
+ * Left: (1) the at.vy/at.vz load temps: `at.vz = ..; at.vy = -at.vy` (or a y local) gives the
+ * original's two at.vy stores but local-alloc gives the vz chain temps (pri 2.0) v0 before vy
+ * (0.67); (2) the original keeps `sll` in the far arm of the kind==1 dist test (reorg
+ * try_merge_delay_insns did not run there: own_thread_p false?); (3) DamageTerrain's stack
+ * arg store is last in the original (ours first: anti-dep class 2 + lowest LUID in sched1). */
 void SniperShoot(void) {
     VECTOR32 from;
     VECTOR32 at;
@@ -683,10 +700,9 @@ void SniperShoot(void) {
                             }
                             bones = gSniperBonesHit;
                             if (bones & 1) {
-                                damage = (D_80105F60[weapon][0] >> 1) & 0x7FE0;
+                                damage = WDMG(weapon).damageNear * 32;
                             } else if (bones & 0x6000) {
-                                damage = D_80105F60[weapon][0] >> 6;
-                                damage &= 0x3FF;
+                                damage = WDMG(weapon).damageNear;
                                 if (rt->id == gPlayerOffset || (GOBJ_INFO_W(rt->id).flags & 0x4000)) {
                                     damage = -damage;
                                 }
@@ -709,16 +725,15 @@ void SniperShoot(void) {
                     at.vz = ((SniperAnimFrame *)rt->anim)->frame->t[2];
                     EGSGeometry_GetFuzzyDistancePoint2Point(&from, &at, &dist);
                     if (dist < 0x3C1) {
-                        damage = D_80105F60[weapon][0] >> 6;
+                        damage = WDMG(weapon).damageNear;
                     } else {
-                        damage = D_80105F62[weapon][0];
+                        damage = WDMG(weapon).damageFar;
                     }
-                    damage &= 0x3FF;
                 }
                 if (damage == 0) {
                     return;
                 }
-                if ((s32)((D_80105F60[weapon][0] >> 6) & 0x3FF) < damage) {
+                if (WDMG(weapon).damageNear < damage) {
                     DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, 0x7FFF, 0x58);
                 } else {
                     DamageGOBJ(gPlayerOffset, gPlayerOffset, rt->id, damage, WeaponGetDeathAction(weapon));
@@ -750,15 +765,14 @@ void SniperShoot(void) {
 
                 EGSGeometry_GetFuzzyDistancePoint2Point(&from, &at, &dist2);
                 if (dist2 < 0x3C1) {
-                    radius = D_80105F60[w][0] >> 6;
+                    radius = WDMG(w).damageNear;
                 } else {
-                    radius = D_80105F62[w][0];
+                    radius = WDMG(w).damageFar;
                 }
-                radius &= 0x3FF;
                 DamageRadius(gPlayerOffset, &D_801156D8, radius, 0x60, 0x20, 0x11, 0);
             }
             fx = D_8010FFC8;
-            who = gPlayerOffset;
+            do { do { who = gPlayerOffset; } while (0); } while (0);
             tex = BulletTextureGet(fx);
             if (tex != 0) {
                 EGSDisplayRegisterDamage(&D_801156D8, &D_801156E8, &dir, tex, 0);
@@ -766,10 +780,10 @@ void SniperShoot(void) {
             DamageTerrain(who, &D_801156D8, &D_801156E8, &dir, fx);
         }
     } else if (weapon == 16) {
-        ParticleGrenadeLauncher(gObjPlayer->id, &D_801156D8, 0);
+        ParticleGrenadeLauncher(gObjPlayer->id, &D_801156D8);
     } else {
         ((SniperShooter *)gObjPlayer->target)->fx = 0x19;
-        ParticleTracer(gObjPlayer, &D_801156D8);
+        ParticleTracer(gObjPlayer, &D_801156D8, 0);
     }
     gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
 }
