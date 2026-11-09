@@ -3354,9 +3354,13 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
 }
 
 #ifdef NON_MATCHING
-/* regalloc: prev and p swap s0/s1; min-loop head lands in a0 */
-/* r6E: p (128 refs) is allocated first and so always gets s0; prev (7 refs) can only reach s0 if
- * p is split or loses priority. A separate block-local pointer for the min loop is worse (113). */
+/* r7J (104 -> 11): original s0 = tex/range/prev (no mutual conflicts), s1 = p, so tex (22/45:
+ * 19555) must outrank p (128/336: 26666). cx store in 6 nested do-while(0) gives tex 28/41
+ * (27317) and fixes all of that. Left: the barrier pins the cx store above the attribute lw
+ * (3 lines; cy x6 or cx/cy split are worse); min-loop head loads into j's reg a1 in the original
+ * (ours a0: c/j init orders, while form change nothing); offset = range >> 8 and range >>= 10
+ * are issued after the `and` with the rand result in the original (sched). Any single-level
+ * wrap of a tex statement is 110-120 (barrier without the regalloc flip). */
 /* Explosion fireballs: animated sprites respawned around the (drifting) group centre */
 void ParticleUpdateExplosion(ParticleGroup *g) {
     VECTOR32 cam;
@@ -3538,7 +3542,19 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
         sprite->h = tex->image.ph;
         sprite->mx = sprite->w >> 1;
         sprite->my = sprite->h >> 1;
-        sprite->cx = tex->image.cx;
+        do {
+            do {
+                do {
+                    do {
+                        do {
+                            do {
+                                sprite->cx = tex->image.cx;
+                            } while (0);
+                        } while (0);
+                    } while (0);
+                } while (0);
+            } while (0);
+        } while (0);
         sprite->cy = tex->image.cy;
         sprite->attribute |= 0x80000000 | (mode << 24);
         if (!(g->flags & 0x800)) {
