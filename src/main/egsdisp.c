@@ -2050,15 +2050,18 @@ void EGSDisplayPacketAreaFree(void) {
 }
 
 #ifdef NON_MATCHING
-/* 8 diff lines. The do {} while (0) (sched barrier) keeps sched1 from sinking the birthing-boosted
- * param copies down to the EGSFrameCreate call, so their live lengths grow and pos/dist/region/
- * priority/otShift get s2-s6 as in the original. Left: the original copies the gCameraID load into
- * s0 with a plain move (here andi: zero_extend of the u16 temp); a same-mode u16/s16 copy is merged
- * by cse2 (load temp stays class head, its path spans the whole function), and parent's a0 copy is
+/* 7 diff lines (r7K, was 8). The do {} while (0) (sched barrier) keeps sched1 from sinking the
+ * birthing-boosted param copies down to the EGSFrameCreate call, so their live lengths grow and
+ * pos/dist/region/priority/otShift get s2-s6 as in the original. r7K: `s32 id; u16 index = id;`
+ * (a mode-changing copy survives cse; a same-mode u16/s16 copy is merged by cse2) plus an
+ * s32-param inline doing the (s16) cast gives the original's plain move into s0. Left: the (s16)
+ * extension lands in v1 (original a1, so v0/v1/a0 were all busy there at local-alloc; the la of
+ * gCameraArray is pinned after the chain by the loop-note barrier) and parent's a0 copy is
  * scheduled later than in the original. */
+static inline EGSCamera *GetCam(s32 i) { return &gCameraArray[(s16)i]; }
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
-    u16 id;
-    s32 index;
+    s32 id;
+    u16 index;
     EGSCamera *camera;
     VECTOR p;
     s32 err;
@@ -2066,7 +2069,7 @@ s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 p
     id = gCameraID++;
     index = id;
     do {} while (0);
-    camera = &gCameraArray[(s16)index];
+    camera = GetCam(index);
 
     err = EGSFrameCreate(&camera->frame);
     if (err != 0) {
