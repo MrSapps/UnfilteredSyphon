@@ -632,35 +632,12 @@ typedef struct SniperAnimFrame {
     /* 0x0C */ SniperFrame *frame;
 } SniperAnimFrame;
 
-#if !defined(_PSYQ) && !defined(NON_MATCHING)
-/* SniperShoot (still INCLUDE_ASM) addresses these through their splat labels */
-__asm__(
-        ".set D_801156DC, D_801156D8+0x4\n"
-        ".set D_801156E0, D_801156D8+0x8\n"
-        ".set D_80115700, D_801156F8+0x8\n"
-        ".set D_80115740, D_801156F8+0x48\n");
-#endif
-
-#ifdef NON_MATCHING
-/* 28 masked lines left. The do { } while (0) around the kind == 1 branch doubles its refs
- * (flow.c loop weight) and fixed damage/rt/i -> $s0/$s1/$s2. Left: at.vy temp gets v1 not v0
- * (local-alloc), the dist if/else delay slot (orig repeats `sll` in the else arm), radius not
- * computed straight into a2, fx/who s-reg swap, and the GrenadeLauncher/Tracer arg order
- * (orig sets a2 / la a1 first; ternary/cast-prototype variants did not change it).
- * r7L: the original stores at.vy twice (t[1], then -vy after the t[2] load): `at.vz = ..;
- * at.vy = -at.vy;` gives that shape but swaps the v0/v1 temps (31). The arg order is a sched1
- * LUID tie (a1/a2 both priority 1, the later-emitted a2 lands next to the jal).
- * r8S (28 -> 9): damage/radius are the weapon info's damageNear/damageFar bitfields (as in
- * target.c; each arm ends in andi, jump2 cross-jumps it to the join, radius gets a2);
- * ParticleGrenadeLauncher takes 2 args and ParticleTracer 3 (damage.c protos; the tracer's
- * a2=0 is what reorg puts in the bne slot); 2 nested do-while(0) on `who` fix fx/who.
- * Left: (1) the at.vy/at.vz load temps: `at.vz = ..; at.vy = -at.vy` (or a y local) gives the
- * original's two at.vy stores but local-alloc gives the vz chain temps (pri 2.0) v0 before vy
- * (0.67); (2) DamageTerrain's stack arg store is last in the original (ours first: anti-dep
- * class 2 + lowest LUID in sched1).
- * Bones without 1/0x6000/0x8000 take damageFar: the original's `beqz .., far arm` is jump2
- * cross-jumping that arm with the dist test's far arm (which is also why that arm keeps its
- * own `sll`: two jumps to the label, so reorg's own_thread_p fails). */
+/* Fires the sniper shot at D_801156D8: damages the hit NPC or the terrain, or spawns the
+ * grenade/tracer. Levers that matched it: do-while(0) loop-depth weights (kind == 1 body, the at.vy load, `who`),
+ * at.vy stored before the at.vz load then negated, ParticleTracer's 3rd arg (a2 = 0 in the bne slot),
+ * and the terrain arm's own copy of the miss-counter update: its lw/sw in the DamageTerrain block
+ * give sched1 a memory-unit potential hazard, so the stack-arg store goes last (into the jal slot);
+ * jump2 then cross-jumps that copy with the shared one at the end. */
 void SniperShoot(void) {
     VECTOR32 from;
     VECTOR32 at;
@@ -722,9 +699,9 @@ void SniperShoot(void) {
                     }
                 } else {
                     at.vx = ((SniperAnimFrame *)rt->anim)->frame->t[0];
-                    at.vy = ((SniperAnimFrame *)rt->anim)->frame->t[1];
-                    at.vy = -at.vy;
+                    do { at.vy = ((SniperAnimFrame *)rt->anim)->frame->t[1]; } while (0);
                     at.vz = ((SniperAnimFrame *)rt->anim)->frame->t[2];
+                    at.vy = -at.vy;
                     EGSGeometry_GetFuzzyDistancePoint2Point(&from, &at, &dist);
                     if (dist < 0x3C1) {
                         damage = WDMG(weapon).damageNear;
@@ -780,6 +757,8 @@ void SniperShoot(void) {
                 EGSDisplayRegisterDamage(&D_801156D8, &D_801156E8, &dir, tex, 0);
             }
             DamageTerrain(who, &D_801156D8, &D_801156E8, &dir, fx);
+            gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
+            return;
         }
     } else if (weapon == 16) {
         ParticleGrenadeLauncher(gObjPlayer->id, &D_801156D8);
@@ -789,9 +768,6 @@ void SniperShoot(void) {
     }
     gPlayerNumConsecutiveHits = gPlayerNumConsecutiveHits > 0 ? -1 : gPlayerNumConsecutiveHits - 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/sniper", SniperShoot);
-#endif
 
 /* referenced from .data (camera callbacks) */
 s32 func_800319FC(void) {
