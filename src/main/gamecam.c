@@ -2050,7 +2050,13 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * r9X: `pd[1]`/`pd[2]` through one pointer are still MEM_IN_STRUCT (only pd[0] was scalar); one pointer per field
  * (*px/*py/*pz) makes all three d stores scalar so they sink like the original's: natural order = 21 (d tail now
  * matches incl. d.vz kept past abs), but the raw src.vy store is dead again (-2). Keeping it needs a frame load
- * between src.vy and its negation; best such order (SX SY DX SZ AX DZ AZ NY DY AY) = 23. */
+ * between src.vy and its negation; best such order (SX SY DX SZ AX DZ AZ NY DY AY) = 23.
+ * r10AA (21 -> 4): d.vy written as `-src.vy - pos.vy` BEFORE `src.vy = -src.vy` puts the *py store between the
+ * raw and negated src.vy stores, so flow's consecutive-store kill (last_mem_set) spares the raw one. All 2160
+ * statement orders (one pointer per d field) bottom out at 4: left are the vz frame reload, which the original
+ * hoists above the a.vy store (needs a.vy stored as a scalar `*qy`, but that reshuffles the block: >= 19), and
+ * the pos.vz load at the block top (its pseudo is birthing-boosted in sched1; `t = pos.vz; t = src.vz - t;`
+ * removes the boost but it still lands after the reload chain: 8). */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
@@ -2125,13 +2131,13 @@ void func_8001EF10(void) {
                 s32 *pz = &d.vz;
 
                 src.vx = shake->frame->pos.vx;
+                src.vy = shake->frame->pos.vy;
                 *px = src.vx - pos.vx;
                 a.vx = abs(*px);
-                src.vy = shake->frame->pos.vy;
-                src.vy = -src.vy;
-                *py = src.vy - pos.vy;
+                *py = -src.vy - pos.vy;
                 a.vy = abs(*py);
                 src.vz = shake->frame->pos.vz;
+                src.vy = -src.vy;
                 *pz = src.vz - pos.vz;
                 a.vz = abs(*pz);
                 if (a.vx < a.vy) {
