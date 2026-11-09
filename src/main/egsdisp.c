@@ -1535,7 +1535,6 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
     VECTOR fd;
     MATRIX m;
     VECTOR c1;
-    VECTOR c0;
     VECTOR c2;
     EGSAnim *ref = NULL;
     u8 movie;
@@ -1545,15 +1544,14 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
     EGSCamera *camera;
     GsOT *ot;
     EGSImage *img;
-    EGSImageLevel *lv;
-    u32 *tags;
-    u8 *p;
+    s32 j;
+    s32 p;
     u8 *mark;
     s32 angle;
     s32 depth;
     s32 left;
     s32 k;
-    s16 i;
+    s32 i;
     s16 load;
     u16 t;
 
@@ -1569,8 +1567,8 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
         up = D_80013740;
         dir.vx = ref->frame->matrix.m[0][2];
         dir.vy = ref->frame->matrix.m[1][2];
-        dir.vy = 0;
         dir.vz = ref->frame->matrix.m[2][2];
+        dir.vy = 0;
         OuterProduct12(&dir, &up, &gPCGouraudLight);
         GsSetFlatLight(0, &gFoo);
         GsSetFlatLight(1, &gPCGouraudLight);
@@ -1585,26 +1583,30 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
         node = gFlashlightList;
         gFLCount = 0;
         for (; node != NULL; node = node->next) {
+            s32 n;
+
             fl = node->data;
             fd.vx = fl->frame->matrix.m[0][2];
             fd.vy = fl->frame->matrix.m[1][2];
-            fd.vy = -fd.vy;
             fd.vz = fl->frame->matrix.m[2][2];
+            fd.vy = -fd.vy;
             if (fl->headFlag & 1) {
                 fd.vx = -fd.vx;
                 fd.vy = -fd.vy;
                 fd.vz = -fd.vz;
             }
             angle = ratan2(fd.vz, fd.vx);
-            e = &gFLArray[gFLCount++];
+            n = gFLCount;
+            e = &gFLArray[n];
             e->x = fl->frame->matrix.t[0];
             e->y = fl->frame->matrix.t[1];
+            gFLCount = n + 1;
             e->y = -e->y;
             e->z = fl->frame->matrix.t[2];
             if (fl->color == 0xFF) {
-                e->angle = (angle & 0xFFFF) | 0x80000000;
+                gFLArray[n].angle = (angle & 0xFFFF) | 0x80000000;
             } else {
-                e->angle = angle & 0xFFFF;
+                gFLArray[n].angle = angle & 0xFFFF;
             }
         }
         if (gTextureAnimationList != NULL && run) {
@@ -1634,27 +1636,28 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
         gCurrentCamera = i;
         if (!movie) {
             for (node = gFlashlightList; node != NULL; node = node->next) {
-                fl = node->data;
+                EGSFlashlight *fl = node->data;
+
                 m = fl->frame->matrix;
                 if (fl->headFlag & 1) {
-                    c0.vx = m.m[0][0];
-                    c0.vy = m.m[1][0];
-                    c0.vz = m.m[2][0];
+                    fd.vx = m.m[0][0];
+                    fd.vy = m.m[1][0];
+                    fd.vz = m.m[2][0];
                     c2.vx = m.m[0][2];
                     c2.vy = m.m[1][2];
                     c2.vz = m.m[2][2];
                     c1.vx = m.m[0][1];
                     c1.vy = m.m[1][1];
                     c1.vz = m.m[2][1];
-                    c0.vx = -c0.vx;
-                    c0.vy = -c0.vy;
-                    c0.vz = -c0.vz;
+                    fd.vx = -fd.vx;
+                    fd.vy = -fd.vy;
+                    fd.vz = -fd.vz;
                     c2.vx = -c2.vx;
                     c2.vy = -c2.vy;
                     c2.vz = -c2.vz;
-                    m.m[0][0] = c0.vx;
-                    m.m[1][0] = c0.vy;
-                    m.m[2][0] = c0.vz;
+                    m.m[0][0] = fd.vx;
+                    m.m[1][0] = fd.vy;
+                    m.m[2][0] = fd.vz;
                     m.m[0][1] = c1.vx;
                     m.m[1][1] = c1.vy;
                     m.m[2][1] = c1.vz;
@@ -1716,52 +1719,53 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
             VSync(1);
             DrawSync(0);
             if (gCameraArray[0].flags & 0x10) {
-                tags = D_80107B1C;
-                for (k = 1; k < 4; k++, tags++) {
+                for (k = 1; k < 4; k++) {
                     img = &gImages[(gImagePtr + k) % 5];
-                    p = img->start;
-                    if (img->enabled && p != NULL && p != img->end) {
-                        lv = img->levels;
-                        mark = lv->mark;
+                    p = (s32)img->start;
+                    if (img->enabled && p != 0 && p != (s32)img->end) {
+                        j = 0;
+                        mark = img->levels[0].mark;
                         depth = 20;
-                        for (; p < img->end; p += 0x14) {
-                            if (p == mark) {
-                                depth = *(s32 *)(lv + 6);
-                                lv++;
-                                mark = lv->mark;
+                        for (; p < (s32)img->end; p += 0x14) {
+                            if (p == (s32)mark) {
+                                depth = img->depths[j];
+                                j++;
+                                mark = img->levels[j].mark;
                             }
                             if (depth - k <= 0) {
                                 depth = k + 1;
                             }
-                            ((u32 *)p)[1] = *tags;
-                            AddPrim((u32 *)gOtbl[(s16)gDisplayBuffer].org + depth - k, p);
+                            ((u32 *)p)[1] = D_80107B1C[k - 1];
+                            AddPrim((u32 *)gOtbl[(s16)gDisplayBuffer].org + depth - k, (void *)p);
                         }
                     }
                 }
             }
         }
-        if (!gRunFlag) {
-            VSync(2);
-        } else {
-            while (VSync(-1) < D_8010FE48 + (run ? gFrameRate : 2)) {
-            }
-        }
-        D_8010FE48 = VSync(-1);
-        EGSDeviceRender();
-        DrawSyncCallback(DCallback);
-        if (gPacketAreaFull) {
-            *(Str8 *)gErrorString = *(Str8 *)D_8010FE4C;
-        } else if (gFaceCache == NULL) {
-            *(Str8 *)gErrorString = *(Str8 *)D_8010FE54;
-        }
-        dTicks++;
-        return 0;
     }
-    ((EGSAnim *)gCameraArray[0].refAnim)->unk28 = 0;
-    DrawSync(0);
-    VSync(0);
+    if (movie) {
+        ((EGSAnim *)gCameraArray[0].refAnim)->unk28 = 0;
+        DrawSync(0);
+        VSync(0);
+        EGSDeviceRender();
+        return 1;
+    }
+    if (!gRunFlag) {
+        VSync(2);
+    } else {
+        while (VSync(-1) < D_8010FE48 + (run ? gFrameRate : 2)) {
+        }
+    }
+    D_8010FE48 = VSync(-1);
     EGSDeviceRender();
-    return 1;
+    DrawSyncCallback(DCallback);
+    if (gPacketAreaFull) {
+        *(Str8 *)gErrorString = *(Str8 *)D_8010FE4C;
+    } else if (gFaceCache == NULL) {
+        *(Str8 *)gErrorString = *(Str8 *)D_8010FE54;
+    }
+    dTicks++;
+    return 0;
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySort);
