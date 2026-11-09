@@ -465,6 +465,10 @@ __asm__(".set D_8014289C, parkObjectives+4\n");
  * refType in BOTH the hostage do-loop and the bomb branch puts type in v1 and the COP compare on
  * the hoisted reg (as the original), but then 0x35 and 0x29A tie on refs (12 each) and 0x29A's
  * longer live range (348 vs 344) gives it s4 instead of s3 (still 14 lines).
+ * r8S (14 -> 2): refType in both places + `do { refType = ...; } while (0)` in the hostage loop
+ * fixes the s3/s4 tie. Left: the original keeps `move v1,v0` after ObjectMatchToRefIDByCatID;
+ * ours combine.c folds the npc copy into the healthInfo load (npc dies there). Using rt/cop/a
+ * direct call, an s16 cast or a do-while(0) between the copy and the load all still fold.
  */
 void iParkInit(s32 mode) {
     int i;
@@ -524,8 +528,8 @@ void iParkInit(s32 mode) {
                     NPCInitHostageTaker(npc->id);
                 } else {
                     do {
-                        type = GOBJ_TYPE(ref);
-                        if (type == GOBJ_TYPE_COP) {
+                        do { refType = GOBJ_TYPE(ref); } while (0);
+                        if (refType == GOBJ_TYPE_COP) {
                             gameObjectsInfo[ref].runtime->flags23 |= 2;
                         }
                         ref = gameObjectsInfo[ref].refId;
@@ -547,8 +551,8 @@ void iParkInit(s32 mode) {
                 D_8014310C++;
             }
             cop = ObjectMatchToRefID(i, GOBJ_TYPE_COP);
-            type = GOBJ_TYPE(cop->id);
-            if (cop->id != i && type == GOBJ_TYPE_COP && (*(u32 *)rt & 0x8020) != 0x20) {
+            refType = GOBJ_TYPE(cop->id);
+            if (cop->id != i && refType == GOBJ_TYPE_COP && (*(u32 *)rt & 0x8020) != 0x20) {
                 cop->flags23 |= 2;
             }
             if (cop->healthInfo->health <= 0) {
