@@ -653,9 +653,12 @@ __asm__(".set D_80112DD0, D_80112DD0_bss\n"
  * unscheduled leading param-copy run after the a0 copy; the QI copy is then birthing-boosted next to the first
  * `a2 = 6`. `s32 flag` + `(u8)flag == 1` keeps `move s7,a2` at the top (orig: mid-prologue, after s5's la).
  * `li a1,1` floats to the top because the unused `on` copy is deleted (no a1 anti-dependence).
- * r14AI: sched1 dump: `li a1,1` (prio 1) is ready from T-17 and loses every tie until the block top.
- * Range block: orig keeps r6/r5/r4 in stack slots 0x90-0x98 (spills after the 8 vectors), 1 in s2 then s0
- * (two different constant-1 pseudos), and re-materialises la D_800101E4 per copy (address used once). */
+ * r14AI (99 -> 9): range block now matches: the radii go through block-local temps into a stack array
+ * (scalar stores, so all three loads come first), the D40 stores use two constant-1 pseudos set before
+ * the range[2] / range[1] tests (`u8 one`, then the dead param `on` reused), and the D_800101E4 copies go
+ * through an inline (la per copy). Left: prologue only. sched1: `li a1,1` (prio 1) is ready from T-17 and
+ * loses every tie until the block top; `s32 flag` + a separate one2 keeps `move s7,a2` in the leading
+ * param run but scores 13 (on's dead copy note then no longer ends the run after the a0 copy). */
 /* Loads a camera mode's view: lead/watch frames, offsets, limits and ranges. */
 static inline VECTOR32 iOnes(void) { return D_800101E4; }
 s32 func_8001B000(s32 mode, u8 on, u8 flag) {
