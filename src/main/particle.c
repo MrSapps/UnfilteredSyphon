@@ -3361,14 +3361,6 @@ void ParticleUpdateFragmentMeterFrictionFloor(ParticleGroup *g) {
     }
 }
 
-#ifdef NON_MATCHING
-/* r7J (104 -> 11): original s0 = tex/range/prev (no mutual conflicts), s1 = p, so tex (22/45:
- * 19555) must outrank p (128/336: 26666). cx store in 6 nested do-while(0) gives tex 28/41
- * (27317) and fixes all of that. Left: the barrier pins the cx store above the attribute lw
- * (3 lines; cy x6 or cx/cy split are worse); min-loop head loads into j's reg a1 in the original
- * (ours a0: c/j init orders, while form change nothing); offset = range >> 8 and range >>= 10
- * are issued after the `and` with the rand result in the original (sched). Any single-level
- * wrap of a tex statement is 110-120 (barrier without the regalloc flip). */
 /* Explosion fireballs: animated sprites respawned around the (drifting) group centre */
 void ParticleUpdateExplosion(ParticleGroup *g) {
     VECTOR32 cam;
@@ -3382,6 +3374,7 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
     s32 j;
     s32 min;
     s32 c;
+    s32 col;
     s32 range;
     s32 spread;
     s32 offset;
@@ -3441,11 +3434,12 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
             }
         }
         D_80119040[j].state = 0;
-        c = (g->y - D_80110088) >> 1;
-        if (c >= 0x100) {
-            c = 0xFF;
+        /* separate from c: reusing c here made c outlive j, so cse took c as the head's class reg */
+        col = (g->y - D_80110088) >> 1;
+        if (col >= 0x100) {
+            col = 0xFF;
         }
-        D_80119040[j].color = (c << 16) | (c << 8) | c;
+        D_80119040[j].color = (col << 16) | (col << 8) | col;
     }
     while (i >= 0) {
         p = &D_80119040[i];
@@ -3480,8 +3474,7 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
             p->state = p->unk60 = p->unk64 + (rand() & 7);
             range = g->unk23 * 127;
             spread = range >> 7;
-            offset = range >> 8;
-            p->pos.vx = (spread & rand()) - offset + g->x;
+            p->pos.vx = (spread & rand()) - (offset = range >> 8) + g->x;
             p->pos.vz = (spread & rand()) - offset + g->z;
             if (g->flags & 0x2000) {
                 cam.vx = (*D_8011008C)->pos.vx;
@@ -3510,10 +3503,9 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
                 if (g->unk1C != 1) {
                     p->pos.vy = (spread & rand()) - offset + g->y;
                     spread = range >> 9;
-                    range >>= 10;
-                    p->vel.vx = g->dx + (spread & rand()) - range;
-                    p->vel.vy = (g->dy + (spread & rand()) - range) << 12;
-                    p->vel.vz = g->dz + (spread & rand()) - range;
+                    p->vel.vx = g->dx + (spread & rand()) - (range >> 10);
+                    p->vel.vy = (g->dy + (spread & rand()) - (range >> 10)) << 12;
+                    p->vel.vz = g->dz + (spread & rand()) - (range >> 10);
                 }
             } else {
                 range >>= 9;
@@ -3546,23 +3538,13 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
         }
         sprite->v = tex->image.py;
         sprite->tpage = tpage;
-        sprite->w = tex->image.pw << shift;
+        do { /* loop-depth ref weight: tex (s0) must outrank p (s1) in global-alloc */
+            sprite->w = tex->image.pw << shift;
+        } while (0);
         sprite->h = tex->image.ph;
         sprite->mx = sprite->w >> 1;
         sprite->my = sprite->h >> 1;
-        do {
-            do {
-                do {
-                    do {
-                        do {
-                            do {
-                                sprite->cx = tex->image.cx;
-                            } while (0);
-                        } while (0);
-                    } while (0);
-                } while (0);
-            } while (0);
-        } while (0);
+        sprite->cx = tex->image.cx;
         sprite->cy = tex->image.cy;
         sprite->attribute |= 0x80000000 | (mode << 24);
         if (!(g->flags & 0x800)) {
@@ -3580,9 +3562,6 @@ void ParticleUpdateExplosion(ParticleGroup *g) {
         i = next;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleUpdateExplosion);
-#endif
 
 /* GPU code word: r, g, b and the primitive code in the top byte */
 typedef union ParticleRGBC {
