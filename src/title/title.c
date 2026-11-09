@@ -389,6 +389,8 @@ static const s32 D_80141610[14][2] = {
  * ours keeps it in the loop ("move-insn savings 1 not desirable", 32 insns vs threshold ~30);
  * `&edges[i][1]` is worse (111). (2) i gets s1 (46 refs), orig s3; per-loop counters only 66.
  * (3) line init before the blez (orig: giv init after it). */
+/* r8R: first build loop regs: orig pt s6, poly s7, edge s2, line s5, counter s3 (the same s3 as the later
+ * loops, so one i across them), pt+4 s4; ours puts n in s7 and line in s3. */
 /*
  * Builds (frame 0) and shows/hides the memory card drawing a piece at a time;
  * frame counts up to 12.

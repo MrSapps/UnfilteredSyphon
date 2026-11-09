@@ -649,6 +649,10 @@ __asm__(".set D_80112DD0, D_80112DD0_bss\n"
 
 #ifdef NON_MATCHING
 /* regalloc: the original spills the three range radii to the stack and keeps 1 in s2; prologue scheduling */
+/* r8R (prologue): combine folds the a2 SI copy into the QI `flag` copy, leaving a NOTE that ends sched.c's
+ * unscheduled leading param-copy run after the a0 copy; the QI copy is then birthing-boosted next to the first
+ * `a2 = 6`. `s32 flag` + `(u8)flag == 1` keeps `move s7,a2` at the top (orig: mid-prologue, after s5's la).
+ * `li a1,1` floats to the top because the unused `on` copy is deleted (no a1 anti-dependence). */
 /* Loads a camera mode's view: lead/watch frames, offsets, limits and ranges. */
 s32 func_8001B000(s32 mode, u8 on, u8 flag) {
     static const VECTOR32 up = { 0, 1, 0 };
@@ -2038,7 +2042,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * (`s32 *pd = &d.vx; pd[0] = ...`): d/a via pointers gives 25-27, order still differs.
  * r7M: GET order (src.vx/vy/vz loads, then src.vy = -src.vy) + iEdgeLength order (d.vx, d.vy, a.vx,
  * d.vz, a.vy, a.vz) with `s32 *pa = &a.vx` = 25; orig keeps d.vz live past abs (abs into a new reg,
- * d.vz stored after) and loads pos.vz first. */
+ * d.vz stored after) and loads pos.vz first.
+ * r8R: in the original frame->pos.vy is loaded BEFORE the a.vx store (so a.vx = abs(d.vx) follows the src.vy
+ * load in source) and the d.vx/d.vy stores sink below the pos.vz frame reload (scalar `s32 *pd = &d.vx`):
+ * src.vx, pd[0], src.vy, a.vx, src.vz, src.vy = -src.vy, pd[1], a.vy, pd[2], a.vz = 27 (4 imm) with both
+ * src.vy stores kept. Left: orig loads pos.vx/pos.vz at the block start and pos.vy right after f->pos.vy. */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */

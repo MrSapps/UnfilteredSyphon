@@ -521,7 +521,11 @@ static void func_8014196C(s32 id) {
  * (birthing_insn_p boost), near the top, so sched2's luid tie-break puts sra a1 / lw 574C early. The original's
  * sched1 had 307 after the r>>1 sra. Twice-set temps for r>>3 (h = r; h >>= 3) don't change it.
  * r7M (-dS): 307 becomes ready only after the a1 copy (324) is scheduled, and 324 (prio 2, no hazard)
- * loses every tie to the prio-2 global stores ("greater potential hazard"), so it lands at the top. */
+ * loses every tie to the prio-2 global stores ("greater potential hazard"), so it lands at the top.
+ * r8R: rank_for_schedule ties go to schedule_select's potential_hazard, which is 0 for a reg copy and >0 for
+ * any memory-unit insn, so 324 can only win if it outranks the stores: the original needs either prio >= 3 for
+ * the a1 copy or prio 1 for the pos.vy-derived stores. h temp, `(h = r >> 3)` in the expression, a 3-arg cast
+ * call, do{}while(0) barriers before r / before unk190: all 6-11. */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;

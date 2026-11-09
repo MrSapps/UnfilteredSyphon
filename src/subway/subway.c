@@ -627,7 +627,9 @@ static void func_801420D8(SubwayRuntime *rt, s16 by) {
  * r5C: combine.c simplify_comparison rewrites LTU 2 -> LEU 1, then (unsigned) narrows ZERO_EXTEND/AND 0xFFFF to
  * HImode (front end already made it plus:HI) and widens back without the mask; only GEU escapes the narrowing
  * (unsigned_comparison_p lists LEU twice) but GEU 2 is first canonicalised to GTU 1. Param/s32 weapon, `bits` temp
- * in the same block: all lose the andi. Attacker-id regs: separate ai pointer / s32 aid change nothing. */
+ * in the same block: all lose the andi. Attacker-id regs: separate ai pointer / s32 aid change nothing.
+ * r8R: `(weapon -= 6, weapon < 2)` gives sltiu but no andi; a u16 temp behind an empty do{}while(0) in a
+ * ({ }) also loses it (weapon is reg/v:HI, the zero_extend of the plus:SI subreg folds away). */
 static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
     VECTOR32 pos;
     SubwayRuntime *rt;
