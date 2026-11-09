@@ -257,16 +257,11 @@ static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, 
 
 static const s32 D_80013360[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
-#ifdef NON_MATCHING
-/* r11AB: 137 -> 104. Block-scope locals ARE temp slots in 2.7.2 (expand_decl -> assign_stack_temp,
- * freed + combined at block end; best fit / exact size reuse): {bones, radii, pos, inv, fwd, {side, up},
- * loop{p, sv, lo, hi}} then {axisX, axisZ, extX, extZ, halfX, halfZ, centerX, centerZ} reproduces
- * every original stack offset. anim->flags is a u8 (lbu), bones[i] read once into a local.
- * Left: frame 0x160 vs 0x168 (orig saves s7): in the bone loop the original addresses
- * bones/radii off a pseudo holding sp+0x10 (s7 = base, s2 = base + 16*i giv, 0x40($s7+4i),
- * 0x58($s2)); ours folds the base into sp offsets. That pseudo looks like integrate.c's inline
- * frame/param register (arrays reached through pointer params of an inlined helper?), but making
- * the whole body one static inline still const-substituted it (101, frame 0x158). */
+/* Block-scope locals are temp slots (expand_decl -> assign_stack_temp, freed + combined at block
+ * end) and the block structure reproduces the original stack layout. `(radii + i)->vx` expands as
+ * (plus (plus i*16 vsv) 88), whose vsv instantiates to a separate sp+16 pseudo that loop hoists
+ * (the s7/s2 base); that ADDR_EXPR marks radii addr-taken, so the loop sits in its own block to
+ * keep the i++ statement from escaping radii past the block end. */
 u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count) {
     s32 i;
 
@@ -289,8 +284,8 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
 
                 fwd.vx = obj->anim->frame->m[0][2];
                 fwd.vy = obj->anim->frame->m[1][2];
-                fwd.vy = -fwd.vy;
                 fwd.vz = obj->anim->frame->m[2][2];
+                fwd.vy = -fwd.vy;
                 if (fwd.vy != 0) {
                     fwd.vy = 0;
                     GTEMath_VectorNormal(&fwd, &fwd);
@@ -314,6 +309,7 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
             inv.t[2] = rot.t[2];
             SetRotMatrix(&inv);
             SetTransMatrix(&inv);
+            {
             for (i = 0; i < 5; i++) {
                 ShadowVec p;
                 ShadowSVec sv;
@@ -332,10 +328,17 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                 sv.vy = p.vy;
                 sv.vz = p.vz;
                 ApplyRotMatrix(&sv, &p);
-                hi.vx = p.vx + radii[i].vx;
-                hi.vz = p.vz + radii[i].vz;
-                lo.vx = p.vx - radii[i].vx;
-                lo.vz = p.vz - radii[i].vz;
+                {
+                    s32 px = p.vx;
+                    s32 rx = (radii + i)->vx;
+                    s32 pz = p.vz;
+                    s32 rz = (radii + i)->vz;
+
+                    hi.vx = px + rx;
+                    hi.vz = pz + rz;
+                    lo.vx = px - rx;
+                    lo.vz = pz - rz;
+                }
                 if (bounds[1].vx < hi.vx) {
                     bounds[1].vx = hi.vx;
                 }
@@ -350,6 +353,7 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                 }
             }
             }
+            }
             {
             ShadowVec axisX;
             ShadowVec axisZ;
@@ -359,8 +363,6 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
             ShadowVec halfZ;
             ShadowVec centerX;
             ShadowVec centerZ;
-            s32 hx;
-            s32 hz;
 
             {
                 axisX.vx = rot.m[0][0];
@@ -369,31 +371,27 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                 axisZ.vx = rot.m[0][2];
                 axisZ.vy = rot.m[1][2];
                 axisZ.vz = rot.m[2][2];
-                hx = (bounds[1].vx - bounds[0].vx) / 2;
-                extX.vx = axisX.vx * hx;
+                extX.vx = axisX.vx * ((bounds[1].vx - bounds[0].vx) / 2);
                 extX.vy = axisX.vy;
-                extX.vz = axisX.vz * hx;
+                extX.vz = axisX.vz * ((bounds[1].vx - bounds[0].vx) / 2);
                 extX.vx = SHADOW_FIX(extX.vx);
                 extX.vy = SHADOW_FIX(extX.vy);
                 extX.vz = SHADOW_FIX(extX.vz);
-                hz = (bounds[1].vz - bounds[0].vz) / 2;
-                extZ.vx = axisZ.vx * hz;
+                extZ.vx = axisZ.vx * ((bounds[1].vz - bounds[0].vz) / 2);
                 extZ.vy = axisZ.vy;
-                extZ.vz = axisZ.vz * hz;
+                extZ.vz = axisZ.vz * ((bounds[1].vz - bounds[0].vz) / 2);
                 extZ.vx = SHADOW_FIX(extZ.vx);
                 extZ.vy = SHADOW_FIX(extZ.vy);
                 extZ.vz = SHADOW_FIX(extZ.vz);
-                hx = (bounds[1].vx + bounds[0].vx) / 2;
-                centerX.vx = axisX.vx * hx;
+                centerX.vx = axisX.vx * ((bounds[1].vx + bounds[0].vx) / 2);
                 centerX.vy = axisX.vy;
-                centerX.vz = axisX.vz * hx;
+                centerX.vz = axisX.vz * ((bounds[1].vx + bounds[0].vx) / 2);
                 centerX.vx = SHADOW_FIX(centerX.vx);
                 centerX.vy = SHADOW_FIX(centerX.vy);
                 centerX.vz = SHADOW_FIX(centerX.vz);
-                hz = (bounds[1].vz + bounds[0].vz) / 2;
-                centerZ.vx = axisZ.vx * hz;
+                centerZ.vx = axisZ.vx * ((bounds[1].vz + bounds[0].vz) / 2);
                 centerZ.vy = axisZ.vy;
-                centerZ.vz = axisZ.vz * hz;
+                centerZ.vz = axisZ.vz * ((bounds[1].vz + bounds[0].vz) / 2);
                 centerZ.vx = SHADOW_FIX(centerZ.vx);
                 centerZ.vy = SHADOW_FIX(centerZ.vy);
                 centerZ.vz = SHADOW_FIX(centerZ.vz);
@@ -462,9 +460,6 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/shadow", func_800918C0);
-#endif
 
 static u8 func_80092468(ShadowObj *obj, Shadow *shadow, s32 count) {
     ShadowVec center;
