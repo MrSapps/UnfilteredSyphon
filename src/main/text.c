@@ -1465,7 +1465,15 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * come from a reload attached to the andi: the source must have a separate copy t = id (t in a3)
  * that sched1 puts before the sb (t not birthing) and that combine does NOT fold into the andi.
  * Every copy tried (n/i/x/c = id, u16 t reused from the TEXT_GET_STRING index) folds -> lbu (2-54).
- * Single return via `goto end` with s32 ret = (u16)(...) before the sb gives andi lhu sll andi or sb (1). */
+ * Single return via `goto end` with s32 ret = (u16)(...) before the sb gives andi lhu sll andi or sb (1).
+ * r15AM (-dS/-dR, greg): a3 is reload's spill reg ("Spilling reg 7"; same as the str reload), so the lhu
+ * IS a reload, not a copy pseudo. sched2 analyzes REG_DEAD notes as uses (sched.c, reload_completed)
+ * and reload turns id's death note into (mem:HI sp+16), so the sb gets an anti dep on whichever insn
+ * carries id's death: if the andi precedes the sb the sb can never pass it. The original (lhu before
+ * sb, andi after) therefore needs the andi AFTER the sb in sched1 with its reload lhu coming from an
+ * earlier insn before the sb that reload inherits (reg_last_reload_reg) and that then vanishes, or id
+ * not dying at the andi. `*(volatile u16 *)&id` copy before the sb gives the exact order but a real
+ * pseudo (lhu v1 / andi v1,v1, 2); dead-init u16/s32 copies (t = 0 at top) are 2-19. */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

@@ -2273,7 +2273,12 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * `vx`/`t` locals so the >>2 is emitted before the vel.vx store still get both the sra (single-set
  * t: birthing boost) and the addu glued to the pos.vx store (5-12); a user var x for pos.vx
  * (x += t; two sets, no boost) is 21.
- * r14AK: prototype audit clean (iParticleExplosion is unprototyped but only gets int/pointer args). */
+ * r14AK: prototype audit clean (iParticleExplosion is unprototyped but only gets int/pointer args).
+ * r15AM (-dS ready lists, flag-before-vel.vz variant, 5): the vel.vx>>2 sra (pseudo 109) and pos.vx
+ * addu (111) become ready only when the pos.vx store is scheduled and are both boosted to 7f000001
+ * (single-set dests), so they cluster right before that store; the original has them floating up
+ * to right after their producers (sra after the >>16 sra, addu right after the m[1][2] base load),
+ * which is what non-boosted (multi-set dest) prio-10 insns do. Needs both dests set twice. */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
