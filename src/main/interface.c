@@ -2358,7 +2358,10 @@ void func_8003EF48(VECTOR32 *scr, s32 fresh) {
  * original the /4 adjusts prod in place in a0 (D's register) and the sra result goes to a new
  * reg, so the division had no var target (expand_divmod's copy_to_suggested_reg), and the
  * h2 = q/2 sign comes from the adjusted prod. Also the /4 branch sits before lines[0] and
- * h2/6 after the len/8 branch. */
+ * h2/6 after the len/8 branch.
+ * r6F (201 -> 196): sibling shape `t = size * D / 4; prod = t * D; len = t;` puts D and the size*D
+ * product where the original has them (a0/v0); still len is a copy in t1 (orig: the quotient itself
+ * in a2) and prod takes a2 for 41 insns, so lines falls to t2. */
 void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
     IfaceLine *lines = D_80118264;
     s32 i;
@@ -2393,13 +2396,14 @@ void func_8003F3F8(VECTOR32 *scr, s32 fresh) {
         if (t >= 4) {
             size = t;
         }
-        len = size * D_8010FFEC / 4;
-        prod = len * D_8010FFEC;
+        t = size * D_8010FFEC / 4;
+        prod = t * D_8010FFEC;
+        len = t;
+        q = prod / 4;
         lines[0].xy0 = XY(scr->vx - len * 2, scr->vy);
         lines[0].xy1 = XY(scr->vx - len, scr->vy);
         lines[1].xy0 = XY(scr->vx + len, scr->vy);
         lines[1].xy1 = XY(scr->vx + len * 2, scr->vy);
-        q = prod / 4;
         h2 = q / 2;
         lines[2].xy0 = XY(scr->vx, scr->vy - q);
         lines[2].xy1 = XY(scr->vx, scr->vy - h2);
