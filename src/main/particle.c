@@ -2817,30 +2817,24 @@ void ParticleBuildGlass(GlassShard *shard, VECTOR32 *a, VECTOR32 *b, VECTOR32 *c
     shard->spin = 0;
 }
 
-#ifdef NON_MATCHING
 /* Bit-length mask of |x| via the GTE leading-zero counter (the mfc2 result is an input
  * operand, as in ParticleInitLifeColorFade, so the shift folds to 0).
- * r6E: only the shift register differs (ours v0, original v1): local-alloc gives the
- * block-local shift the first free reg (v0); same under ccpsx. Early `return`s, ret set
- * before the asm, `"=r"/"0"` operands and a register-asm v1 var are all worse. */
+ * shift = 0 at function scope: the pseudo spans blocks, gets no hard reg and is reloaded
+ * from its REG_EQUIV constant (into v1) right before the one asm that uses it, so mtc2 and
+ * mfc2 must be one asm statement for the `li v1,0` to land before the mtc2. */
 s32 func_80052D90(s32 x) {
+    s32 shift = 0;
     s32 ret = 0;
-    s32 shift;
 
     if (x < 0) {
         x = -x;
     }
     if (x > 0) {
-        shift = 0;
-        __asm__ volatile("mtc2 %0, $30" : : "r"(x));
-        __asm__ volatile("nop\n\tnop\n\tmfc2 %0, $31" : : "r"(shift));
+        __asm__ volatile("mtc2 %1, $30\n\tnop\n\tnop\n\tmfc2 %0, $31" : : "r"(shift), "r"(x));
         ret = 0x7FFFFFFF >> shift;
     }
     return ret;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", func_80052D90);
-#endif
 
 u16 GetTPage(int tp, int abr, int x, int y);
 void ParticleInitEmitterXZPlane(VECTOR32 *min, VECTOR32 *max, VECTOR32 *size);
