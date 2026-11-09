@@ -1216,7 +1216,14 @@ void LOSOverride(VECTOR32 *pos);
 #define JOY_SCALE(speed, angle) ((JOY_FIX_TO_INT((speed) * 4) * JOY_ABS(angle)) / 4096 << 12)
 
 #ifdef NON_MATCHING
-/* draft: structure follows the asm, but speed lives in a stack slot (sp74) and the u8 flags spill; stack layout and regalloc differ */
+/* draft: structure follows the asm, but speed lives in a stack slot (sp74) and the u8 flags spill; stack layout and regalloc differ
+ * r12AE notes (orig slots): cam 0x10, flags 0x20, pad 0x30, vec 0x38, sniper zoom 0x48, FPS los 0x50 / eye 0x60,
+ * 0x70 unused 4 bytes, speed 0x74, rate 0x78, cur 0x60, side 0x88, along 0x98, across 0x9C, none 0xA0.
+ * pad before vec needs &pad expanded before any aggregate: dropping the function-level vec and putting the
+ * sniper's vec/zoom in a nested block after EGSDeviceControllerRead gives pad 0x30, vec 0x38, zoom 0x48 exactly,
+ * but FPS los then lands at 0x48 (orig 0x50: an extra 8-byte BLK temp in each of the sniper/FPS blocks?).
+ * In the original speed is memory-resident (&speed taken somewhere, an inline?): `(void)&speed;` alone takes the
+ * masked score 262 -> 226 and stops the u8 flag spills, so that is the main lever once its slot is placed at 0x74. */
 /* Look stick to camera: sniper zoom, side pans, and the camera turn rate. */
 s32 func_800374E8(JoyController *joy) {
     VECTOR32 cam;
