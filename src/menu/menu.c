@@ -997,22 +997,17 @@ void func_80139150(MenuItem *item, s32 on, s32 enabled) {
     }
 }
 
-#ifdef NON_MATCHING
-/* register allocation of the x/y invariants and the end-x register. Original: half=s3, x1&0xFFFF=s4, quad=s5,
- * top=s6 (priority half > x1 > quad > top); ours puts half last. `x1 = ...; x1 &= 0xFFFF;` + `x1 | top` removes
- * our extra loop-2 copy (22 lines) but not the order; u16 x1 is worse.
- * r5B: in the original `value - half - 0x39` stays in loop 1 (value reloaded there) and its masked value is ONE
- * pseudo (s4) used by both loops. Any temp form (`(..) & 0xFFFF`, u16, a separate masked var) lets loop.c hoist
- * the subtraction (31 lines); only a user var used after the loop stays. half needs ~8 refs (now 5) to land in s3. */
+/* half = width; half /= 2; (two sets of half give it the refs to outrank x1/quad/top for s3) */
 void func_80139230(MenuBox *box, s32 y, s32 width, s32 value) {
     MenuQuad *quad = box->quads;
     MenuLine *line = box->lines;
     s32 i = 0;
     s32 top = (y - 5) << 16;
-    s32 half = width / 2;
+    s32 half = width;
     s32 xy0;
     s32 x1;
 
+    half /= 2;
     for (; i < 2; i++, line++) {
         if (i == 0) {
             xy0 = ((-half - 0x39) & 0xFFFF) | top;
@@ -1033,9 +1028,6 @@ void func_80139230(MenuBox *box, s32 y, s32 width, s32 value) {
         InterfacePlaceQuad(quad, MAP_XY(x1, y - 5), i * 2 + 3, i + 1);
     }
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_80139230);
-#endif
 
 void func_801393C4(MenuBox *box, s32 selected) {
     u32 color = 0xF08250;
