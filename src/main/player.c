@@ -1609,69 +1609,25 @@ void PlayerGrenadeCASAnimCB(s16 id) {
 /* 20.12 fixed point to integer, rounding towards zero */
 #define GRENADE_FIX(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
 
+static inline void GrenadeSwap(s32 *a, s32 *b) {
+    s32 t = *a;
+    *a = *b;
+    *b = t;
+}
+
 /* Cheap |v|: largest component plus a quarter of the other two. */
 static inline s32 GrenadeFuzzyLength(s32 x, s32 y, s32 z) {
-    VECTOR32 a;
-    s32 t;
+    s32 ax = abs(x);
+    s32 ay = abs(y);
+    s32 az = abs(z);
 
-    a.vx = abs(x);
-    a.vy = abs(y);
-    a.vz = abs(z);
-    if (a.vx < a.vy) {
-        t = a.vx;
-        a.vx = a.vy;
-        a.vy = t;
+    if (ax < ay) {
+        GrenadeSwap(&ax, &ay);
     }
-    if (a.vx < a.vz) {
-        t = a.vx;
-        a.vx = a.vz;
-        a.vz = t;
+    if (ax < az) {
+        GrenadeSwap(&ax, &az);
     }
-    return a.vx + ((a.vy + a.vz) >> 2);
-}
-
-static inline s32 GrenadeFuzzyLengthZ(s32 x, s32 y, s32 z) {
-    VECTOR32 a;
-    s32 t;
-
-    a.vz = abs(z);
-    a.vx = abs(x);
-    a.vy = abs(y);
-    if (a.vx < a.vy) {
-        t = a.vx;
-        a.vx = a.vy;
-        a.vy = t;
-    }
-    if (a.vx < a.vz) {
-        t = a.vx;
-        a.vx = a.vz;
-        a.vz = t;
-    }
-    return a.vx + ((a.vy + a.vz) >> 2);
-}
-
-/*
- * Whether the grenade flies freely from 'from' to 'to'; fills in where and what it hit otherwise.
- * A window in the way breaks and does not stop it.
- */
-static inline s32 GrenadeLOS(VECTOR32 *from, VECTOR32 *to, Gobj *obj, VECTOR32 *hitPos, VECTOR32 *hitNormal) {
-    LOSRequest req;
-    u8 noHit;
-
-    req.from = from;
-    req.to = to;
-    req.fromObj = obj;
-    req.toObj = NULL;
-    req.noHit = &noHit;
-    req.hitPos = hitPos;
-    req.hitNormal = hitNormal;
-    req.hitInfo = NULL;
-    _LOSPoint2PointCollide(&req);
-    if (losWindowCount != 0) {
-        DamageGOBJ(gPlayerOffset, gPlayerOffset, losWindowArray[0]->id, 100, 0);
-        return 1;
-    }
-    return noHit;
+    return ax + ((ay + az) >> 2);
 }
 
 static inline void GrenadeDot(VECTOR32 *a, VECTOR32 *b, s32 *out) {
@@ -1682,14 +1638,6 @@ static inline void GrenadeFixDiv(s32 a, s32 b, s32 *out) {
     *out = EGSMathFIXDiv(a, b);
 }
 
-#ifdef NON_MATCHING
-/* 10 lines. (1) The window path keeps a dead `ret = 1` in the j slot: ours threads the jump
- * past the !ret test only in jump2 (after flow), the original earlier. Hand-inlining the LOS
- * call fixes that but breaks req's inline slot reuse (0xC8) for the length helper.
- * (2) First fuzzy-length block: original stores a.vz right after abs(z) and loads
- * move->friction last before the beqz (sched1 birthing boost: friction's pseudo is set once;
- * a separate `friction` local did not get it). abs order x,y,z for the vel length and z,x,y
- * for the norm length (two helpers) and `scale = -restitution; scale -= 0x1000` fixed the rest. */
 /* Per-tick grenade update: fly, bounce off what it hits, explode after 60 ticks. */
 void iWeaponGrenadeCB(Gobj *grenade) {
     VECTOR32 pos;
@@ -1712,6 +1660,7 @@ void iWeaponGrenadeCB(Gobj *grenade) {
     s32 dot;
     s32 ratio;
     s32 scale;
+    u8 noHit;
     Gobj *gobj = grenade;
     void *display = *gCamera;
 
@@ -1739,7 +1688,25 @@ void iWeaponGrenadeCB(Gobj *grenade) {
     ahead.vx = next.vx + GRENADE_FIX(dir.vx * 19);
     ahead.vy = next.vy + GRENADE_FIX(dir.vy * 19);
     ahead.vz = next.vz + GRENADE_FIX(dir.vz * 19);
-    if (!GrenadeLOS(&pos, &ahead, gobj, &hitPos, &hitNormal)) {
+    /* The request sits two blocks deep: its slot is freed again for the length helpers. */
+    {
+        {
+            LOSRequest req;
+
+            req.from = &pos;
+            req.to = &ahead;
+            req.fromObj = gobj;
+            req.toObj = NULL;
+            req.noHit = &noHit;
+            req.hitPos = &hitPos;
+            req.hitNormal = &hitNormal;
+            req.hitInfo = NULL;
+            _LOSPoint2PointCollide(&req);
+        }
+    }
+    if (losWindowCount != 0) {
+        DamageGOBJ(gPlayerOffset, gPlayerOffset, losWindowArray[0]->id, 100, 0);
+    } else if (!noHit) {
         los = losHitsSorted[0];
         hit = NULL;
         id = los != NULL && los->type == 1 ? los->owner->id & 0x3FF : -1;
@@ -1773,9 +1740,11 @@ void iWeaponGrenadeCB(Gobj *grenade) {
             tang.vx = vel.vx - norm.vx;
             tang.vy = vel.vy - norm.vy;
             tang.vz = vel.vz - norm.vz;
-            scale = ((PlayerMoveInfo *)gobj->move)->friction;
-            GrenadeFixDiv(GrenadeFuzzyLengthZ(norm.vx, norm.vy, norm.vz), GrenadeFuzzyLength(vel.vx, vel.vy, vel.vz) + 1, &ratio);
-            scale *= ratio;
+            {
+                s32 fr = ((PlayerMoveInfo *)gobj->move)->friction;
+                GrenadeFixDiv(GrenadeFuzzyLength(norm.vx, norm.vy, norm.vz), GrenadeFuzzyLength(vel.vx, vel.vy, vel.vz) + 1, &ratio);
+                scale = fr * ratio;
+            }
             scale = GRENADE_FIX(scale);
             scale = -scale;
             tang.vx = EGSMathFIXMul(tang.vx, scale);
@@ -1805,9 +1774,6 @@ void iWeaponGrenadeCB(Gobj *grenade) {
     ParticleFuse(&pos);
     SysExeTickQueueTimer(iWeaponGrenadeCB, 1, grenade);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/player", iWeaponGrenadeCB);
-#endif
 
 /* Grenade flight: x/z speed (also drop height) and launch y speed, kept in memory */
 typedef struct GrenadeArc {
