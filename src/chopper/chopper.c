@@ -525,7 +525,11 @@ static void func_8014196C(s32 id) {
  * r8R: rank_for_schedule ties go to schedule_select's potential_hazard, which is 0 for a reg copy and >0 for
  * any memory-unit insn, so 324 can only win if it outranks the stores: the original needs either prio >= 3 for
  * the a1 copy or prio 1 for the pos.vy-derived stores. h temp, `(h = r >> 3)` in the expression, a 3-arg cast
- * call, do{}while(0) barriers before r / before unk190: all 6-11. */
+ * call, do{}while(0) barriers before r / before unk190: all 6-11.
+ * r9X: priorities are forward load-latency paths (priority() = max pred prio + cost - 1): the stores are 2 only
+ * because pos.vy is a load (cost 2) in this block; the a1 copy can reach 3 only via a second load in r's chain.
+ * Copying pos.vy into a local before the health block keeps it in a reg (no lw, 23 lines); pos.vy really is
+ * the 0x24(sp) slot of pos in the original. */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;

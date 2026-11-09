@@ -2046,7 +2046,11 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * r8R: in the original frame->pos.vy is loaded BEFORE the a.vx store (so a.vx = abs(d.vx) follows the src.vy
  * load in source) and the d.vx/d.vy stores sink below the pos.vz frame reload (scalar `s32 *pd = &d.vx`):
  * src.vx, pd[0], src.vy, a.vx, src.vz, src.vy = -src.vy, pd[1], a.vy, pd[2], a.vz = 27 (4 imm) with both
- * src.vy stores kept. Left: orig loads pos.vx/pos.vz at the block start and pos.vy right after f->pos.vy. */
+ * src.vy stores kept. Left: orig loads pos.vx/pos.vz at the block start and pos.vy right after f->pos.vy.
+ * r9X: `pd[1]`/`pd[2]` through one pointer are still MEM_IN_STRUCT (only pd[0] was scalar); one pointer per field
+ * (*px/*py/*pz) makes all three d stores scalar so they sink like the original's: natural order = 21 (d tail now
+ * matches incl. d.vz kept past abs), but the raw src.vy store is dead again (-2). Keeping it needs a frame load
+ * between src.vy and its negation; best such order (SX SY DX SZ AX DZ AZ NY DY AY) = 23. */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
@@ -2116,16 +2120,20 @@ void func_8001EF10(void) {
                 s32 t;
                 s32 dist;
 
+                s32 *px = &d.vx;
+                s32 *py = &d.vy;
+                s32 *pz = &d.vz;
+
                 src.vx = shake->frame->pos.vx;
-                d.vx = src.vx - pos.vx;
-                a.vx = abs(d.vx);
+                *px = src.vx - pos.vx;
+                a.vx = abs(*px);
                 src.vy = shake->frame->pos.vy;
                 src.vy = -src.vy;
-                d.vy = src.vy - pos.vy;
-                a.vy = abs(d.vy);
+                *py = src.vy - pos.vy;
+                a.vy = abs(*py);
                 src.vz = shake->frame->pos.vz;
-                d.vz = src.vz - pos.vz;
-                a.vz = abs(d.vz);
+                *pz = src.vz - pos.vz;
+                a.vz = abs(*pz);
                 if (a.vx < a.vy) {
                     t = a.vx;
                     a.vx = a.vy;
