@@ -1558,24 +1558,10 @@ void func_8001D89C(VECTOR32 *pos) {
     pos->vx = out.vx;
 }
 
-#ifdef NON_MATCHING
-/* regalloc: the pitch dead-zone bound 'up' lands in a2 instead of v1. The neg = -fov pseudo
- * (refs 4, live 7, pri 11428) is allocated before up (refs 4, live 16, pri 5000) and takes v1;
- * the original has neg in a0. Tried (r2C): up=0 inside the if, inverted if, neg as lim/fov/
- * down/up/diff.vz/cur.vz, -fov repeated, cur.vx + (diff.vx - down) order: all 11-16.
- * r4G: `up = neg * 3; up /= 64;` raises up's refs so it is allocated first (neg a0, up v1 as in
- * the original, 8 lines) but then the *3 lands in up instead of a v0 temp.
- * r5C (greg): neg (297) conflicts only with up(75), 302 and v0, so it takes v1 in pass 0. To land in a0 it needs
- * a conflicting pseudo with a v1 hard preference (regs_someone_prefers) - up has none, since set_preference only
- * looks at the FIRST operand of an arithmetic src (diff.vx - up gives diff.vx the pref). Nested do{}while(0)
- * around the compare only adds +1 per ref (up 4 -> 6 refs, pri 7500), not enough.
- * r7M: one function-scope `neg` also holding diff.vx (`neg = -fov; ... neg = diff.vx; if (neg >= up)`,
- * second arm `(neg - down) + cur.vx`) gives the original's regs (neg/diff a0, up v1; 6 lines), but then
- * neg outlives expand_divmod's copy for /8, so cse (make_regs_eqv) makes neg the class head and tests
- * bgez a0 instead of the copy; also a beqz delay-slot fill in the lim block changes. */
 /* Camera angle: aims along the lead->watch line, easing toward it within a dead zone
  * scaled by the fov. The fov fetch copies a whole vector into one word (as the
- * original does, spilling over the saved registers above it). */
+ * original does, spilling over the saved registers above it). 'up' doubles as the
+ * delta in the pitch arms (keeps it in v1, as the original allocates it). */
 s32 func_8001D91C(void) {
     VECTOR32 dir;
     VECTOR32 angle;
@@ -1703,8 +1689,8 @@ s32 func_8001D91C(void) {
             } else {
                 angle.vy = cur.vy;
             }
-            up = 0;
             if (D_80113B2C.mode == 19 || D_80113B2C.mode == 20) {
+                up = 0;
                 down = 0;
             } else {
                 s32 neg = -fov;
@@ -1713,9 +1699,11 @@ s32 func_8001D91C(void) {
                 down = neg / 8;
             }
             if (diff.vx >= up) {
-                angle.vx = cur.vx + (diff.vx - up);
+                up = diff.vx - up;
+                angle.vx = cur.vx + up;
             } else if (diff.vx <= down) {
-                angle.vx = (diff.vx - down) + cur.vx;
+                up = diff.vx - down;
+                angle.vx = cur.vx + up;
             } else {
                 angle.vx = cur.vx;
             }
@@ -1759,9 +1747,6 @@ s32 func_8001D91C(void) {
     CameraAccessMoveInfo(gCamera, 1, 6, 1);
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gamecam", func_8001D91C);
-#endif
 
 /* As func_8001D89C: only the copy of a zero vector is left. */
 void func_8001E1DC(void) {
