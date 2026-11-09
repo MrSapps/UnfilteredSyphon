@@ -129,7 +129,12 @@ void WindowLOSLoop(LOSContext *ctx);
  * the cam.vy/vz stores sit before the gGabeSector load; ctx.length's 0x188 load is earlier.
  * The dead s0 = sp+0x10 is &from: `LOSVector *f = &from; ... ctx.from = *f;` reproduces it in the
  * bltz slot (bltz+j layout then matches), but the ctx.from copy then reads through s0 where the
- * original reads sp+0x10 directly (12 lines); *f = *req->from variants don't keep the set. */
+ * original reads sp+0x10 directly (12 lines); *f = *req->from variants don't keep the set.
+ * r7N (11 -> 5): `do {} while (0);` after the cam block keeps the cam stores ahead of the
+ * gGabeSector load (they share a sched block otherwise); `u16 s = gGabeSector; ctx.unk04 = 0;
+ * ctx.sector = s;` puts the unk04 store in the lhu delay (the stack-struct store conflicts with
+ * the global load in sched, so it must be emitted after it, with a lower LUID than the sh).
+ * With f on top: 6 (only cam.vx a1 + the movstr through s0 left). */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
@@ -156,9 +161,13 @@ u8 _LOSPoint2Point(LOSRequest *req) {
     cam.vy = (*(LOSMatrix **)*gCamera)->t[1];
     cam.vz = (*(LOSMatrix **)*gCamera)->t[2];
     cam.vy = -cam.vy;
+    do {} while (0);
 
-    ctx.unk04 = 0;
-    ctx.sector = gGabeSector;
+    {
+        u16 s = gGabeSector;
+        ctx.unk04 = 0;
+        ctx.sector = s;
+    }
     ctx.noHitPos = req->hitPos == NULL;
     ctx.from = from;
     ctx.delta = delta;
