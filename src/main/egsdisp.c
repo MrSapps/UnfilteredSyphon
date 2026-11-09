@@ -2874,16 +2874,9 @@ void InitDamagePolys(void) {
     gDamagePolyPtr = 0;
 }
 
-#ifdef NON_MATCHING
-/* 24 lines left (r3C). Regs now all match (h/w/u order: w then h then py; uv[2]/uv[3]
- * computed into a reused `t` and the uv[1] word built in `s` before the uv[2]/uv[3] stores).
- * Remaining: sched1 puts `v = py & 0xFF` (+ v << 8) at the top of the block (both are
- * birthing insns, 7f000001) where the original computes them inside the uv[0] chain; moving
- * v after the cy/cx part (`t = A << 16; v = ...; t = t + (v << 8) + u * 2`) fixes that but
- * then the uv[2]/uv[1] interleave and t0..t3 numbering differ. r6D: with v after the clut part
- * (30 lines) the original's px reload (lhu a3) and (s16)w (t0) are live across the uv[2] store,
- * so local-alloc numbering shifts by one; the original computes uv[3] = uv[2] + (s16)w in the
- * uv[2] register before storing uv[2]. */
+/* v = py & 0xFF is a single set (`v = py; v &= 0xFF` gets combined and leaves a USE at the block
+ * label, so v dies twice and loses its local tie); the uv[0] high part goes in a single-death `t`
+ * so the or/<< 16 chain ties into one reg, and uv[2]/uv[3] use their own `x`. */
 void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTexture *tex, s32 owner) {
     VECTOR a;
     VECTOR b;
@@ -2895,6 +2888,7 @@ void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTextu
     s16 h;
     s32 v;
     s32 t;
+    s32 x;
     s32 s;
 
     d = &gDamagePolys[gDamagePolyPtr++];
@@ -2915,15 +2909,14 @@ void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTextu
     }
     d->active = 1;
     d->owner = (void *)owner;
-    v = py;
-    v &= 0xFF;
-    t = (((tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F)) << 16) + (v << 8) + u * 2;
-    d->uv[0] = t;
-    t = ((v + h) << 8) + u * 2;
+    t = ((tex->image.cy << 6) | ((tex->image.cx >> 4) & 0x3F)) << 16;
+    v = py & 0xFF;
+    d->uv[0] = t + (v << 8) + u * 2;
+    x = ((v + h) << 8) + u * 2;
     s = ((((py >> 4) & 0x10) | (((tex->image.px & 0x3FF) >> 6) | 0x80) | ((py & 0x200) * 4)) << 16) + (v << 8) + u * 2 +
                (s16)w;
-    d->uv[2] = t;
-    d->uv[3] = t + (s16)w;
+    d->uv[2] = x;
+    d->uv[3] = x + (s16)w;
     d->uv[1] = s;
     OuterProduct12(dir, normal, &a);
     if (a.vx == 0 && a.vy == 0 && a.vz == 0) {
@@ -2951,9 +2944,6 @@ void EGSDisplayRegisterDamage(VECTOR *pos, VECTOR *dir, VECTOR *normal, EGSTextu
     d->v[3].vy = -(pos->vy - a.vy - b.vy);
     d->v[3].vz = pos->vz - a.vz - b.vz;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayRegisterDamage);
-#endif
 
 void EGSDisplayRegisterFootprint(EGSFrame *frame, s32 kind, void *owner) {
     VECTOR dir;
