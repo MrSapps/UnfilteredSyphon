@@ -1447,7 +1447,10 @@ void npcGrenadeLanded(s32 which) {
 }
 
 #ifdef NON_MATCHING
-/* draft: structure right, 17 insns long; abs/loop register allocation differs */
+/* draft: structure right, 17 insns long; abs/loop register allocation differs
+ * r8S (165 -> 100): the three |x - range| are __builtin_abs (abssi2), `next` is s32 (no andi
+ * 0xFF on the copies). Left: curPt is spilled (orig keeps it in s0), s-reg permutation of
+ * npc/link/p/i in the loops. */
 s32 NPCPointIQ(obj, path)
 Gobj *obj;
 PathPoint *path;
@@ -1462,7 +1465,7 @@ PathPoint *path;
     VECTOR32 *goal = &npc->lastSeenPos;
     s32 range = 0;
     s32 skipKind = -1;
-    u8 next;
+    s32 next;
     u8 cur;
     PathPoint *curPt;
     PathPoint *p;
@@ -1526,7 +1529,7 @@ PathPoint *path;
     pt.vy = curPt->y;
     pt.vz = curPt->z;
     EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &best);
-    best = best - range >= 0 ? best - range : -(best - range);
+    best = __builtin_abs(best - range);
     cur = next;
     if (((curPt->flags & 0xF00) >> 8) == 7) {
         skipKind = 7;
@@ -1539,7 +1542,7 @@ PathPoint *path;
             pt.vy = p->y;
             pt.vz = p->z;
             EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &dist);
-            dist = dist - range >= 0 ? dist - range : -(dist - range);
+            dist = __builtin_abs(dist - range);
             for (j = 0; j < 3; j++) {
                 link2 = p->links[j];
                 if (link2 >= 0 && link2 != cur && link2 != link && link2 != 1 && link2 != skipKind) {
@@ -1547,7 +1550,7 @@ PathPoint *path;
                     pt.vy = path[link2].y;
                     pt.vz = path[link2].z;
                     EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &d2);
-                    d2 = d2 - range >= 0 ? d2 - range : -(d2 - range);
+                    d2 = __builtin_abs(d2 - range);
                     if (d2 < dist) {
                         dist = d2;
                     }
