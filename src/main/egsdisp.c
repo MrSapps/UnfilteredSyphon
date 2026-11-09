@@ -216,8 +216,9 @@ typedef struct EGSAnim {
     /* 0x0B */ u8 unk0B;
     /* 0x0C */ EGSFrame *frame;
     /* 0x10 */ EGSModel *model;
-    /* 0x14 */ u8 unk14[4];
-    /* 0x18 */ void *unk18; /* billboard animation / cached model */
+    /* 0x14 */ u8 unk14[2];
+    /* 0x16 */ s16 side; /* +-1: OT z bias direction */
+    /* 0x18 */ void *unk18; /* billboard animation / cached model / attached anim / terrain colour */
     /* 0x1C */ void **dla;
     /* 0x20 */ HAnimNode *haList;
     /* 0x24 */ SVECTOR *rot; /* per-part rotations */
@@ -597,7 +598,7 @@ void InitPointSources(void *anim);
 void FinalizePointSources(void);
 void SortHMDs(EGSCamera *camera, EGSListNode *anims, s16 sortBuffer);
 void SortEMDs(EGSCamera *camera, EGSListNode *anims, s16 sortBuffer);
-void SortGs(EGSCamera *camera, EGSListNode *anims, u16 sortBuffer);
+void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer);
 s32 GetVideoMode(void);
 s32 func_80138718();
 void GsDrawOt(GsOT *ot);
@@ -3341,10 +3342,387 @@ s32 FuzzyXZDistancePoint2Point(VECTOR *a, VECTOR *b) {
     return sum;
 }
 
-/* cc1 output (0x178 frame, GTE back-color ctc2 asm blocks); no C yet. An m2c draft is the
- * starting point; its per-anim flashlight loop, TMD on-screen test and the sort-depth
- * bias (D_80137714[sortBuffer]) need EGSAnim's 0x14..0x1B fields typed first. */
+#ifdef NON_MATCHING
+/* r7K first C draft, 228/863 masked diff lines (control flow follows the original). The original
+ * reaches gTerrainFog/gFogFlag/gRunFlag/gFLCount/gGameTick/dTicks/gInfraredColor* with lui/lw
+ * (only gOTStart through $gp), like BillboardAnimate: it was built where those were not small
+ * data of the TU. Most call-crossing values live in stack slots reloaded through t1-t3 (slot order
+ * 0x90.. = declaration order below). Left: anim gets s2 (orig s1, shared with sortBuffer), the
+ * sortBuffer*0x14 / camera spill schedule at entry, and reload-register (t1-t3) choices that stop
+ * jump2 cross-jumping the bias stores (-72/-10). A while loop whose run test does its own
+ * advance (as the original layout suggests) scores worse (274). */
+extern s32 gInfraredColorNoGp[] __asm__("gInfraredColor+0+0");
+extern s32 gInfraredColorSnifferNoGp[] __asm__("gInfraredColorSniffer+0+0");
+extern s32 gTerrainFogNoGp[] __asm__("gTerrainFog+0+0");
+extern s32 gFogFlagNoGp[] __asm__("gFogFlag+0+0");
+extern u8 gRunFlagNoGp[] __asm__("gRunFlag+0+0");
+extern s32 gFLCountNoGp[] __asm__("gFLCount+0+0");
+extern s32 gGameTickNoGp[] __asm__("gGameTick+0+0");
+extern s32 dTicksNoGp2[] __asm__("dTicks+0+0");
+extern u16 D_8012DB22;
+extern EGSListNode *D_8012D8CC;
+void EGSDisplayTMDSetupGTE(EGSFrame *frame);
+s32 EGSDisplayTMDOnScreen(s32 dist, s32 size);
+void EGSDisplaySortGMD(void *tmd, u8 flags, u32 *ot, s8 attr);
+void DoSortHMD(void *hmd, s32 flags, u32 *ot, EGSAnim *anim);
+void EGSDisplayAnimateHMD(EGSAnim *anim);
+void EGSFrameUpdateHierarchy(EGSFrame *frame);
+void EGSFrameSetRotationMatrix(EGSFrame *frame, EGSFrame *parent, MATRIX *m);
+void EGSGeometry_UnitVectorToRotationMatrix(VECTOR *v, s32 arg1, MATRIX *m);
+s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out);
+void BillboardAnimate(EGSAnim *anim);
+
+/* GTE far (back) colour: RBK, GBK, BBK */
+#define gte_SetBackColor(r, g, b) \
+    __asm__ volatile("ctc2 %0, $13\n\tctc2 %1, $14\n\tctc2 %2, $15" : : "r"(r), "r"(g), "r"(b))
+
+/* Attached light of an attached anim (EGSAnim.dla viewed as HMDSortLight in egshmd.c) */
+typedef struct SortGsLight {
+    /* 0x00 */ void *dla;
+    /* 0x04 */ s16 r, g, b;
+} SortGsLight;
+
+void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
+    VECTOR pos;
+    MATRIX rot;
+    MATRIX view;
+    VECTOR dir;
+    VECTOR side;
+    VECTOR n;
+    EGSModel *model;
+    u32 mflags;
+    u32 *ot;
+    s32 index;
+    s32 fogNear;
+    s32 fogFar;
+    s32 fogRange;
+    s32 fogOn;
+    EGSAnim *gabe;
+    u8 run;
+    s32 flags;
+    u8 sniffer;
+    u8 boost;
+    s16 bias;
+    s32 far;
+    s32 range;
+    u8 attr;
+    s32 dist;
+    EGSAnim *att;
+    EGSAnim *anim;
+    EGSFrame *f;
+    FLEntry *e;
+    SortGsLight *light;
+    void *tmd;
+    s32 z;
+    s32 d;
+    s32 a;
+    s32 sh;
+    s32 v;
+    s32 i;
+    u8 wide;
+    s16 angle;
+    s32 sum;
+    s32 sumG;
+    s32 sumB;
+    s32 lev;
+    s32 r;
+    s16 g;
+    s16 b;
+    s32 c;
+    s32 cap;
+    s32 t;
+    u8 fb;
+
+    sniffer = 0;
+    fogNear = gTerrainFogNoGp[0] & 0xFFFF;
+    fogFar = fogNear + ((0x1000 - fogNear) >> (gTerrainFogNoGp[0] >> 16));
+    fogRange = fogFar - fogNear;
+    flags = camera->flags;
+    ot = gOtbl[sortBuffer].org;
+    index = camera->index;
+    fogOn = gFogFlagNoGp[0];
+    gabe = gPointSourceArray[0].anim;
+    run = gRunFlagNoGp[0];
+    if (flags & 0x10) {
+        sniffer = gInfraredColorNoGp[0] == gInfraredColorSnifferNoGp[0];
+    }
+    boost = 0;
+    if (index == 0 && !(flags & 0x10)) {
+        boost = D_8012DB22 & 1;
+    }
+    if ((u32)gGameTickNoGp[0] < 9) {
+        return;
+    }
+    gOTStart = ot;
+    if (camera->anims != NULL) {
+        f = gCameraArray[0].frame;
+        view.m[0][0] = f->matrix.m[0][0];
+        view.m[0][1] = -f->matrix.m[0][1];
+        view.m[0][2] = f->matrix.m[0][2];
+        view.m[1][0] = -f->matrix.m[1][0];
+        view.m[1][1] = f->matrix.m[1][1];
+        view.m[1][2] = -f->matrix.m[1][2];
+        view.m[2][0] = f->matrix.m[2][0];
+        view.m[2][1] = -f->matrix.m[2][1];
+        view.m[2][2] = f->matrix.m[2][2];
+        view.t[0] = f->matrix.t[0];
+        view.t[1] = -f->matrix.t[1];
+        view.t[2] = f->matrix.t[2];
+        dir.vx = view.m[0][0];
+        dir.vy = view.m[1][0];
+        dir.vz = view.m[2][0];
+        dir.vx = -dir.vx;
+        dir.vy = -dir.vy;
+        dir.vz = -dir.vz;
+        dir.vy = 0;
+        GTEMath_VectorNormal(&dir, &dir);
+        side.vy = 0x1000;
+        side.vx = -dir.vz;
+        side.vz = dir.vx;
+        GTEMath_VectorNormal(&side, &n);
+        EGSGeometry_UnitVectorToRotationMatrix(&n, 0, &rot);
+    }
+    while (anims != NULL) {
+        anim = anims->data;
+        model = anim->model;
+        mflags = model->flags;
+        if (!(mflags & 0x6000000) || (anim->flags & 8)) {
+            goto next;
+        }
+        sum = 0;
+        sumG = 0;
+        sumB = 0;
+        bias = 0;
+        far = fogFar;
+        range = fogRange;
+        att = NULL;
+        attr = anim->unk09;
+        if ((mflags & 0x400000) && (anim->flags2 & 0x40)) {
+            dist = 20000;
+        } else if (mflags & 0x10000) {
+            dist = 2000;
+            att = anim->unk18;
+            if (att != NULL) {
+                dist = 4500;
+            } else if (model->unk24 != 0) {
+                f = anim->frame;
+                if (f->node == NULL) {
+                    f->matrix.m[0][0] = rot.m[0][0];
+                    anim->frame->matrix.m[0][1] = -rot.m[0][1];
+                    anim->frame->matrix.m[0][2] = rot.m[0][2];
+                    anim->frame->matrix.m[1][0] = -rot.m[1][0];
+                    anim->frame->matrix.m[1][1] = rot.m[1][1];
+                    anim->frame->matrix.m[1][2] = -rot.m[1][2];
+                    anim->frame->matrix.m[2][0] = rot.m[2][0];
+                    anim->frame->matrix.m[2][1] = -rot.m[2][1];
+                    anim->frame->matrix.m[2][2] = rot.m[2][2];
+                } else {
+                    EGSFrameSetRotationMatrix(f, NULL, &rot);
+                }
+            }
+        } else {
+            dist = 4500;
+        }
+        for (i = 0; i < gFLCountNoGp[0]; i++) {
+            e = &gFLArray[i];
+            angle = *(s16 *)&e->angle;
+            pos.vx = anim->frame->matrix.t[0];
+            pos.vy = anim->frame->matrix.t[1];
+            wide = e->angle >> 31;
+            pos.vy = -pos.vy;
+            pos.vz = anim->frame->matrix.t[2];
+            d = FuzzyXZDistancePoint2Point(&pos, (VECTOR *)e);
+            if (!wide ? d < 0x821 : d < 0x501) {
+                pos.vx -= e->x;
+                pos.vy -= e->y;
+                pos.vz -= e->z;
+                a = ratan2(pos.vz, pos.vx) - angle;
+                if (a < 0) {
+                    a += 0x1000;
+                }
+                if (a > 0x800) {
+                    a = 0x1000 - a;
+                }
+                if (a < 600) {
+                    sh = d >> 9;
+                    if (sh < 2) {
+                        sh = 2;
+                    }
+                    v = (600 - a) >> sh;
+                    if (!wide) {
+                        sum += v;
+                        sumG += v;
+                        sumB += v;
+                    } else {
+                        sum = v >> 2;
+                        sumG += v >> 4;
+                        sumB += v >> 4;
+                    }
+                }
+            }
+        }
+        if (anim->unk09 & 0x80) {
+            far += far >> 1;
+            range = far - fogNear;
+        }
+        EGSDisplayTMDSetupGTE(anim->frame);
+        if (anim->flags2 & 0x20) {
+            z = EGSDisplayTMDOnScreen(dist, 0x400);
+        } else {
+            z = EGSDisplayTMDOnScreen(dist, index ? 0x8C : 0x190);
+        }
+        if (!(anim->flags2 & 0x40)) {
+            if (z == 0 || (fogOn && far < z)) {
+                goto next;
+            }
+        }
+        if (anim->unk09 & 0x10) {
+            lev = (anim->unk09 & 0xF) << 8;
+        } else {
+            lev = 0xC00;
+        }
+        lev += sum * 16;
+        r = 0xFFF;
+        if (lev < 0x1000) {
+            r = lev;
+        }
+        if (flags & 0x10) {
+            b = 0;
+            r = 0;
+            g = 0x3FF;
+        } else if (anim->unk09 & 0x40) {
+            c = (s32)anim->unk18;
+            r = c >> 16;
+            if (c == 0) {
+                EGSDisplayCalculateHMDTerrainLighting(D_8012D8CC, anim, (SVECTOR *)&n);
+                c = ((((SVECTOR *)&n)->vx >> 4) << 16) + ((((SVECTOR *)&n)->vy >> 4) << 8) +
+                    (((SVECTOR *)&n)->vz >> 4);
+                anim->unk18 = (void *)c;
+                if (c == 0) {
+                    anim->unk18 = (void *)1;
+                }
+                r = c >> 16;
+            }
+            g = (c >> 8) & 0xFF;
+            b = c & 0xFF;
+            if (sum != 0) {
+                r = r + sum < 0x100 ? r + sum : 0xFF;
+                g = g + sumG < 0x100 ? g + sumG : 0xFF;
+                b = b + sumB < 0x100 ? b + sumB : 0xFF;
+            }
+            r <<= 4;
+            g <<= 4;
+            b <<= 4;
+        } else {
+            b = r;
+            if (sum >= 31 && sumB < sum) {
+                t = r >> 6;
+                cap = sum < 0x100 ? sum : 0xFF;
+                if (t < cap) {
+                    t = cap;
+                }
+                r = t << 4;
+                b = 0;
+                g = 0;
+            } else {
+                g = b;
+            }
+        }
+        if (fogOn && fogNear < z) {
+            t = far - z;
+            r = (s16)r * t / range;
+            g = g * t / range;
+            gte_SetBackColor(r, g, b * t / range);
+        } else {
+            gte_SetBackColor(r, g, b);
+        }
+        anim->flags2 &= 0x7F;
+        if (att != NULL) {
+            light = (SortGsLight *)att->dla;
+            if (!run || att->node[0] == NULL) {
+                goto next;
+            }
+            if (((flags & 0x10) || (D_8012DB22 & 1)) && att == gabe) {
+                goto next;
+            }
+            anim->flags2 = (anim->flags2 & 0xF) | (att->flags2 & 0xF0) | 0x80;
+            if (att->unk09 & 0x20) {
+                attr |= 0x20;
+            }
+            if (!(flags & 0x10)) {
+                gte_SetBackColor(light->r, light->g, light->b);
+            }
+            fb = att->unk0B;
+            if (fb & 0x10) {
+                bias = -72;
+            } else if (fb & 0x20) {
+                bias = -24;
+            } else {
+                d = 24;
+                if (att == gabe) {
+                    d = 12;
+                }
+                if (att->side == 1) {
+                    bias = d;
+                } else if (att->side == -1) {
+                    bias = -d;
+                }
+                if (z < 60 && bias < 0) {
+                    bias = 0;
+                }
+            }
+        } else if (anim->side == 1) {
+            bias = gabe->side * 12;
+        } else {
+            bias = -10;
+        }
+        gOtbl[sortBuffer].org = ot + bias;
+        if (mflags & 0x10000000) {
+            BillboardAnimate(anim);
+        } else if (!(mflags & 0x10000)) {
+            anim->side = 0;
+        } else if (anim->flags & 0x20) {
+            EGSFrameUpdateHierarchy(anim->frame);
+        }
+        if (mflags & 0x400000) {
+            EGSDisplayAnimateHMD(anim);
+            DoSortHMD(model->info, camera->flags << 16, gOtbl[sortBuffer].org, anim);
+        } else {
+            if (anim->flags2 & 4) {
+                tmd = (void *)model->unk24;
+            } else {
+                tmd = model->info;
+            }
+            if ((mflags & 0x10000) && att == NULL && model->unk24 != 0) {
+                t = dTicksNoGp2[0] & 0xF;
+                if (t >= 8) {
+                    c = 0xFFF - (15 - t) * 250;
+                } else {
+                    c = 0xFFF - t * 250;
+                }
+                if (!(flags & 0x10)) {
+                    gte_SetBackColor(c, c, c);
+                }
+                tmd = (void *)model->unk24;
+            }
+            if (boost) {
+                gte_SetBackColor(300, 300, 300);
+            }
+            if (sniffer) {
+                attr |= 0x20;
+            }
+            EGSDisplaySortGMD(tmd, anim->flags2, gOtbl[sortBuffer].org, attr);
+        }
+        if (bias != 0) {
+            gOtbl[sortBuffer].org = ot;
+        }
+    next:
+        anims = anims->next;
+    }
+}
+#else
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", SortGs);
+#endif
 
 INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplayTMDSetupGTE);
 
