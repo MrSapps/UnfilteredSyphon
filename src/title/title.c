@@ -175,11 +175,16 @@ static struct {
 } titleBss;
 #define D_80144920 (titleBss.cardOps)
 /* Labels inside titleBss. The original addresses them as separate symbols (cse never relates
- * them: each gets its own lui/addiu), so the code uses externs; a matching C function needs
- * `.set D_80144948, titleBss+0x28` etc. (GNU) and psylink equates (_PSYQ), as chopper.c does. */
+ * them: each gets its own lui/addiu), so the code uses externs with `.set` labels (GNU) and
+ * psylink equates (_PSYQ), as chopper.c does. */
 extern TitlePolyF4 D_80144948[13];
 extern TitleLineF2 D_80144B1C[13][2];
 extern TitleLineF2 D_80144D8C[30];
+#ifndef _PSYQ
+__asm__(".set D_80144948, titleBss+0x28\n"
+        ".set D_80144B1C, titleBss+0x1FC\n"
+        ".set D_80144D8C, titleBss+0x46C\n");
+#endif
 #define D_8014505C (titleBss.highlight)
 
 /* commons: psylink lays them out after the .bss */
@@ -372,7 +377,6 @@ static void func_80144544(void);
         mTitleSelection[0].f += mTitleSelection[2].f;                                \
     }
 
-#ifdef NON_MATCHING
 /* Memory card outline: 14 pairs of outer/inner points (x | y << 16). */
 static const s32 D_80141610[14][2] = {
     { 0xFFD1007B, 0xFFD60072 }, { 0xFFD1FF85, 0xFFD6FF8A }, { 0xFFDAFF7C, 0xFFDCFF84 },
@@ -382,22 +386,10 @@ static const s32 D_80141610[14][2] = {
     { 0xFFDA0084, 0xFFDC0078 }, { 0xFFD1007B, 0xFFD60072 },
 };
 
-/* r6H: 104 (separate-symbol externs fixed the outline loop's base loads).
- * r7M: 69. The add loops index through local base pointers (`polys[i]`, `edges[i][0]`, `line++`)
- * so loop.c reduces them to pointer givs, while the rgbc stores stay `D_x[i].rgbc` (symbol+offset
- * giv, as in the original). Left: (1) `&D_80144B1C[i][1]`: orig hoists sym+24 (s7 = base+0x18),
- * ours keeps it in the loop ("move-insn savings 1 not desirable", 32 insns vs threshold ~30);
- * `&edges[i][1]` is worse (111). (2) i gets s1 (46 refs), orig s3; per-loop counters only 66.
- * (3) line init before the blez (orig: giv init after it). */
-/* r8R: first build loop regs: orig pt s6, poly s7, edge s2, line s5, counter s3 (the same s3 as the later
- * loops, so one i across them), pt+4 s4; ours puts n in s7 and line in s3. */
-/* r14AL: 69 -> 6. One `i` for the build loop too (s3); the first grid loop's x is a giv
- * (`x = i * 12 - 118`, init lands after the hoisted consts); the add loop's lines go through a
- * local base `lines[i]` (giv init after the blez). Left: (1) sym+24 for &D_80144B1C[i][1] is
- * still "move-insn savings 1 not desirable" (orig: edges reg + 0x18 hoisted, s7); (2) second
- * grid loop: orig puts `li 7` before `x = -37` (biv x: n_sets 2, no birthing boost; a giv x
- * fixes the order but loop.c then reduces x << 16). */
 /*
+ * Keys: one `i` for every loop; grid loop x values are givs of i; `e = D_80144B1C[i]` puts the
+ * symbol in a reg so cse rewrites &D_80144B1C[i][1] as e-base + 24 (a hoistable movable).
+ *
  * Builds (frame 0) and shows/hides the memory card drawing a piece at a time;
  * frame counts up to 12.
  */
@@ -435,8 +427,10 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
             line->type = 7;
             line++;
         }
-        for (i = 0, x = -37; i < 8; i++, x += 10) {
-            EGSDisplayBuildLineF(line, 0x461E28, XY(-124, x), XY(120, x));
+        for (i = 0; i < 8; i++) {
+            x = i * 10 - 37;
+            /* (u16)x: the and blocks loop.c's x << 16 giv, combine folds it away later */
+            EGSDisplayBuildLineF(line, 0x461E28, XY(-124, (u16)x), XY(120, (u16)x));
             line->type = 7;
             line++;
         }
@@ -451,7 +445,6 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
         nLines = ARRAY_COUNT(D_80144D8C) * frame / 12;
         {
             TitlePolyF4 *polys = D_80144948;
-            TitleLineF2 (*edges)[2] = D_80144B1C;
 
             for (i = 0; i < nPolys; i++) {
                 if (polys[i].next == NULL) {
@@ -459,9 +452,13 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
                 } else {
                     D_80144948[i].rgbc = 0x285A281E;
                 }
-                if (edges[i][0].next == NULL) {
-                    EGSDisplayAddPoly(gTextCamera, &edges[i][0]);
-                    EGSDisplayAddPoly(gTextCamera, &D_80144B1C[i][1]);
+                {
+                    TitleLineF2 *e = D_80144B1C[i];
+
+                    if (e->next == NULL) {
+                        EGSDisplayAddPoly(gTextCamera, e);
+                        EGSDisplayAddPoly(gTextCamera, &D_80144B1C[i][1]);
+                    }
                 }
             }
         }
@@ -514,9 +511,6 @@ u8 AnimateMemCardScreen(u8 on, s32 frame) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/title/nonmatchings/title", AnimateMemCardScreen);
-#endif
 
 static const char D_80141680[] = "bin/title.c";
 static const char D_8014168C[] = "BASCUS-94240SYPHON";
