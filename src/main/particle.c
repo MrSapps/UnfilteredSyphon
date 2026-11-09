@@ -647,7 +647,9 @@ void EGSDisplayAddPoly(void *display, void *prim);
  * r9V: confirmed -- `c = D_801100BC; <any store>; LineF(prim, c, ..)` gives a0, a2, lw a1, a3.
  * combine.c can_combine_p only refuses that merge for a store/call/volatile insn between the lw
  * and the a1 copy (mem_last_set / last_call_cuid) or if P stays live past the copy; the original
- * arm has none of those, so the color arg must come from some other shape. */
+ * arm has none of those, so the color arg must come from some other shape.
+ * r10Z (-dS): with the merged `lw a1` all four arg sets are prio 1 and the lw is queued a cycle (load
+ * latency) so a3 goes first, then a2 wins the LUID tie; no rank_for_schedule class difference applies. */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;

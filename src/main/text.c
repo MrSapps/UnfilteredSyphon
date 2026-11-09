@@ -1457,7 +1457,9 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * `u16 r = id & 0xFF; r |= (u8)sum << 8; s->serial = sum; return r;` (ior into (subreg:SI r) = not
  * birthing) gives lhu before sb, but fold drops the sum andi in HI and r's unknown nonzero_bits add
  * andi 0xFFFF (3). `s32 r = (u8)sum; r <<= 8; r |= (u16)(id & 0xFF);` keeps everything but lbu (2).
- * `u16 r = id; r &= 0xFF;` before the sb: combine re-targets the and next to the ior (after sb). */
+ * `u16 r = id; r &= 0xFF;` before the sb: combine re-targets the and next to the ior (after sb).
+ * r10Z: block-local `u16 lo = id & 0xFF` / `u8 lo = id` / `u16 hi, lo` before the sb, `id &= 0xFF`, `n = id & 0xFF`
+ * (reused s32), `(id & 0xFF) | ((s->serial = sum) << 8)` (spills sum): all 1-56, none puts the id and above the sb. */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;
