@@ -2018,23 +2018,9 @@ void NPCShoot(Gobj *obj) {
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: target copies points to a2 and keeps v in a0; the vz store goes through v (a0) instead of a %lo symbol */
-/* r2B: `v = &D; v->vz = ..` still folds (cse1 knows v == &D, so (plus v 8) becomes D+8); all-through-v is worse (31). */
-/* r4F (22 -> 19): the fold is cse2's (v = reg101 carries REG_EQUAL &D); a pre-loop `p = &D` written
- * through p->vx/vy and `v = p; v->vz` keeps the vz store on v.  Left: v must get a0 and points a2.
- * global.c: v (pri 4909) is allocated before points (4852) but pass 0 skips a0 because points
- * copy-prefers it (regs_someone_prefers), so v takes a2.  The original's v either prefers a0 too
- * or points lost its a0 preference (a0 conflict); renaming points via a copy changes nothing.
- * r4J: reusing the param itself as v (`PathPoint *points = pts; ... pts = NULL`) just moves the
- * a0 copy preference to `points` (cse turns the copies into points = a0) -> same 19.
- * prune_preferences only leaves a0 in v's regs_someone_prefers if v does not prefer a0 itself,
- * so the original's v must carry an a0 (full) preference, or points conflict with hard a0.
- * r7L: v as the reused param with `points = (PathPoint *)v` (with or without a dead `points = NULL`
- * init) still loses: combine folds (set P a0) into (set points P), so points keeps the a0 copy pref. */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
-    VECTOR32 *p = &D_8011D1F0;
+    VECTOR32 *p;
     NPC *npc = NPC_OF(obj);
     s32 i;
     s32 link;
@@ -2042,6 +2028,11 @@ VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     for (i = 0; i < 3; i++) {
         link = ((s8 *)points[npc->curPoint].links)[i];
         if (link >= 0 && ((points[link].flags & 0xF00) >> 8) == 1) {
+            /* the do-while(0) ends cse1's block so p->vy/v->vz stay register-based;
+             * loop.c then hoists p after the `== 1` constant */
+            do {
+                p = &D_8011D1F0;
+            } while (0);
             p->vx = points[link].x;
             p->vy = points[link].y;
             v = p;
@@ -2050,16 +2041,14 @@ VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
         }
     }
     if (v == NULL) {
-        v = &D_8011D1F0;
-        D_8011D1F0.vx = points[points[npc->curPoint].links[0]].x;
+        VECTOR32 *q = &D_8011D1F0; /* local-alloc gives q $a0, so v prefers $a0 */
+        q->vx = points[points[npc->curPoint].links[0]].x;
         D_8011D1F0.vy = points[points[npc->curPoint].links[0]].y;
         D_8011D1F0.vz = points[points[npc->curPoint].links[0]].z;
+        v = q;
     }
     return v;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", getPointActionVector);
-#endif
 
 s32 getPointActionLink(PathPoint *points, Gobj *obj) {
     s32 found = -1;
