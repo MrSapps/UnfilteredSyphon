@@ -153,7 +153,6 @@ void EGSFrameSetRotationParentYXZ(AnimFrame *frame, AnimVec *rot);
         (a) += 0x1000;         \
     }
 
-#ifdef NON_MATCHING
 /* local matrix converted to the y-up coordinate system */
 #define GET_MATRIX_YUP(in, out)                \
     {                                          \
@@ -380,6 +379,7 @@ static inline void AnimMatrixAngles(AnimMatrix *m, AnimVec *ang) {
         AIM_DELTA(bone, pos, delta, target);      \
         VECTOR_ANGLES(delta, ang);                \
     }
+#ifdef NON_MATCHING
 
 /*
  * Aim tracking for the simple (non-scratchpad) animation mode: turns the
@@ -1350,38 +1350,8 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
     }
 }
 
-#ifdef NON_MATCHING
-/*
- * Same length and stack layout; differs in global register allocation
- * (aiming/gobj/aimType land in s3/s1/s2 instead of s1/s2/s3) and a few
- * temporaries.
- * r4F: the s-reg order comes from the else-branch `bone` (refs 14, life ~104, pri 4077) beating
- * slot (pri 3049): bone takes s0, slot shares it.  The original has slot s0, bone s1, gobj s2,
- * aimType s3, aiming s1 -- i.e. slot allocated before bone and the two conflict.  `bone = NULL`
- * before `ang = slot->aimAngle` gives the conflict (gobj/aimType then land in s2/s3, 71 lines)
- * but bone still outranks slot; one function-scope bone for both branches is worse.
- * r4J: using the AnimRotMatrix/AnimMatrixToArm inlines for the else branch scores the same (77;
- * the stack layout still matches) and an inline for the world==NULL stores does not lower bone's
- * refs: integrate.c maps a user-variable pseudo argument straight onto the parameter, only
- * expressions / non-user regs get a fresh pseudo.  bone needs live > ~137 insns (now 103) or
- * fewer refs for slot (3063) to outrank it.
- * r7N (77 -> 28): `bone = NULL;` before `ang = slot->aimAngle;` (else branch; makes bone conflict
- * with slot) + `slot->aimAngle = ang;` inside 6 nested do-while(0) (flow.c weights that slot ref
- * x7: slot 23 refs, pri 4144 > bone 4077) gives slot s0, bone s1, gobj s2, aimType s3, aiming s1.
- * Left: local-alloc temps in the recoil/hit /10 divisions and the bone pointer, the ang sum order,
- * AND the frame: ours is 0xE0 vs 0xD0 (masked by score.py; vs.py shows it). The two `AnimVec rot`
- * blocks land at sp+0x68 instead of 0x48 (bonePos/delta slots of the aiming block are not reused),
- * which also shifts the else-branch m/ang/u; `unused` only papers over part of it.
- * r8S: double-nesting the spine rot block (`{ { AnimVec rot; ... } }`, r7 tell: an addr-taken
- * block local is preserved one level up) frees its slot so the head rot reuses 0x48 as in the
- * original (vs.py imm 48 -> 41). Frame still 0xE0: the original's else-branch u (48 bytes) sits
- * at 0x88..0xB8, so the then-branch must already have reached 0xB8 (ours stops at 0x98 after
- * diff) -- 32 more bytes of then-branch locals, or these slots are function-scope vars shared by
- * both branches (0x48 bonePos/rot/X, 0x58 delta+ang/m, 0x78 cur/ang, 0x88 diff/u).
- * r9V: recoil/hit /10: the original's product is not tied to the dying -k (mflo v1; quotient a0,
- * as in the head block where `rt * k` ties to rt). `k = -k; (k * rt) / 10` (k global, no local
- * tie) unties it but k then loses a0 (45); `rt * -k` and `-= (k * rt) / 10` are 45 too.
- */
+/* Aim/recoil/hit poses for the upper body. The nested do-while(0) around the aimAngle store is a
+ * global-alloc weight trick (slot outranks bone); `unused` pads the else-branch stack layout. */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
     AnimVec head;
@@ -1416,7 +1386,9 @@ void func_8007E650(AnimSlot *slot) {
             if (aimType == 1) {
                 k = -0x38;
             }
-            spine.vx += (-k * slot->recoilTime) / 10;
+            k = -k;
+            k = (k * slot->recoilTime) / 10;
+            spine.vx += k;
             if (aimType == 1) {
                 k = 0x4F;
                 head.vx += (slot->recoilTime * k) / 10;
@@ -1428,7 +1400,9 @@ void func_8007E650(AnimSlot *slot) {
             if (dot[0] > 0) {
                 k = 0xAA;
             }
-            spine.vx += (-k * slot->hitTime) / 10;
+            k = -k;
+            k = (k * slot->hitTime) / 10;
+            spine.vx += k;
         }
         if (aiming) {
             if (slot->unk14 == 2) {
@@ -1439,8 +1413,8 @@ void func_8007E650(AnimSlot *slot) {
                 AnimVec diff;
                 AnimFrame *bone;
 
-                cur = D_8001232C;
                 bone = NULL;
+                cur = D_8001232C;
                 if (aimType == 1) {
                     bone = gobj->anim->bones[11];
                 } else if (aimType == 2) {
@@ -1472,8 +1446,8 @@ void func_8007E650(AnimSlot *slot) {
                     spine.vx += -diff.vx / 2;
                 }
                 ang.vx = cur.vx + diff.vx;
-                ang.vz = cur.vz + diff.vz;
                 ang.vy = cur.vy + diff.vy;
+                ang.vz = cur.vz + diff.vz;
                 if (aimType == 1) {
                     ang.vx += 0x38;
                 }
@@ -1524,10 +1498,6 @@ void func_8007E650(AnimSlot *slot) {
             AnimVec unused; /* keeps m/ang at the original stack offsets */
             AnimMatrix m;
             AnimVec ang;
-            union {
-                AnimSVec r;
-                AnimVec c[3];
-            } u;
             AnimFrame *bone;
 
             bone = NULL;
@@ -1537,43 +1507,18 @@ void func_8007E650(AnimSlot *slot) {
             } else if (aimType == 2) {
                 bone = gobj->anim->bones[8];
             }
-            u.r.vx = -ang.vx;
-            u.r.vy = ang.vy;
-            u.r.vz = -ang.vz;
-            RotMatrixYXZ(&u.r, &m);
-            m.m[0][1] = -m.m[0][1];
-            m.m[1][0] = -m.m[1][0];
-            m.m[1][2] = -m.m[1][2];
-            m.m[2][1] = -m.m[2][1];
+            AnimRotMatrix(&ang, &m);
             if (aimType == 1) {
                 goto transpose;
             }
             if (aimType == 2) {
+                AnimVec x, y, z;
+
             transpose:
-                u.c[0].vx = m.m[0][0];
-                u.c[0].vy = m.m[1][0];
-                u.c[0].vz = m.m[2][0];
-                u.c[1].vx = m.m[0][1];
-                u.c[1].vy = m.m[1][1];
-                u.c[1].vz = m.m[2][1];
-                u.c[2].vx = m.m[0][2];
-                u.c[2].vy = m.m[1][2];
-                u.c[2].vz = m.m[2][2];
-                u.c[1].vx = -u.c[1].vx;
-                u.c[1].vy = -u.c[1].vy;
-                u.c[1].vz = -u.c[1].vz;
-                u.c[2].vx = -u.c[2].vx;
-                u.c[2].vy = -u.c[2].vy;
-                u.c[2].vz = -u.c[2].vz;
-                m.m[0][0] = u.c[1].vx;
-                m.m[1][0] = u.c[1].vy;
-                m.m[2][0] = u.c[1].vz;
-                m.m[0][1] = u.c[2].vx;
-                m.m[1][1] = u.c[2].vy;
-                m.m[2][1] = u.c[2].vz;
-                m.m[0][2] = u.c[0].vx;
-                m.m[1][2] = u.c[0].vy;
-                m.m[2][2] = u.c[0].vz;
+                GET_COLUMNS(&m, x, y, z);
+                NEGATE_VEC(y);
+                NEGATE_VEC(z);
+                SET_COLUMNS(&m, y, z, x);
             }
             if (bone->world == NULL) {
                 bone->local.m[0][0] = m.m[0][0];
@@ -1592,8 +1537,5 @@ void func_8007E650(AnimSlot *slot) {
         EGSFrameUpdateHierarchy(gobj->anim->frame);
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/animate", func_8007E650);
-#endif
 
 
