@@ -882,7 +882,11 @@ u16 func_80083F1C(TextWindow *w, char *str, s32 ticks, TextChar *sprites, s16 *x
  * any narrowing whose result reaches `lines` loses the extension in combine -> local temp in v0.
  * r8P: (u16)w->yAdjust keeps lbu+sll+sra but adds andi 0xFFFF; (s16) folds back to lb. s16 locals
  * here are non-promoted HI pseudos; an unused named label before `*y = h` is deleted, h stays local
- * (v0). The result needs a pseudo that local-alloc skips (2 deaths or live across a real block). */
+ * (v0). The result needs a pseudo that local-alloc skips (2 deaths or live across a real block).
+ * r9W: the narrowing is tree-level (expand emits HI plus/minus); assigning to a var narrows only with an
+ * explicit (s16) cast, and then the result goes temp -> var copy that combine folds into the sh (v0).
+ * A compound op on s16/u16 `lines` (global, a3) writes (subreg:SI lines) directly (subu a3 ok) but is
+ * not narrowed (lb + sll/sra 16 of lines, 4). Local HI vars with compound ops still fold to v0. */
 void iTextGetWindowOffsets(TextWindow *w, s16 *x, s16 *y) {
     EGSListNode *node;
     s32 lines;
@@ -1474,7 +1478,12 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * already put the id andi above the sb. Boosted insns (7f000001) always beat the prio-1 sb, so the
  * andi's dest must be set twice: combine always re-targets it to a fresh single-set temp (HI vars,
  * `id &=`, `t = id; t &= 0xFF`), and SImode 2-set forms (`x = (u16)(id & 0xFF)`, x reused) get the
- * right order (andi lbu sll sb or) but zero_extend:QI -> lbu (3). */
+ * right order (andi lbu sll sb or) but zero_extend:QI -> lbu (3).
+ * r9W (-dS): sched1 needs the id and's consumer to be a NON-boosted insn with a lower LUID than the sb:
+ * `u16 r = id & 0xFF; r |= (u8)sum << 8; s->serial = sum; return r;` (ior into (subreg:SI r) = not
+ * birthing) gives lhu before sb, but fold drops the sum andi in HI and r's unknown nonzero_bits add
+ * andi 0xFFFF (3). `s32 r = (u8)sum; r <<= 8; r |= (u16)(id & 0xFF);` keeps everything but lbu (2).
+ * `u16 r = id; r &= 0xFF;` before the sb: combine re-targets the and next to the ior (after sb). */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

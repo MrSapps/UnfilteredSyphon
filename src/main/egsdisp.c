@@ -2059,7 +2059,9 @@ void EGSDisplayPacketAreaFree(void) {
  * gCameraArray is pinned after the chain by the loop-note barrier) and parent's a0 copy is
  * scheduled later than in the original. r8Q: original sll v0/sra a1 means the sra dest was NOT tied to the
  * sll temp (local-alloc combine_regs refuses when the dest already has a qty or dies twice); reusing `id`/`err`
- * as the extension dest unties it (sll v0; sra v1) but costs 15-21 lines elsewhere. a1 also needs v1/a0 busy. */
+ * as the extension dest unties it (sll v0; sra v1) but costs 15-21 lines elsewhere. a1 also needs v1/a0 busy.
+ * r9W: the a0/a1 param copies are a never-scheduled leading run in sched1 (sched.c skips reg-source SETs
+ * up to the first note), so a0 can't stay live; moving gCameraID's increment after GetCam (v1 live) is 22. */
 static inline EGSCamera *GetCam(s32 i) { return &gCameraArray[(s16)i]; }
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
     s32 id;
