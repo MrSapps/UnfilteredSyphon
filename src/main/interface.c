@@ -3699,9 +3699,13 @@ extern IfaceLine *gMenuLines;  /* menu outline lines */
  * s0, i: hide path s1), activate block has its own v/poly/line, line++ steps in the sweep loops,
  * SET_SEMI_TRANS before unk04 (loop.c keeps the last DEST_ADDR giv: poly+4), mark loops index a
  * &gMenuLines[112] base, xl/ya and xr/yb share a/b (xr's andi 0xFFFF needs yb's negative sets).
- * Left: hide path i (pri 27840) beats line (26760) for s0 (orig: line s0, i s1); y gets a3 (pref 7)
- * because b conflicts with a3; rule loop's unk04 = 5 is hoisted (savings 2) where the original
- * leaves it in each arm; givs j*10 / j*10-180 derived from each other instead of one product. */
+ * r12AE: 141 -> 45. Duplicated delete+return instead of `goto hide` (jump2 cross-jumps the jal);
+ * nested do-while(0) on the default-case `line =` gives line s0 over i in the hide path;
+ * `j < 18 ? ... : ...` arm order makes the j*10-180 giv first (one product, copy);
+ * `line++, j++` puts line's iv class first (giv init/increment order).
+ * Left: y gets a3 / b v1 (orig the reverse) in the tick and rule loops; unk04 = 5 (two matched
+ * li 5, savings 2) is hoisted out of both loops where the original keeps it per arm; default
+ * case line[1]/line[2] tests fold to absolute addresses in cse2 (orig keeps line+0x18). */
 /* Menu view (mode 4): one step of the menu background sweep and its tick lines.
  * D_80118264[0..5] are the menu's highlight and pointer lines. */
 u8 func_80043B04(u8 active) {
@@ -3890,8 +3894,8 @@ u8 func_80043B04(u8 active) {
         D_80118264[2].xy0 = XY32(35, -94);
         D_80118264[2].xy1 = XY32(to * 78 / 30 + 35, -94);
 
-        for (j = tick0, line = &gMenuLines[60 + tick0]; j <= tick1; j++, line++) {
-            y = j >= 18 ? -10 - (j - 18) * 10 : j * 10 - 89;
+        for (j = tick0, line = &gMenuLines[60 + tick0]; j <= tick1; line++, j++) {
+            y = j < 18 ? j * 10 - 89 : -10 - (j - 18) * 10;
 
             if (j == 0) {
                 b = 31;
@@ -3933,8 +3937,8 @@ u8 func_80043B04(u8 active) {
                 }
             }
         }
-        for (j = rule0, line = &gMenuLines[86 + rule0]; j <= rule1; j++, line++) {
-            y = j >= 16 ? (j - 16) * 12 + 44 : j * 12 - 151;
+        for (j = rule0, line = &gMenuLines[86 + rule0]; j <= rule1; line++, j++) {
+            y = j < 16 ? j * 12 - 151 : (j - 16) * 12 + 44;
 
             if (j == 0) {
                 a = -20;
@@ -3996,7 +4000,8 @@ u8 func_80043B04(u8 active) {
             D_80118264[0].xy1 = line[j].xy1;
             return 1;
         }
-        goto hide;
+        EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[0]);
+        return 1;
     }
 
     poly = &gMenuPolys[to];
@@ -4064,7 +4069,11 @@ u8 func_80043B04(u8 active) {
         D_80118264[5].xy1 = XY32(-169, i + 51);
         break;
     default:
-        line = &D_80118264[3];
+        do {
+            do {
+                line = &D_80118264[3];
+            } while (0);
+        } while (0);
         if (line[0].link != 0) {
             EGSDisplayDeletePoly(gInterfaceWindow, line);
         }
@@ -4096,7 +4105,6 @@ u8 func_80043B04(u8 active) {
         EGSDisplayDeletePoly(gInterfaceWindow, &line[i]);
     }
     if (D_80118264[0].link != 0) {
-    hide:
         EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[0]);
     }
     return 1;
