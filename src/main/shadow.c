@@ -50,7 +50,8 @@ typedef struct ShadowFrame {
 /* View of GameObjectAnim */
 typedef struct ShadowAnim {
     /* 0x00 */ u8 unk00[8];
-    /* 0x08 */ u32 flags; /* 0x10: no shadow */
+    /* 0x08 */ u8 flags; /* 0x10: no shadow */
+    /* 0x09 */ u8 unk09[3];
     /* 0x0C */ ShadowFrame *frame;
     /* 0x10 */ ShadowModel *model;
     /* 0x14 */ u8 unk14[4];
@@ -257,43 +258,39 @@ static void func_800916CC(Shadow *shadow, ShadowVec *center, ShadowVec *points, 
 static const s32 D_80013360[4] = { 1, 1, 1, 0 }; /* starts every game TU's .rdata */
 
 #ifdef NON_MATCHING
-/* stack layout: the original overlays the bone tables with the half/centre vectors
- * r6H: orig frame is 0x168 (ours 0x1C0) and it reloads obj->anim at every use (no anim local;
- * `#define anim (obj->anim)` reproduces those loads, 139). 2.7.2 never reuses block-scope slots,
- * but inline-function frames are temp slots that later inlines reuse: the bone loop and the
- * half/centre math were probably static inlines. */
+/* r11AB: 137 -> 104. Block-scope locals ARE temp slots in 2.7.2 (expand_decl -> assign_stack_temp,
+ * freed + combined at block end; best fit / exact size reuse): {bones, radii, pos, inv, fwd, {side, up},
+ * loop{p, sv, lo, hi}} then {axisX, axisZ, extX, extZ, halfX, halfZ, centerX, centerZ} reproduces
+ * every original stack offset. anim->flags is a u8 (lbu), bones[i] read once into a local.
+ * Left: frame 0x160 vs 0x168 (orig saves s7): in the bone loop the original addresses
+ * bones/radii off a pseudo holding sp+0x10 (s7 = base, s2 = base + 16*i giv, 0x40($s7+4i),
+ * 0x58($s2)); ours folds the base into sp offsets. That pseudo looks like integrate.c's inline
+ * frame/param register (arrays reached through pointer params of an inlined helper?), but making
+ * the whole body one static inline still const-substituted it (101, frame 0x158). */
 u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count) {
-    ShadowAnim *anim;
     s32 i;
 
     if ((u32)(obj->npcState - 1) < 2) {
-        anim = obj->anim;
-        if ((anim->model->flags & 0x400000) && !(anim->flags & 0x10) && obj->state != NULL) {
+        if ((obj->anim->model->flags & 0x400000) && !(obj->anim->flags & 0x10) && obj->state != NULL) {
             ShadowVec bounds[2] = { { -32, 0, -16 }, { 32, 0, 16 } };
             ShadowMatrix rot;
+
+            {
             s32 bones[5] = { 0, 7, 1, 9, 3 };
             ShadowVec radii[5] = { { 32, 0, 16 }, { 12, 0, 16 }, { 12, 0, 16 }, { 3, 0, 3 }, { 3, 0, 3 } };
             ShadowVec pos;
             ShadowMatrix inv = { 0 };
             ShadowVec fwd;
-            ShadowVec halfX;
-            ShadowVec halfZ;
-            ShadowVec centerX;
-            ShadowVec centerZ;
-            ShadowVec extX;
-            ShadowVec extZ;
-            s32 hx;
-            s32 hz;
 
             pos = obj->state->pos;
             {
-                ShadowVec up = D_80013414;
                 ShadowVec side;
+                ShadowVec up = D_80013414;
 
-                fwd.vx = anim->frame->m[0][2];
-                fwd.vy = anim->frame->m[1][2];
+                fwd.vx = obj->anim->frame->m[0][2];
+                fwd.vy = obj->anim->frame->m[1][2];
                 fwd.vy = -fwd.vy;
-                fwd.vz = anim->frame->m[2][2];
+                fwd.vz = obj->anim->frame->m[2][2];
                 if (fwd.vy != 0) {
                     fwd.vy = 0;
                     GTEMath_VectorNormal(&fwd, &fwd);
@@ -322,10 +319,11 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                 ShadowSVec sv;
                 ShadowVec lo;
                 ShadowVec hi;
+                s32 b = bones[i];
 
-                p.vx = anim->frames[bones[i]]->t[0];
-                p.vy = anim->frames[bones[i]]->t[1];
-                p.vz = anim->frames[bones[i]]->t[2];
+                p.vx = obj->anim->frames[b]->t[0];
+                p.vy = obj->anim->frames[b]->t[1];
+                p.vz = obj->anim->frames[b]->t[2];
                 p.vy = -p.vy;
                 p.vx -= pos.vx;
                 p.vy -= pos.vy;
@@ -351,10 +349,20 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                     bounds[0].vz = lo.vz;
                 }
             }
+            }
             {
-                ShadowVec axisX;
-                ShadowVec axisZ;
+            ShadowVec axisX;
+            ShadowVec axisZ;
+            ShadowVec extX;
+            ShadowVec extZ;
+            ShadowVec halfX;
+            ShadowVec halfZ;
+            ShadowVec centerX;
+            ShadowVec centerZ;
+            s32 hx;
+            s32 hz;
 
+            {
                 axisX.vx = rot.m[0][0];
                 axisX.vy = rot.m[1][0];
                 axisX.vz = rot.m[2][0];
@@ -449,6 +457,7 @@ u8 func_800918C0(ShadowObj *obj, ShadowVec *center, ShadowVec *points, s32 count
                 points[i].vz += center->vz;
             }
             return 1;
+            }
         }
     }
     return 0;
