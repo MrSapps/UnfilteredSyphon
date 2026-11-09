@@ -1755,10 +1755,12 @@ static inline void iRadarScale(GOBJ_MATRIX *out) {
     IfaceSV3 r1;
     s16 v;
 
-    r0.vy = 0;
-    r0.vz = 0;
-    v = D_8010FFF0;
-    r0.vx = v;
+    do {
+        v = D_8010FFF0;
+        r0.vx = v;
+        r0.vy = 0;
+        r0.vz = 0;
+    } while (0);
     rows.r[0] = r0;
     r1.vx = 0;
     r1.vy = 0;
@@ -1768,6 +1770,10 @@ static inline void iRadarScale(GOBJ_MATRIX *out) {
     rows.r[2] = D_8010F8D8;
     *(IfaceRows *)tmp.m = rows;
     *(IfaceT3 *)tmp.t = D_80011D3C;
+    tmp = tmp;
+    tmp = tmp;
+    tmp = tmp;
+    tmp = tmp;
     *out = tmp;
 }
 
@@ -1782,24 +1788,22 @@ static inline s32 iXYAdd(s32 xy, s32 d) {
 }
 
 static inline void iFadeBox(IfacePoly4 *box) {
-    IfacePoly4 *p = box;
     IfaceColor cur;
     IfaceColor want;
 
-    cur.w = p->color.word;
+    cur.w = box->color.word;
     want.w = 0x503028;
     iStepColor(&cur, &want);
-    p->color.word = want.w | 0x28000000;
+    box->color.word = want.w | 0x28000000;
 }
 
-#ifdef NON_MATCHING
-/* (r6F, 32 -> 6) the m.t self-copy is `m.t[k] = m.t[k]` per element (a BLKmode struct self-copy is
- * dropped by sched.c as a no-op set after reload); box = &base[i] with base an invariant local makes
- * box a giv of i that absorbs the field address givs (orig s2); fade via inline (shared inline slot 0x60).
- * iXYAdd's delta is a plain s32 (non-struct scalar store, so sched keeps it behind the pt reads; -> 6).
- * Left: the t3 copy `p = box` sits before the color test in the orig (ours inside the fade block);
- * the lhu of D_8010FFF0 is hoisted above the prologue by sched2 (struct-cast loads don't help);
- * one sh $0 order in the m.m zeroing. */
+/* Matching notes: m.t[k] = m.t[k] and tmp = tmp are no-op copies that only exist for the
+ * scheduler. sched.c flushes its pending memory lists at the first store after 32 pending
+ * references; the four BLKmode tmp self-copies (dropped after reload) make that flush land on
+ * the m.t[2] store, so the heading-only zero stores follow it. The do/while(0) in iRadarScale
+ * puts loop notes (full sched barriers) on the D_8010FFF0 load (keeps it below the prologue
+ * saves) and on the rows.r[0] copy (keeps the D_8010FFF4 load after it). p = box before the
+ * link test puts the copy in the beqz delay slot. */
 /* Radar update: NPC boxes and blips (with the danger level they add), the target box and
  * the bomb pointer, all in the player's frame scaled to the radar. */
 void func_8003D76C(void) {
@@ -1845,9 +1849,11 @@ void func_8003D76C(void) {
         box = &base[i];
         id = D_80117B2C[i];
         if (id == -1) {
+            IfacePoly4 *p = box;
+
             if (box->link != 0) {
                 if (box->color.word != 0x28503028) {
-                    iFadeBox(box);
+                    iFadeBox(p);
                 } else {
                     EGSDisplayDeletePoly(gInterfaceWindow, box);
                 }
@@ -1908,9 +1914,6 @@ void func_8003D76C(void) {
     }
     func_8003C3F4();
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_8003D76C);
-#endif
 
 /* Grows or shrinks weapon-select bar idx by 8 (hides it when shrunk to nothing); returns 1 when
  * done. Block-local j = idx + 1 keeps (idx+1)*24 from folding into idx*24+24; the hide path
