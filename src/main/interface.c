@@ -1971,7 +1971,13 @@ static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
     n = MIN(n, (cur) + 5)
 
 #ifdef NON_MATCHING
-/* regalloc: health lands in s0 not s1; 6 insns longer overall */
+/* (r6F, 105 -> 85) armor/health read through block temps (a s16 field in s32 armor kept the raw
+ * value in s2). Left: the orig's meter edges use a base reg (lui a1 = &D_801175CC[k].xy[0], stores
+ * at 0x24(a1)/8(a0)) and lhu (HImode adds): cse1 makes those (plus P k) addresses from
+ * use_related_value, but cse2's find_best_addr folds (plus P k) back to constants whenever P's
+ * constant is known in its extended block (a do-while(0) macro keeps only REG addresses); so the
+ * orig's base was probably not cse-known (set before an if/else join?). Also health s0/s1 swap and
+ * the danger clamp branch layout. Armor edge: base/dst pointers set before IFACE_STEP keep reg addresses. */
 /* Status meters: armor/health, target health and danger, each with its caption. The bars
  * move at most 5 pixels a frame toward their value; an empty armor bar or a full danger
  * bar pulses. */
@@ -1992,10 +1998,14 @@ void func_8003E13C(void) {
     if (D_80011C10[D_8010F8AC] == 0) {
         GameObjectHealth *h = gObjPlayer->healthInfo;
 
-        armor = h->armor;
-        armor /= 12;
-        health = h->health;
-        health /= 3;
+        {
+            s32 a = h->armor;
+            armor = a / 12;
+        }
+        {
+            s32 b = h->health;
+            health = b / 3;
+        }
         if (armor == 0) {
             from.w = 0xFF;
             to.w = 0;
@@ -2034,14 +2044,19 @@ void func_8003E13C(void) {
     func_8003DF74(0, health > 0);
     if (armor != armorShown) {
         s32 n;
-        s32 top;
-        s32 bottom;
+        s16 top;
+        s16 bottom;
+        IfacePoint *xy = D_801175CC[0].xy;
+        IfacePoint *a = &D_801175CC[1].xy[0];
+        IfacePoint *b = &D_801175CC[0].xy[1];
 
         IFACE_STEP(n, armor, armorShown);
-        top = D_801175CC[0].xy[0].vx + n;
-        bottom = D_801175CC[0].xy[2].vx + n;
-        iMeterEdge(&D_801175CC[1].xy[0], top, bottom);
-        iMeterEdge(&D_801175CC[0].xy[1], top, bottom);
+        top = xy[0].vx + n;
+        bottom = xy[2].vx + n;
+        a[0].vx = top;
+        b[0].vx = top;
+        a[2].vx = bottom;
+        b[2].vx = bottom;
         health = MAX(health, n);
     } else {
         health = MAX(health, armor);
