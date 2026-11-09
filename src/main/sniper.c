@@ -650,15 +650,17 @@ __asm__(
  * r7L: the original stores at.vy twice (t[1], then -vy after the t[2] load): `at.vz = ..;
  * at.vy = -at.vy;` gives that shape but swaps the v0/v1 temps (31). The arg order is a sched1
  * LUID tie (a1/a2 both priority 1, the later-emitted a2 lands next to the jal).
- * r8S (28 -> 11): damage/radius are the weapon info's damageNear/damageFar bitfields (as in
+ * r8S (28 -> 9): damage/radius are the weapon info's damageNear/damageFar bitfields (as in
  * target.c; each arm ends in andi, jump2 cross-jumps it to the join, radius gets a2);
  * ParticleGrenadeLauncher takes 2 args and ParticleTracer 3 (damage.c protos; the tracer's
  * a2=0 is what reorg puts in the bne slot); 2 nested do-while(0) on `who` fix fx/who.
  * Left: (1) the at.vy/at.vz load temps: `at.vz = ..; at.vy = -at.vy` (or a y local) gives the
  * original's two at.vy stores but local-alloc gives the vz chain temps (pri 2.0) v0 before vy
- * (0.67); (2) the original keeps `sll` in the far arm of the kind==1 dist test (reorg
- * try_merge_delay_insns did not run there: own_thread_p false?); (3) DamageTerrain's stack
- * arg store is last in the original (ours first: anti-dep class 2 + lowest LUID in sched1). */
+ * (0.67); (2) DamageTerrain's stack arg store is last in the original (ours first: anti-dep
+ * class 2 + lowest LUID in sched1).
+ * Bones without 1/0x6000/0x8000 take damageFar: the original's `beqz .., far arm` is jump2
+ * cross-jumping that arm with the dist test's far arm (which is also why that arm keeps its
+ * own `sll`: two jumps to the label, so reorg's own_thread_p fails). */
 void SniperShoot(void) {
     VECTOR32 from;
     VECTOR32 at;
@@ -706,11 +708,11 @@ void SniperShoot(void) {
                                 if (rt->id == gPlayerOffset || (GOBJ_INFO_W(rt->id).flags & 0x4000)) {
                                     damage = -damage;
                                 }
-                            } else {
+                            } else if (bones & 0x8000) {
                                 damage = 0;
-                                if (bones & 0x8000) {
-                                    ParticleHitWall(gPlayerOffset, &D_801156D8, &D_801156E8, 0xC0FFFF);
-                                }
+                                ParticleHitWall(gPlayerOffset, &D_801156D8, &D_801156E8, 0xC0FFFF);
+                            } else {
+                                damage = WDMG(weapon).damageFar;
                             }
                         } else {
                             damage = 0;
