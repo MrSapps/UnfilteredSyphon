@@ -386,16 +386,21 @@ void EGSDisplayAnimateHMD(EGSHMD *hmd);
 #define SORT_MAX 6
 
 #ifdef NON_MATCHING
-/* register allocation: different pseudos spill and the reload registers are s0/s5/s7 instead of s3/s5/s7 */
+/* register allocation: different pseudos spill and the reload registers are s0/s5/s7 instead of s3/s5/s7.
+ * r11AC: the original's spill slots run 0x38 camera, 0x40 sortBuffer, 0x48 gabe, 0x50 count,
+ * 0x58 index, 0x60 fogNear, 0x68 fogFar, 0x70 fogOn, 0x78 savedPacket, 0x80 infrared,
+ * 0x88 sniffer, 0x90 snifferModel (pseudo = declaration order, now matched); fogRange lives in fp
+ * and image in s6 there, ours spills fogRange (frame 0x120 vs 0x118). fogNear's initialiser goes
+ * through a separate pseudo (andi -> 0xD8 slot -> copied to 0x60). */
 void SortHMDs(HMDCamera *camera, EGSListNode *anims, s32 sortBuffer)
 {
     HMDSortAnim *sorted[SORT_MAX];
     s16 depths[SORT_MAX];
     s32 slot = 0;
-    s32 count = 0;
-    s32 fogNear = gTerrainFog & 0xFFFF;
     HMDSortAnim *gabe = gPointSourceArray[0].anim;
+    s32 count = 0;
     s32 index = camera->index;
+    s32 fogNear = gTerrainFog & 0xFFFF;
     s32 fogFar;
     s32 fogRange;
     s32 fogOn;
