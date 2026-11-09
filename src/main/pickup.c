@@ -233,7 +233,7 @@ __asm__(".set D_80121978, D_80121978_bss\n"
         ".set D_80121996, D_80121978_bss+0x1E\n"
         ".set D_801219B0, D_80121978_bss+0x38\n"
         ".set D_801219E8, D_80121978_bss+0x70\n"
-        /* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes its own array from this
+        /* snddrv's SoundSeqCallback indexes its own array from this
          * folded address */
         ".globl D_801101C8\n");
 #endif

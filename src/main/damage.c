@@ -19,7 +19,7 @@ static s32 D_80110174;
 static s32 D_80110178; /* cos 65 deg: front/back limits */
 static s32 D_8011017C;
 #ifndef _PSYQ
-/* snddrv's SoundSeqCallback (INCLUDE_ASM) indexes one of its own arrays from these
+/* snddrv's SoundSeqCallback indexes one of its own arrays from these
  * folded addresses, so the labels have to stay visible to it */
 __asm__(".globl D_80110170\n.globl D_80110178\n.globl D_80110180\n.globl D_80110184\n");
 #endif
