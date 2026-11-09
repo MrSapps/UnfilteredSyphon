@@ -1650,14 +1650,14 @@ s32 NPCPickNextPoint(Gobj *obj, PathPoint *path, s32 cur) {
     return 0;
 }
 
-void NPCRethinkNextPoint(Gobj *obj) {
+void NPCRethinkNextPoint(Gobj *obj, PathPoint *path) {
     NPC *npc = NPC_OF(obj);
     u8 next;
     u8 cur;
 
     if (!(npc->flags & 0x408)) {
         if (!(npc->flags & 0x800)) {
-            if (NPCPointIQ(obj) == npc->nextPoint) {
+            if (NPCPointIQ(obj, path) == npc->nextPoint) {
                 next = npc->nextPoint;
                 cur = npc->curPoint;
                 npc->unk49 = 0xFF;
@@ -2731,7 +2731,7 @@ s32 NPCFaceDirection(Gobj *obj, VECTOR32 *dir) {
  * r8S (36 -> 8): the targetId >= 0 arms each end in their own `v = &D_8011D210` +
  * GTEMath_VectorNormal(v, v) (block-local v gets a0 via local-alloc suggestions; jump2
  * cross-jumps the identical tails), and the mode-5 path calls MovementGobjRegister... in both
- * arms (&D_8011D210 / NULL); NPCRethinkNextPoint is called with (obj, D_80110134);
+ * arms (&D_8011D210 / NULL); NPCRethinkNextPoint really takes (obj, path) (passes a1 on to NPCPointIQ);
  * `kind & 0x400` instead of re-reading npc->flags; npc->dir.vy = 0 after .vx.
  * Left (8): npc->unk2C is loaded before the script address in the original. Its load is
  * sched1-birthing-boosted (dest set once) so it lands late; `s16 c = npc->unk2C; ... c--;`
@@ -2864,7 +2864,7 @@ void NPCIQEveryFrame(Gobj *obj) {
                     }
                 } else {
                     if (kind & 0x4000000) {
-                        ((void (*)(Gobj *, PathPoint *))NPCRethinkNextPoint)(obj, D_80110134);
+                        NPCRethinkNextPoint(obj, D_80110134);
                         npc->flags &= ~0x4000000;
                     }
                     k = (D_80110134[npc->curPoint].flags & 0xF00) >> 8;
