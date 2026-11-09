@@ -1459,7 +1459,13 @@ void TextSetStringIntensity(u8 id, u8 r, u8 g, u8 b) {
  * andi 0xFFFF (3). `s32 r = (u8)sum; r <<= 8; r |= (u16)(id & 0xFF);` keeps everything but lbu (2).
  * `u16 r = id; r &= 0xFF;` before the sb: combine re-targets the and next to the ior (after sb).
  * r10Z: block-local `u16 lo = id & 0xFF` / `u8 lo = id` / `u16 hi, lo` before the sb, `id &= 0xFF`, `n = id & 0xFF`
- * (reused s32), `(id & 0xFF) | ((s->serial = sum) << 8)` (spills sum): all 1-56, none puts the id and above the sb. */
+ * (reused s32), `(id & 0xFF) | ((s->serial = sum) << 8)` (spills sum): all 1-56, none puts the id and above the sb.
+ * r14AK (-dR): prototypes match (callers, func_80082CE8). In sched2 the sb gets an anti dep on the insn
+ * that used the spilled id (and its reload), so the original's lhu-before-sb / andi-after-sb cannot
+ * come from a reload attached to the andi: the source must have a separate copy t = id (t in a3)
+ * that sched1 puts before the sb (t not birthing) and that combine does NOT fold into the andi.
+ * Every copy tried (n/i/x/c = id, u16 t reused from the TEXT_GET_STRING index) folds -> lbu (2-54).
+ * Single return via `goto end` with s32 ret = (u16)(...) before the sb gives andi lhu sll andi or sb (1). */
 /* Swap in new text for a live string, keeping its position; returns the new id. */
 u16 TextReplaceString(u16 id, char *str) {
     TextString *s;

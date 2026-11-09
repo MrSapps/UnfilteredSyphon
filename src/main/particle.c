@@ -649,7 +649,14 @@ void EGSDisplayAddPoly(void *display, void *prim);
  * and the a1 copy (mem_last_set / last_call_cuid) or if P stays live past the copy; the original
  * arm has none of those, so the color arg must come from some other shape.
  * r10Z (-dS): with the merged `lw a1` all four arg sets are prio 1 and the lw is queued a cycle (load
- * latency) so a3 goes first, then a2 wins the LUID tie; no rank_for_schedule class difference applies. */
+ * latency) so a3 goes first, then a2 wins the LUID tie; no rank_for_schedule class difference applies.
+ * r14AK: prototypes match egsdisp.c. The order needs P (expand_call's copy_to_mode_reg of the color;
+ * preserve_subexpressions_p is always 1 at -O2) to survive combine: then a1=P gets prio 2 (load
+ * latency) and lw P the birthing boost -> a0 a2 lw a3. combine keeps P only with a store/call/
+ * volatile insn between or P used before/after the a1 copy (LOG_LINK goes to P's first use).
+ * Still 1: inline helpers (color / xy / prim params), K&R, varargs and s16 prototypes, `c = ..`
+ * block local, `prim = p->prim` inside the arg, basic `asm("")` in an arg (ASM_INPUT is not
+ * volatile_insn_p), `asm volatile("" : :)` (keeps P but is a sched barrier: lw hoists above). */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -1282,7 +1289,10 @@ typedef struct FootAnimView {
  * `info` local) -> the original's offset+base `addu` and temps. With the asm barrier above this is
  * 21: only steps s0 (orig s5), light9 s5 (s6), &D_80118FD0 s6 (s7) left. In ours prim (s0) and
  * steps share s0 without conflicting; in the original steps avoids s0/s1, so it must conflict with
- * the prim and &D_80118FD0/p pseudos (longer steps life or earlier prim set at global time). */
+ * the prim and &D_80118FD0/p pseudos (longer steps life or earlier prim set at global time).
+ * r14AK: prototype audit clean (return types differ only where unused). Calls do not end sched blocks,
+ * so the sra can only sit after rand #2 via an anti dep on that call: sched.c adds one only when the
+ * set pseudo has reg_n_calls_crossed == 0 (impossible here, it lives to the end) or a barrier. */
 /* A tracer line from gobj's gun to target (every few NPC shots), and an ejected shell for the player. */
 void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     void *display;
@@ -2286,7 +2296,8 @@ void EGSDisplaySetFlashTime(s32 ticks);
  * flag, pos.vy, pos.vz += (vel loads kept in x,y,z order): best is 4 (this one), then 5.
  * `vx`/`t` locals so the >>2 is emitted before the vel.vx store still get both the sra (single-set
  * t: birthing boost) and the addu glued to the pos.vx store (5-12); a user var x for pos.vx
- * (x += t; two sets, no boost) is 21. */
+ * (x += t; two sets, no boost) is 21.
+ * r14AK: prototype audit clean (iParticleExplosion is unprototyped but only gets int/pointer args). */
 void ParticleFireWaveDeath(void) {
     VECTOR32 pos;
     VECTOR32 vel;
