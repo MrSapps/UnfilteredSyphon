@@ -3433,7 +3433,7 @@ void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
     s32 v;
     s32 i;
     u8 wide;
-    s16 angle;
+    s32 angle;
     s32 sum;
     s32 sumG;
     s32 sumB;
@@ -3671,14 +3671,14 @@ void SortGs(EGSCamera *camera, EGSListNode *anims, s32 sortBuffer) {
             } else if (fb & 0x20) {
                 bias = -24;
             } else {
-                d = 24;
+                v = 24;
                 if (att == gabe) {
-                    d = 12;
+                    v = 12;
                 }
                 if (att->side == 1) {
-                    bias = d;
+                    bias = v;
                 } else if (att->side == -1) {
-                    bias = -d;
+                    bias = -v;
                 }
                 if (z < 60 && bias < 0) {
                     bias = 0;
