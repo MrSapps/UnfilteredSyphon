@@ -3693,19 +3693,14 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_80042DA4);
 extern IfacePoly4 *gMenuPolys; /* menu background quads, [30] is the backdrop */
 extern IfaceLine *gMenuLines;  /* menu outline lines */
 
-#ifdef NON_MATCHING
-/* r11AC: 375 -> 141 masked diff lines. Shape that the original's registers prove: one lvl var
- * for both *level reads (s0), separate counters (k: entry loops s1, block-local j: activate path
- * s0, i: hide path s1), activate block has its own v/poly/line, line++ steps in the sweep loops,
- * SET_SEMI_TRANS before unk04 (loop.c keeps the last DEST_ADDR giv: poly+4), mark loops index a
- * &gMenuLines[112] base, xl/ya and xr/yb share a/b (xr's andi 0xFFFF needs yb's negative sets).
- * r12AE: 141 -> 45. Duplicated delete+return instead of `goto hide` (jump2 cross-jumps the jal);
- * nested do-while(0) on the default-case `line =` gives line s0 over i in the hide path;
- * `j < 18 ? ... : ...` arm order makes the j*10-180 giv first (one product, copy);
- * `line++, j++` puts line's iv class first (giv init/increment order).
- * Left: y gets a3 / b v1 (orig the reverse) in the tick and rule loops; unk04 = 5 (two matched
- * li 5, savings 2) is hoisted out of both loops where the original keeps it per arm; default
- * case line[1]/line[2] tests fold to absolute addresses in cse2 (orig keeps line+0x18). */
+/* Delete a line from the display if it is linked. Inlined, its parameter copy keeps cse2
+ * from folding line+0x18/line+0x30 into absolute addresses. */
+static inline void iHideLine(IfaceLine *l) {
+    if (l->link != 0) {
+        EGSDisplayDeletePoly(gInterfaceWindow, l);
+    }
+}
+
 /* Menu view (mode 4): one step of the menu background sweep and its tick lines.
  * D_80118264[0..5] are the menu's highlight and pointer lines. */
 u8 func_80043B04(u8 active) {
@@ -3978,12 +3973,16 @@ u8 func_80043B04(u8 active) {
             }
             if (j == rule1) {
                 if (rule1 < 26) {
-                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(y, a), XY32(y, b));
+                    u16 x = y;
+
+                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(x, a), XY32(x, b));
                     line->unk04 = 5;
                     EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             } else {
-                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(y, a), XY32(y, b));
+                u16 x = y;
+
+                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(x, a), XY32(x, b));
                 SET_SEMI_TRANS(&line->tag);
                 line->unk04 = 5;
                 if (line->link == 0) {
@@ -3998,9 +3997,9 @@ u8 func_80043B04(u8 active) {
         if (j < 12) {
             D_80118264[0].xy0 = line[j].xy0;
             D_80118264[0].xy1 = line[j].xy1;
-            return 1;
+        } else {
+            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[0]);
         }
-        EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[0]);
         return 1;
     }
 
@@ -4069,20 +4068,10 @@ u8 func_80043B04(u8 active) {
         D_80118264[5].xy1 = XY32(-169, i + 51);
         break;
     default:
-        do {
-            do {
-                line = &D_80118264[3];
-            } while (0);
-        } while (0);
-        if (line[0].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, line);
-        }
-        if (line[1].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &line[1]);
-        }
-        if (line[2].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &line[2]);
-        }
+        line = &D_80118264[3];
+        iHideLine(line);
+        iHideLine(&line[1]);
+        iHideLine(&line[2]);
         break;
     }
     i = to * 78 / 30;
@@ -4109,9 +4098,6 @@ u8 func_80043B04(u8 active) {
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", func_80043B04);
-#endif
 
 extern char *gStringSnifferSpareText;
 extern char *D_80107828;
