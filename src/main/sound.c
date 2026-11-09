@@ -661,28 +661,6 @@ void SoundPlayXACASAnimCB(s32 id, s32 event) {
     }
 }
 
-#ifdef NON_MATCHING
-/* cc1 folds the -1 into the note before adding rand() % 3; the original adds (rand() % 3 - 1)
- * to the sign-extended note. Best so far (1 line, no prototype change): `s32 note` (raw result
- * kept across rand), `d = rand() % 3 - 1;` as its own statement, then pass `n = (s16)note + d`
- * (s32 n) -- the ext then lands after rand like the original, but sched1 places the ext pair
- * after the div's `sra a2,v0,31` (the original has it before). Narrowing forms ((s16)(x + d),
- * s16 n += d) drop the ext entirely; `n = (s16)note` before rand puts the ext before the call.
- * r4C (sched1 -dS): the ext pair's dest is set once, so birthing_insn_p boosts it to max
- * priority and the backward scheduler puts it last (after the div); with n set twice
- * (`n = (s16)note; n += d;`) it drops to priority 2 and ties with the a1/a3 arg moves,
- * which win on LUID, so it lands before them.  The original needs the ext between the arg
- * moves and the div: unboosted but with priority > 2 (i.e. depending on something after
- * the rand call).
- * r4F (-dS): with `n = (s16)note; n += d` the ready list after the div's boosted chain is
- * {a3=0, a1, lw a0, sw 0(sp), ext-sra(prio 2)}; the ext loses on LUID.  The original's s0 holds
- * note through the whole sequence (in-place sll/sra s0, addu s0,s0,v0), i.e. one variable;
- * `note = (s16)note; note += d;` gives the in-place ext but note then drops to s5 and the ext
- * lands right after the mult (27 lines).
- * r7N (2 lines): `n = rand() % 3 - 1; m = note; m += n;` gives the in-place s0 ext and the
- * addu into s0; left: the ext pair sits before the a1/a3 arg moves. In sched1 all four have
- * priority 2 (ext's only producer chain is the s0 copy) and the ext has the lower LUID, so the
- * backward scheduler places it first; the original needs it to depend on something after rand. */
 void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 id = song + variant;
     s16 note;
@@ -690,16 +668,18 @@ void SysPlayWpnSnd(s32 type, s32 song, s32 src, s32 variant) {
     s32 m;
 
     note = GetSoundNote(D_8011EB08.blocks[type], id, -1);
-    n = rand() % 3 - 1;
+    /* m = note between rand() and the % 3: the (single-set, birthing-boosted) ext pair gets a
+     * LUID below the div's sra, so sched1 puts it right after the a1/a3 arg moves */
+    n = rand();
     m = note;
-    m += n;
-    SetSoundNote(D_8011EB08.blocks[type], id, m, 0, 0);
+    {
+        s32 d = n % 3 - 1;
+
+        SetSoundNote(D_8011EB08.blocks[type], id, m + d, 0, 0);
+    }
     SysPlaySong(type, id, src, 0);
     SetSoundNote(D_8011EB08.blocks[type], id, -1, 0, 0);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/sound", SysPlayWpnSnd);
-#endif
 
 void SysSetMusicExciteLevel(u8 level) {
     SetGlobalExcite(level);
