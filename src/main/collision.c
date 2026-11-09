@@ -190,6 +190,8 @@ u8 JoystickGobjIsInPureStrafe(Gobj *gobj);
 
 s32 EGSMathFIX_VectorClipToLength(VECTOR32 *v, s32 length, VECTOR32 *out);
 #define HALVE(x) ((x) >= 0 ? (x) >> 1 : -(-(x) >> 1))
+/* libgte.h */
+#define copyVector(v0, v1) (v0)->vx = (v1)->vx, (v0)->vy = (v1)->vy, (v0)->vz = (v1)->vz
 
 
 /* MIN(m, 0) - r, written so that it does not fold to a MIN_EXPR */
@@ -642,8 +644,6 @@ u8 func_8006C7E8(CollBox *box, CollPoly *poly) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* regalloc/caller-saves around the probe calls; edge-length block scheduling */
 void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **records, s32 *count) {
     VECTOR32 lo;
     VECTOR32 hi;
@@ -665,7 +665,6 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
     s32 r;
     s32 top;
     s32 bottom;
-    s32 limit;
     s32 pass;
     s32 n;
     s32 i;
@@ -691,13 +690,17 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
     }
     k = det->unk14 * 0x4CC;
     av = IABS(k);
-    r = MAX(MAX(av, 0x6660), 0x4CC0);
+    r = MAXF(MAX(av, 0x6660), 0x4CC0);
     hi = det->unk13C;
     lo = hi;
     lo.vy -= det->unk14;
     hi.vy += det->unk14 + det->unk18;
-    mv = det->unk14C;
-    func_8006C510(&det->unk13C, det->unk14, lo.vy, hi.vy, &mv, r, r, &box);
+    {
+        /* the radius argument is loaded before the move copy */
+        s32 t = det->unk14;
+        mv = det->unk14C;
+        func_8006C510(&det->unk13C, t, lo.vy, hi.vy, &mv, r, r, &box);
+    }
     rad = det->unk14;
     lowPos = lo;
     lowPos.vy += rad;
@@ -726,7 +729,6 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
             }
         }
     }
-    limit = top - 12;
     for (pass = 0; pass < 2U; pass++) {
         for (face = obj->anim->faceList; face != NULL; face = face->next) {
             poly = &face->poly;
@@ -737,8 +739,8 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
                 probe.hit = 0;
                 if (pass == 1) {
                     if ((face->poly.flags & 8) && slope >= -0x7FF &&
-                        (slope >= 0xB50 || v[0]->vy >= limit || v[1]->vy >= limit || v[2]->vy >= limit ||
-                         (vcount == 4 && v[3]->vy >= limit))) {
+                        (slope >= 0xB50 || v[0]->vy >= top - 12 || v[1]->vy >= top - 12 || v[2]->vy >= top - 12 ||
+                         (vcount == 4 && v[3]->vy >= top - 12))) {
                         probe.poly = poly;
                         probe.pos = lowPos;
                         probe.move = det->unk14C;
@@ -755,15 +757,12 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
                 if (probe.hit == 1) {
                     if (slope > 0xB50) {
                         for (i = 0; i < vcount; i++) {
-                            j = 0;
-                            if (i != vcount - 1) {
-                                j = i + 1;
-                            }
+                            j = (i != vcount - 1) ? i + 1 : 0;
                             d.vx = v[j]->vx - v[i]->vx;
-                            a.vx = IABS(d.vx);
                             d.vy = v[j]->vy - v[i]->vy;
-                            a.vy = IABS(d.vy);
+                            a.vx = IABS(d.vx);
                             d.vz = v[j]->vz - v[i]->vz;
+                            a.vy = IABS(d.vy);
                             a.vz = IABS(d.vz);
                             if (a.vx < a.vy) {
                                 s32 t = a.vx;
@@ -814,15 +813,11 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
                             onWall = 1;
                         }
                         if (collect == 1 && *count < 15) {
-                            records[*count]->count = face->poly.count;
-                            for (i = 0; i < face->poly.count; i++) {
-                                records[*count]->verts[i].vx = face->poly.verts[i]->vx;
-                                records[*count]->verts[i].vy = face->poly.verts[i]->vy;
-                                records[*count]->verts[i].vz = face->poly.verts[i]->vz;
+                            records[*count]->count = poly->count;
+                            for (j = 0; j < poly->count; j++) {
+                                copyVector(&records[*count]->verts[j], poly->verts[j]);
                             }
-                            records[*count]->normal.vx = face->poly.normal->vx;
-                            records[*count]->normal.vy = face->poly.normal->vy;
-                            records[*count]->normal.vz = face->poly.normal->vz;
+                            copyVector(&records[*count]->normal, poly->normal);
                             records[*count]->kind = 1;
                             (*count)++;
                         }
@@ -843,7 +838,7 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
         det->unk15C.vz += sum.vz;
     }
     for (face = obj->anim->faceList; face != NULL; face = face->next) {
-        face->poly.flags &= ~0xE;
+        *(s16 *)&face->poly.flags &= ~0xE; /* signed HImode and: li -15 hoisted, not andi 0xFFF1 */
     }
     if (onSteep) {
         CMOVE(obj)->collFlags |= 0x100000;
@@ -855,9 +850,6 @@ void func_8006CB88(Gobj *obj, CollisionDetector *det, s32 arg2, CollRecord **rec
         CMOVE(obj)->collFlags |= 2;
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/collision", func_8006CB88);
-#endif
 
 s32 func_8006D9F4(Gobj *obj) {
     VECTOR32 pos;
