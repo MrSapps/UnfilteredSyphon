@@ -620,8 +620,9 @@ static void func_801420D8(SubwayRuntime *rt, s16 by) {
 #define INFO_FLAGS(info) (*(u32 *)&(info)->flags24)
 
 #ifdef NON_MATCHING
-/* attacker id lands in $v0 (original $v1) computing its gameObjectsInfo entry; the weapon 6..7 range test:
- * original is addiu/andi 0xFFFF/sltiu. Every unsigned form ((u16)(w-6) < 2, w==6||w==7, range checks, u32/s32/s16
+/* r9X: attacker id fixed (8 -> 1): `type` is an s32 reused for attacker->id (global pseudo, gets $v1 like the
+ * original; the s16 GOBJ_TYPE result goes through an s16 temp so the arms stay lhu + sll at the join).
+ * Only left: the weapon 6..7 range test, original is addiu/andi 0xFFFF/sltiu. Every unsigned form ((u16)(w-6) < 2, w==6||w==7, range checks, u32/s32/s16
  * weapon) loses the andi: combine folds zero_extend(subreg:HI(plus)) into the ltu. A u16 temp set in an earlier
  * block keeps andi+sltiu but lands in $a0; the signed form here keeps andi but gives slti.
  * r5C: combine.c simplify_comparison rewrites LTU 2 -> LEU 1, then (unsigned) narrows ZERO_EXTEND/AND 0xFFFF to
@@ -629,18 +630,24 @@ static void func_801420D8(SubwayRuntime *rt, s16 by) {
  * (unsigned_comparison_p lists LEU twice) but GEU 2 is first canonicalised to GTU 1. Param/s32 weapon, `bits` temp
  * in the same block: all lose the andi. Attacker-id regs: separate ai pointer / s32 aid change nothing.
  * r8R: `(weapon -= 6, weapon < 2)` gives sltiu but no andi; a u16 temp behind an empty do{}while(0) in a
- * ({ }) also loses it (weapon is reg/v:HI, the zero_extend of the plus:SI subreg folds away). */
+ * ({ }) also loses it (weapon is reg/v:HI, the zero_extend of the plus:SI subreg folds away).
+ * r9X: the and is dropped because combine knows weapon's nonzero bits (flow-computed reg_nonzero_bits <= 0xFFFF,
+ * paradoxical subreg + WORD_REGISTER_OPERATIONS), so (plus w -6)&0xFFFF <=u 1 == plus <=u 1. It would survive only
+ * if weapon's bits were unknown (reg set once, or live at function start). Reusing id/arg2/bits/ref for w-6: same. */
 static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
     VECTOR32 pos;
     SubwayRuntime *rt;
     SubwayRuntime *attacker;
-    s16 type;
+    s32 type;
     s16 ref;
     u16 weapon;
     s32 bits;
 
     rt = RT(id);
-    type = GOBJ_TYPE(id);
+    {
+        s16 t = GOBJ_TYPE(id);
+        type = t;
+    }
     if (type == 1) {
         if (id == gLevelSpecificNpcID && !gDeviceDetonated) {
             D_8014586C.npcDead = 1;
@@ -659,9 +666,10 @@ static void func_801422E4(s16 id, s16 by, s32 arg2, s32 arg3) {
             if (by != gPlayerOffset) {
                 attacker = RT(by);
                 if (rt->npcState == 2) {
-                    weapon = *(u8 *)&gameObjectsInfo[attacker->id].flags24;
-                    if (*(u8 *)&gameObjectsInfo[attacker->id].flags24 == 0) {
-                        bits = INFO_FLAGS(&gameObjectsInfo[attacker->id]) & 0x3000;
+                    type = attacker->id;
+                    weapon = *(u8 *)&gameObjectsInfo[type].flags24;
+                    if (*(u8 *)&gameObjectsInfo[type].flags24 == 0) {
+                        bits = INFO_FLAGS(&gameObjectsInfo[type]) & 0x3000;
                         if (bits != 0x1000) {
                             weapon = bits == 0x2000 ? 0x14 : 0;
                         } else {
