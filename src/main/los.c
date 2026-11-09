@@ -138,7 +138,13 @@ void WindowLOSLoop(LOSContext *ctx);
  * r8P: the dead `addiu s0,sp,0x10` shares s0 with the later &ctx (sp+0x60) for SCRATCH_CALL1, so
  * it is likely one pointer pseudo set twice whose first value's uses were all folded to sp+0x10 by
  * combine (I2 kept while used later, so the set survives dead). cam.vx in a1 = local-alloc saw its
- * qty overlap v0/v1 in the original's sched1 order (cam loads interleaved) - not tried yet. */
+ * qty overlap v0/v1 in the original's sched1 order (cam loads interleaved) - not tried yet.
+ * r10AA: interleaving can't be it - the original keeps load-delay nops between the cam store and the next
+ * *gCamera chain, so the store->load dependence holds in sched2 (and so in sched1). Making it independent
+ * (struct-field gCamera reads + scalar `*p = ..` vx store) sinks the store in both passes: 23. GetCamPos(&cam)
+ * inline = same 5. Twice-set p (=&from for the mid reads, =&ctx for SCRATCH_CALL1): 46, combine can't fold
+ * p's uses across the HALF blocks; a 3-insn combine split (combine.c "two independent SETs") is the only
+ * path that folds a use yet keeps a still-live set, so the dead addiu needs p's uses in the length block. */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;
