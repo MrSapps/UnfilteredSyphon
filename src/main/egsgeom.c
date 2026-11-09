@@ -702,11 +702,6 @@ int EGSGeometry_FaceGetNonUnitNormal(EGSFace *face)
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* sched: product/mult order differs (n stores and p reloads match). Original issues e1.vz*e0.vx right after
- * e1.vz (2nd mult); ours delays it past n.vy's mults. Plain n.vx stores and all 64 operand-order swaps don't help.
- * r5B: sched1 (-dS) keeps P2 blocked on the mult unit and takes it as soon as it frees, before P3/P4 are ready;
- * the 5 other n.vx/n.vy/n.vz statement orders and a twice-set temp for P2 (not birthing) are 21-39 lines. */
 int EGSGeometryINT_PointProjectOnFacePlaneAlongY(VECTOR *p, EGSFace *face, u8 *ok, s32 *y)
 {
     VECTOR o;
@@ -723,7 +718,11 @@ int EGSGeometryINT_PointProjectOnFacePlaneAlongY(VECTOR *p, EGSFace *face, u8 *o
     e1.vy = face->v[0].vy - face->v[1].vy;
     e1.vz = face->v[0].vz - face->v[1].vz;
     ((s32 *)&n)[0] = e1.vx * e0.vz - e1.vz * e0.vx;
-    ((s32 *)&n)[1] = (p->vz - o.vz) * e1.vx - (p->vx - o.vx) * e1.vz;
+    {
+        s32 *q = &n.vy; /* plain (not in-struct) store: sched sinks it below the p reloads */
+
+        *q = (p->vz - o.vz) * e1.vx - (p->vx - o.vx) * e1.vz;
+    }
     ((s32 *)&n)[2] = (p->vx - o.vx) * e0.vz - (p->vz - o.vz) * e0.vx;
     if (n.vx != 0) {
         *y = o.vy + (n.vy * e0.vy + n.vz * e1.vy) / n.vx;
@@ -734,12 +733,7 @@ int EGSGeometryINT_PointProjectOnFacePlaneAlongY(VECTOR *p, EGSFace *face, u8 *o
     *ok = hit;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsgeom", EGSGeometryINT_PointProjectOnFacePlaneAlongY);
-#endif
 
-#ifdef NON_MATCHING
-/* sched: product/mult order differs; plane basis selection matches */
 int EGSGeometryINT_PointProjectOnPlaneAlongY(VECTOR *p, EGSPlane *plane, u8 *ok, s32 *y)
 {
     VECTOR o;
@@ -778,7 +772,11 @@ int EGSGeometryINT_PointProjectOnPlaneAlongY(VECTOR *p, EGSPlane *plane, u8 *ok,
         e1.vz = -n.vy;
     }
     ((s32 *)&n)[0] = e1.vx * e0.vz - e1.vz * e0.vx;
-    ((s32 *)&n)[1] = (p->vz - o.vz) * e1.vx - (p->vx - o.vx) * e1.vz;
+    {
+        s32 *q = &n.vy; /* plain (not in-struct) store: sched sinks it below the p reloads */
+
+        *q = (p->vz - o.vz) * e1.vx - (p->vx - o.vx) * e1.vz;
+    }
     ((s32 *)&n)[2] = (p->vx - o.vx) * e0.vz - (p->vz - o.vz) * e0.vx;
     if (n.vx != 0) {
         *y = o.vy + (n.vy * e0.vy + n.vz * e1.vy) / n.vx;
@@ -789,9 +787,6 @@ int EGSGeometryINT_PointProjectOnPlaneAlongY(VECTOR *p, EGSPlane *plane, u8 *ok,
     *ok = hit;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsgeom", EGSGeometryINT_PointProjectOnPlaneAlongY);
-#endif
 
 int EGSGeometry_TransformPoint(VECTOR *in, MATRIX *m, VECTOR *out)
 {
