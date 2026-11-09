@@ -3198,7 +3198,13 @@ extern char *D_80107818, *D_8010781C, *D_80107820;
  * /10 and /5 magic-constant divides in the rangefinder tick loop.
  * (r8T) the corner-loop order is decided by local-alloc, not global: &mSniperPolys is hoisted,
  * spilled and rematerialised by reload into p's reg, and the globals x/y/x3/y3/... just follow the
- * hard regs local-alloc gave the XY32 temps (set_preference). Orig p = v1, ours y3<<16 takes v1 first. */
+ * hard regs local-alloc gave the XY32 temps (set_preference). Orig p = v1, ours y3<<16 takes v1 first.
+ * (r14AJ) correction: the base `lui/addiu D_801185C4` stays in the loop (loop.c: life 1, savings 1,
+ * not desirable at 90 insns), but cse2 relates the first post-loop store (mSniperPolys[8].xy[0],
+ * expanded as a reg address sym+0x130) to it -> `sw 0x130(base)`, making the base global (t3) so
+ * local-alloc can't tie it into p (orig: lui/addiu straight into v1 = p, post-loop stores all
+ * absolute). Tried: do{}while(0) before/inside the post-loop block, p = mSniperPolys + i*2 /
+ * byte-offset forms, a dummy first store: no change. */
 /* Sniper view (mode 2): one zoom step of the scope frame, rangefinder and sprites. */
 u8 func_80041BCC(u8 active) {
     s32 *level;
@@ -3479,7 +3485,11 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_80041BCC);
  * last outer BARRIER, inside the inlined iSetupDirectionSprites), EGSDisplayInfraredOff takes one
  * arg, spr[2].mx = ((w3 >> 1) - 1) + w2. Left: before the goggle-frame loop the original schedules
  * the scale mult first (ours last) and allocates the hoisted lvl*50/lvl*31 quotients differently
- * (orig uses fp, spills one sign word at 0x20); the rangefinder/zoom-bar code after it also differs. */
+ * (orig uses fp, spills one sign word at 0x20); the rangefinder/zoom-bar code after it also differs.
+ * (r14AJ, 136 -> 126) scale as one chained assignment `spr[1].scalex = ... = (lvl << 12) / 12`
+ * puts its mult first, as in the orig. Left: the 8 hoisted lvl*50 / lvl*31 quotient halves (hi>>1
+ * and sign for +-A, +-B) are allocated in a different order: orig sign(lvl*31) -> fp and
+ * sign(-(lvl*31)) spilled to 0x20 (s7 reload reg); ours spills sign(lvl*31), never uses fp. */
 /* Infrared view (mode 3): one zoom step of the goggle frame, rangefinder and sprites. */
 u8 func_80042DA4(u8 active) {
     IfaceSprite *spr = SpriteGet(0x2E); /* goggle frame, 5 sprites */
@@ -3488,7 +3498,6 @@ u8 func_80042DA4(u8 active) {
     s32 i;
     s32 y;
     s32 h;
-    s32 scale;
     IfaceLine *line;
     IfacePoly4 *p;
 
@@ -3600,12 +3609,7 @@ u8 func_80042DA4(u8 active) {
         }
     }
 
-    scale = (lvl << 12) / 12;
-    spr[1].scalex = scale;
-    spr[0].scalex = scale;
-    spr[4].scaley = scale;
-    spr[3].scaley = scale;
-    spr[2].scaley = scale;
+    spr[1].scalex = spr[0].scalex = spr[4].scaley = spr[3].scaley = spr[2].scaley = (lvl << 12) / 12;
 
     /* goggle frame: four quads per side */
     for (i = 0; i < 2; i++) {
