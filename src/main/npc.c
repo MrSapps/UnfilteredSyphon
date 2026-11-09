@@ -4254,20 +4254,20 @@ void NPCLosUpdateOtherStuff(s32 id);
  * 0x1000120) == 0x120: y-flipped copy of frames[8]'s rotation, dir = -column 1), the vector
  * copies as 3 stores then `v.vy = -v.vy (- 8)` (the original stores vy twice), gCamera's extra
  * deref, the forced path falling into the shared flags update, NPC_NEXT_ID/NPC_SCAN_IDS at the
- * top, the type-3 flags read before func_801442B4. Left: s-reg rotation (id s5 vs s4, self/aim
- * s2/s1 swapped), frame 0x130 vs 0x120: the original allocates inSight (0x30) before a/b
- * (0x38/0x48), dist 0x58 before p2p 0x60, and the head-bone matrix shares 0xA0 with ray, so
- * a/b/p2p/ray are probably block-scoped or inline-function temporaries. */
+ * top, the type-3 flags read before func_801442B4.
+ * r12AD: stack layout now matches (frame 0x120). Mechanism (function.c): an addr-taken block
+ * temp escapes ONE binding level per expression statement run at its level (preserve_temp_slots
+ * from expand_expr_stmt), so p2p/ray are declared two blocks deep to be freed at the branch end
+ * (window reuses p2p's 0x60, m and the second ray reuse 0xA0); a/b live in a block opened after
+ * the type-3 check (so &inSight gets 0x30 first). targetId is re-read via self->target.
+ * Left: s-reg rotation (id s5 vs s4, self/aim s2/s1 swapped) and `aim = NULL` in the bltz delay
+ * slot (the original has none there; dropping it shifts regalloc further). */
 void NPCLosCheck(void) {
     VECTOR32 dir;
     VECTOR32 from;
     u8 inSight;
-    VECTOR32 a;
-    VECTOR32 b;
     s32 dist;
-    NPCLosP2P p2p;
     u8 hitP2P;
-    NPCLosRay ray;
     u8 hit;
     u8 hitWindow;
     s32 d2;
@@ -4339,6 +4339,10 @@ void NPCLosCheck(void) {
             obj->target->flags &= ~2;
             goto update;
         }
+        {
+        VECTOR32 a;
+        VECTOR32 b;
+
         if (obj->healthInfo->health <= 0 && D_8010F978 > 0) {
             if (id != gPlayerOffset) {
                 b = gameObjectsInfo[gPlayerOffset].runtime->move->unk10C;
@@ -4350,6 +4354,9 @@ void NPCLosCheck(void) {
                 NPC_OF(obj)->unk28 = dist;
             }
         } else if (D_8010F978 < 0) {
+            {
+            NPCLosP2P p2p;
+
             self = gameObjectsInfo[id].runtime;
             b = self->move->unk10C;
             b.vy += 0x20;
@@ -4383,7 +4390,10 @@ void NPCLosCheck(void) {
                     self->anim->unk00[0xB] |= 0x20;
                 }
             }
+            }
         } else if (D_8010F978 == 0) {
+            NPCLosP2P p2p;
+
             last = NULL;
             hitWindow = 0;
             hit = 0;
@@ -4405,6 +4415,9 @@ void NPCLosCheck(void) {
                 }
             }
             if (forced) {
+                {
+                NPCLosRay ray;
+
                 from.vx = (*self->anim->frames)->pos.vx;
                 from.vy = (*self->anim->frames)->pos.vy;
                 from.vz = (*self->anim->frames)->pos.vz;
@@ -4433,10 +4446,11 @@ void NPCLosCheck(void) {
                 }
                 done = 1;
                 target->flags = (target->flags & ~0x10) | ((hit & 1) << 4);
+                }
             } else {
                 aim = NULL;
-                if (target->targetId >= 0) {
-                    aim = gameObjectsInfo[target->targetId].runtime;
+                if (self->target->targetId >= 0) {
+                    aim = gameObjectsInfo[self->target->targetId].runtime;
                     if (aim != NULL
                         && ((aim->anim->frames != NULL && self->anim->frames != NULL)
                             || ((NPC_OF(self)->flags & 0x20000000) && aim->id == gameObjectsInfo[self->id].refId))) {
@@ -4514,18 +4528,22 @@ void NPCLosCheck(void) {
                     }
                     aim = NULL;
                 }
-                ray.from = &from;
-                ray.dir = &dir;
-                ray.length = 0x1900;
-                ray.hit = &hit;
-                ray.point = TARGET_AIM(target);
-                ray.normal = (VECTOR32 *)((u8 *)target + 0x84);
-                ray.hitWindow = &hitWindow;
-                ray.unk08 = 0;
-                ray.unk0C = 0;
-                ray.unk28 = 0;
-                ray.window = &p2p;
-                _LOSPointAlongDirection(&ray);
+                {
+                    NPCLosRay ray;
+
+                    ray.from = &from;
+                    ray.dir = &dir;
+                    ray.length = 0x1900;
+                    ray.hit = &hit;
+                    ray.point = TARGET_AIM(target);
+                    ray.normal = (VECTOR32 *)((u8 *)target + 0x84);
+                    ray.hitWindow = &hitWindow;
+                    ray.unk08 = 0;
+                    ray.unk0C = 0;
+                    ray.unk28 = 0;
+                    ray.window = &p2p;
+                    _LOSPointAlongDirection(&ray);
+                }
                 for (n = 0; n < losSortedCount; n++) {
                     h = losHitsSorted[n];
                     hitId = LOSHitGobjId(h);
@@ -4617,6 +4635,7 @@ void NPCLosCheck(void) {
                     }
                 }
             }
+        }
         }
         if (done) {
             break;
