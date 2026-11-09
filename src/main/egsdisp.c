@@ -1526,7 +1526,15 @@ INCLUDE_RODATA("asm/main/nonmatchings/egsdisp", D_80013734);
 /* first draft: run/movie flags are kept on the stack in the original, many spill/scheduling differences.
  * r6D: the original's u8 run/movie are global-alloc spills reloaded through $t3 (first unused
  * call-used reg after block temps in t0-t2), i.e. more call-crossing pseudos competed for s-regs
- * than in this draft. */
+ * than in this draft.
+ * r14AI (168 -> 21): run/movie spills now match. Keys: c0 is fd reused (stack 0x30; c1 0x60, c2 0x70);
+ * tags is D_80107B1C[i - 1] (loop.c makes the fp biv + s6 copy); camera loop and image loop share `i`
+ * and `j` is both the % 5 index and the level index (one var, two roles -> s-reg order); 2nd flashlight
+ * loop has a block-local fl and a `gFlashlightList != NULL` guard (lw v0; beqz; move s1); movie is
+ * re-tested before the !gRunFlag tail; dir.vy/fd.vy raw stores survive because the vz load sits between.
+ * Left (1st flashlight loop only): orig stores gFLCount right after the t[1] load and before the raw
+ * e->y store (ours sinks it: the scalar fixed store is independent of the in-struct e-> refs in sched),
+ * so n/la get a0/a1 swapped; and andi angle,0xFFFF before the color test with if/else moves (not cmov). */
 INCLUDE_PART1("asm/main/nonmatchings/egsdisp", EGSDisplaySort)
 
 s32 EGSDisplaySort(u8 run, s32 tick) {
@@ -1550,9 +1558,8 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
     s32 angle;
     s32 depth;
     s32 left;
-    s32 k;
     s32 i;
-    s16 load;
+    s32 load;
     u16 t;
 
     movie = *(u8 *)&gCameraArray[0].flags & 2;
@@ -1634,7 +1641,7 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
             continue;
         }
         gCurrentCamera = i;
-        if (!movie) {
+        if (!movie && gFlashlightList != NULL) {
             for (node = gFlashlightList; node != NULL; node = node->next) {
                 EGSFlashlight *fl = node->data;
 
@@ -1643,12 +1650,12 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
                     fd.vx = m.m[0][0];
                     fd.vy = m.m[1][0];
                     fd.vz = m.m[2][0];
-                    c2.vx = m.m[0][2];
-                    c2.vy = m.m[1][2];
-                    c2.vz = m.m[2][2];
                     c1.vx = m.m[0][1];
                     c1.vy = m.m[1][1];
                     c1.vz = m.m[2][1];
+                    c2.vx = m.m[0][2];
+                    c2.vy = m.m[1][2];
+                    c2.vz = m.m[2][2];
                     fd.vx = -fd.vx;
                     fd.vy = -fd.vy;
                     fd.vz = -fd.vz;
@@ -1719,8 +1726,9 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
             VSync(1);
             DrawSync(0);
             if (gCameraArray[0].flags & 0x10) {
-                for (k = 1; k < 4; k++) {
-                    img = &gImages[(gImagePtr + k) % 5];
+                for (i = 1; i < 4; i++) {
+                    j = (gImagePtr + i) % 5;
+                    img = &gImages[j];
                     p = (s32)img->start;
                     if (img->enabled && p != 0 && p != (s32)img->end) {
                         j = 0;
@@ -1732,11 +1740,11 @@ s32 EGSDisplaySort(u8 run, s32 tick) {
                                 j++;
                                 mark = img->levels[j].mark;
                             }
-                            if (depth - k <= 0) {
-                                depth = k + 1;
+                            if (depth - i <= 0) {
+                                depth = i + 1;
                             }
-                            ((u32 *)p)[1] = D_80107B1C[k - 1];
-                            AddPrim((u32 *)gOtbl[(s16)gDisplayBuffer].org + depth - k, (void *)p);
+                            ((u32 *)p)[1] = D_80107B1C[i - 1];
+                            AddPrim((u32 *)gOtbl[(s16)gDisplayBuffer].org + depth - i, (void *)p);
                         }
                     }
                 }
