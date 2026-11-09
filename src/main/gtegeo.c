@@ -575,15 +575,15 @@ s32 AddFaceToFaceList(GameObjectRuntime *gobj, LOSFace *face) {
     return 1;
 }
 
-#ifdef NON_MATCHING
-/* r11AB: 148 -> 32. setVector/addVector on `&array[...]` (EXPAND_SUM address forced into a reg),
- * same [box][i][j][k] index in every addVector (cse folds i/j/k == 1), interleaved corner sums and
- * separate a/s counters for the face loops fixed everything up to the face loop. Left: the original
- * keeps a plain s*44 giv (j==0 test, exit test, owner-bitfield address a2+t5+la) while ours combines
- * the bitfield address giv with the normal-store giv (same add_val reg 569) and eliminates s*44.
- * (fake) `if (s * 44 == 0)` keeps the s*44 giv and drops the score to 12; adding a block-local
- * `CollisionBoxOwner *o = ...; o->bits.id = ...` makes the bitfield address a non-giv (20 alone) but in
- * c-typeck order ((a*88+sym)+box*264)+s*44 instead of the original (s*44 + t5) + (sym+26). */
+/* Store the owner id into a face normal's pad (CollisionBoxOwner.bits.id).
+ * Being an inline keeps the pad address in the (twice-set) pointer param, so loop.c
+ * doesn't strength-reduce it; `v` set twice keeps the mask off sched1's birthing boost. */
+static inline void iSetCollisionBoxOwner(u16 *owner, s32 id) {
+    s32 v = *owner & 0xC00F;
+    v |= (id & 0x3FF) << 4;
+    *owner = v;
+}
+
 s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRuntime *owner, s32 box) {
     LOSBounds bounds;
     MATRIX m;
@@ -694,7 +694,7 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
                 setVector(&mCollisionBoxFaces[box][a][s].normal, axisPtr[a]->vx, axisPtr[a]->vy, axisPtr[a]->vz);
             }
             mCollisionBoxFaces[box][a][s].normal.pad = 0;
-            ((CollisionBoxOwner *)&mCollisionBoxFaces[box][a][s].normal.pad)->bits.id = gobj->id + 1;
+            iSetCollisionBoxOwner((u16 *)&mCollisionBoxFaces[box][a][s].normal.pad, gobj->id + 1);
         }
     }
     for (a = 0; a < 3; a++) {
@@ -705,9 +705,6 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
     }
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/gtegeo", iCobjHandleCollisionBox_RegisterBox);
-#endif
 
 s32 GetFuzzyDistancePoint2Point(VECTOR *a, VECTOR *b) {
     s32 dx;
