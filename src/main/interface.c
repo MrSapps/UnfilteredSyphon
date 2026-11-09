@@ -2012,7 +2012,14 @@ static inline void iMeterEdge(IfacePoint *xy, s32 top, s32 bottom) {
  * (r7I) a function-scope P = D_801175CC[0].xy (set at the top or after func_8003DF74) with
  * a/b = &P[9]/&P[1] and iMeterEdge(&P[10], ...) only gets 85 -> 80: the orig re-materialises
  * lui/addiu P in each edge block (P is a per-block constant, a/b separate regs, top stores folded
- * to 0x24(P)/0x28(P), bottom stores through a/b +8). */
+ * to 0x24(P)/0x28(P), bottom stores through a/b +8).
+ * (r13AG) target edge alone, tried: inline iMeterStep(xy, n) { iMeterEdge(&xy[1], xy[0].vx+n,
+ * xy[2].vx+n); } on D_801175CC[2].xy (const arg is substituted by integrate.c -> absolute);
+ * a pointer tp = D_801175CC[2].xy set early: before `str =` cse1 relates the color/shown
+ * accesses to it (lh 0(tp)); after `shown =` same; before `level = -1` (separate EBB) tp gets
+ * s3 and all edge accesses use it (0x4/0xC(tp)). The orig's per-block lui/addiu at the edge
+ * label + a2 = P+4 + `8(a2)` looks like a pseudo that cse never saw as constant (update_equiv_regs
+ * single-use replacement after cse2, or a reload rematerialisation), not yet reproduced. */
 /* Status meters: armor/health, target health and danger, each with its caption. The bars
  * move at most 5 pixels a frame toward their value; an empty armor bar or a full danger
  * bar pulses. */
