@@ -116,22 +116,22 @@ typedef struct LOSAnimFace {
     /* 0x14 */ SVECTOR *v[4];
 } LOSAnimFace;
 
+/* Owner tag kept in the pad of a collision box face normal */
+typedef union CollisionBoxOwner {
+    u16 raw;
+    struct {
+        u16 unk : 4;
+        u16 id : 10; /* gameObjectsInfo index + 1 */
+        u16 unk2 : 2;
+    } bits;
+} CollisionBoxOwner;
+
 /* One face of a registered collision box; linked into the owner's face list */
 typedef struct CollisionBoxFace {
     /* 0x00 */ struct CollisionBoxFace *prev;
     /* 0x04 */ struct CollisionBoxFace *next;
     /* 0x08 */ u8 unk08[0xC];
-    /* 0x14 */ s16 nx; /* outward normal */
-    /* 0x16 */ s16 ny;
-    /* 0x18 */ s16 nz;
-    /* 0x1A */ union {
-        u16 raw;
-        struct {
-            u16 unk : 4;
-            u16 id : 10; /* gameObjectsInfo index + 1 */
-            u16 unk2 : 2;
-        } bits;
-    } owner;
+    /* 0x14 */ SVECTOR normal; /* outward normal; pad = CollisionBoxOwner */
     /* 0x1C */ u8 unk1C[0x10];
 } CollisionBoxFace; /* size 0x2C */
 
@@ -179,6 +179,10 @@ void InitBxv2(LOSBox *box, LOSModel *model, s32 id);
 #ifndef MAX
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
 #endif
+
+/* libgte.h vector macros */
+#define setVector(v, _x, _y, _z) (v)->vx = _x, (v)->vy = _y, (v)->vz = _z
+#define addVector(v0, v1) (v0)->vx += (v1)->vx, (v0)->vy += (v1)->vy, (v0)->vz += (v1)->vz
 
 /* 20.12 fixed point product to integer, rounding towards zero */
 #define LOS_FIX(x) ((x) >= 0 ? (x) >> 12 : -(-(x) >> 12))
@@ -572,9 +576,11 @@ s32 AddFaceToFaceList(GameObjectRuntime *gobj, LOSFace *face) {
 }
 
 #ifdef NON_MATCHING
-/* same size; vertex loop offsets are kept as integers off one base register in the original
- * r6H: the original also accumulates corner.vx/vy/vz through memory (lw/addu/sw per term) and
- * keeps delta[] in stack slots, so the corner/delta block is scheduled very differently. */
+/* r11AB: 148 -> 32. setVector/addVector on `&array[...]` (EXPAND_SUM address forced into a reg),
+ * same [box][i][j][k] index in every addVector (cse folds i/j/k == 1), interleaved corner sums and
+ * separate a/s counters for the face loops fixed everything up to the face loop. Left: the original
+ * keeps a plain s*44 giv (j==0 test, exit test, owner-bitfield address a2+t5+la) while ours combines
+ * the bitfield address giv with the normal-store giv (same add_val reg 569) and eliminates s*44. */
 s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRuntime *owner, s32 box) {
     LOSBounds bounds;
     MATRIX m;
@@ -588,7 +594,9 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
     s32 i;
     s32 j;
     s32 k;
-    SVECTOR (*verts)[2][2][2];
+    s32 a;
+    s32 s;
+
 
     bounds = ((LOSModel *)gobj->anim->model)->bounds;
     t = bounds.min.vy;
@@ -636,16 +644,16 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
     maxProj[2].vy = EGSMathFIXMul(axis[2].vy, bounds.max.vz);
     maxProj[2].vz = EGSMathFIXMul(axis[2].vz, bounds.max.vz);
     corner.vx = m.t[0];
-    corner.vx += minProj[0].vx;
-    corner.vx += minProj[1].vx;
-    corner.vx += minProj[2].vx;
     corner.vy = m.t[1];
-    corner.vy += minProj[0].vy;
-    corner.vy += minProj[1].vy;
-    corner.vy += minProj[2].vy;
     corner.vz = m.t[2];
+    corner.vx += minProj[0].vx;
+    corner.vy += minProj[0].vy;
     corner.vz += minProj[0].vz;
+    corner.vx += minProj[1].vx;
+    corner.vy += minProj[1].vy;
     corner.vz += minProj[1].vz;
+    corner.vx += minProj[2].vx;
+    corner.vy += minProj[2].vy;
     corner.vz += minProj[2].vz;
     delta[0].vx = maxProj[0].vx - minProj[0].vx;
     delta[0].vy = maxProj[0].vy - minProj[0].vy;
@@ -656,27 +664,18 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
     delta[2].vx = maxProj[2].vx - minProj[2].vx;
     delta[2].vy = maxProj[2].vy - minProj[2].vy;
     delta[2].vz = maxProj[2].vz - minProj[2].vz;
-    verts = mCollisionBoxVertices;
     for (i = 0; i < 2; i++) {
         for (j = 0; j < 2; j++) {
             for (k = 0; k < 2; k++) {
-                verts[box][i][j][k].vx = corner.vx;
-                verts[box][i][j][k].vy = corner.vy;
-                verts[box][i][j][k].vz = corner.vz;
+                setVector(&mCollisionBoxVertices[box][i][j][k], corner.vx, corner.vy, corner.vz);
                 if (i == 1) {
-                    verts[box][1][j][k].vx += delta[0].vx;
-                    verts[box][1][j][k].vy += delta[0].vy;
-                    verts[box][1][j][k].vz += delta[0].vz;
+                    addVector(&mCollisionBoxVertices[box][i][j][k], &delta[0]);
                 }
                 if (j == 1) {
-                    verts[box][i][1][k].vx += delta[1].vx;
-                    verts[box][i][1][k].vy += delta[1].vy;
-                    verts[box][i][1][k].vz += delta[1].vz;
+                    addVector(&mCollisionBoxVertices[box][i][j][k], &delta[1]);
                 }
                 if (k == 1) {
-                    verts[box][i][j][1].vx += delta[2].vx;
-                    verts[box][i][j][1].vy += delta[2].vy;
-                    verts[box][i][j][1].vz += delta[2].vz;
+                    addVector(&mCollisionBoxVertices[box][i][j][k], &delta[2]);
                 }
             }
         }
@@ -684,25 +683,21 @@ s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRunti
     axisPtr[0] = &axis[0];
     axisPtr[1] = &axis[1];
     axisPtr[2] = &axis[2];
-    for (i = 0; i < 3; i++) {
-        for (j = 0; j < 2; j++) {
-            if (j == 0) {
-                mCollisionBoxFaces[box][i][0].nx = -axisPtr[i]->vx;
-                mCollisionBoxFaces[box][i][0].ny = -axisPtr[i]->vy;
-                mCollisionBoxFaces[box][i][0].nz = -axisPtr[i]->vz;
+    for (a = 0; a < 3; a++) {
+        for (s = 0; s < 2; s++) {
+            if (s == 0) {
+                setVector(&mCollisionBoxFaces[box][a][0].normal, -axisPtr[a]->vx, -axisPtr[a]->vy, -axisPtr[a]->vz);
             } else {
-                mCollisionBoxFaces[box][i][j].nx = axisPtr[i]->vx;
-                mCollisionBoxFaces[box][i][j].ny = axisPtr[i]->vy;
-                mCollisionBoxFaces[box][i][j].nz = axisPtr[i]->vz;
+                setVector(&mCollisionBoxFaces[box][a][s].normal, axisPtr[a]->vx, axisPtr[a]->vy, axisPtr[a]->vz);
             }
-            mCollisionBoxFaces[box][i][j].owner.raw = 0;
-            mCollisionBoxFaces[box][i][j].owner.bits.id = gobj->id + 1;
+            mCollisionBoxFaces[box][a][s].normal.pad = 0;
+            ((CollisionBoxOwner *)&mCollisionBoxFaces[box][a][s].normal.pad)->bits.id = gobj->id + 1;
         }
     }
-    for (i = 0; i < 3; i++) {
-        for (j = 0; j < 2; j++) {
-            mCollisionBoxFaceFlags[box][i][j] = 0;
-            AddFaceToFaceList(owner, (LOSFace *)&mCollisionBoxFaces[box][i][j]);
+    for (a = 0; a < 3; a++) {
+        for (s = 0; s < 2; s++) {
+            mCollisionBoxFaceFlags[box][a][s] = 0;
+            AddFaceToFaceList(owner, (LOSFace *)&mCollisionBoxFaces[box][a][s]);
         }
     }
     return 1;
