@@ -1114,15 +1114,12 @@ void SetMusicUnderscoreVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mo
     }
 }
 
-#ifdef NON_MATCHING
-/* regalloc: target gives snd/time/mode/diff/stop stack homes (frame 0x70 vs 0x60); structure matches */
 void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
     SoundEntry *sounds;
-    SoundEntry *s;
     SoundEvent *ev = NULL;
     s16 left, right;
-    s16 stop;
     s16 diff;
+    s16 stop;
     s16 d;
     s16 i;
     s32 t;
@@ -1139,10 +1136,9 @@ void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
         if (stop) {
             vol = 0;
         }
-        s = &sounds[snd];
-        type = s->flags & 0x1F;
+        type = sounds[snd].flags & 0x1F;
         if (type == SND_TYPE_GROUP) {
-            for (i = 0; i < s->prog; i++) {
+            for (i = 0; i < sounds[snd].prog; i++) {
                 if (sounds[i + snd + 1].numVoices == -1) {
                     SetSoundVol(block, snd + (s16)(i + 1), vol, 0, 2);
                 }
@@ -1156,17 +1152,21 @@ void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
             break;
         case SND_TYPE_LOOP:
             gLoopsPaused = 0;
-            if (s->numVoices == -1) {
-                s->vol = vol;
+            if (sounds[snd].numVoices == -1) {
+                sounds[snd].vol = vol;
                 return;
             }
             if (time == 0) {
                 RemoveSoundEvent(FindSoundEvent(4, block, snd));
-                s->vol = vol;
-                GetVolumesFromPan(s->vol, s->pan, &left, &right, s->unk12);
-                SetLoopingVolume(s, left, right);
+                sounds[snd].vol = vol;
+                GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+                SetLoopingVolume(&sounds[snd], left, right);
+                if (stop) {
+                    StopSound(block, snd);
+                }
+                return;
             } else {
-                diff = vol - s->vol;
+                diff = vol - sounds[snd].vol;
                 if (diff == 0) {
                     return;
                 }
@@ -1175,11 +1175,14 @@ void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
                     if (ev != NULL) {
                         d = vol - ev->value;
                         if (d == 0) {
-                            s->vol = vol;
-                            GetVolumesFromPan(s->vol, s->pan, &left, &right, s->unk12);
-                            SetLoopingVolume(s, left, right);
+                            sounds[snd].vol = vol;
+                            GetVolumesFromPan(sounds[snd].vol, sounds[snd].pan, &left, &right, sounds[snd].unk12);
+                            SetLoopingVolume(&sounds[snd], left, right);
                             RemoveSoundEvent(ev);
-                            goto done;
+                            if (stop) {
+                                StopSound(block, snd);
+                            }
+                            return;
                         }
                         time = abs(diff * time / d);
                         if (time <= 0) {
@@ -1211,35 +1214,30 @@ void SetSoundVol(SoundBlock *block, s16 snd, s16 vol, s16 time, s16 mode) {
                 }
                 return;
             }
-        done:
-            if (stop) {
-                StopSound(block, snd);
-            }
             break;
         case SND_TYPE_SEQ:
-            master = D_801101D0[s->unk12];
+            master = D_801101D0[sounds[snd].unk12];
             newVol = vol * master / 127;
-            oldVol = s->vol * master / 127;
+            oldVol = sounds[snd].vol * master / 127;
             if (newVol != oldVol) {
-                if (s->sepNum == -1) {
-                    SsSeqSetCrescendo(s->seq, newVol - oldVol, time);
+                if (sounds[snd].sepNum == -1) {
+                    SsSeqSetCrescendo(sounds[snd].seq, newVol - oldVol, time);
                 } else {
-                    SsSepSetCrescendo(s->seq, s->sepNum, newVol - oldVol, time);
+                    SsSepSetCrescendo(sounds[snd].seq, sounds[snd].sepNum, newVol - oldVol, time);
                 }
                 sounds[snd].vol = vol;
                 if (stop) {
                     ev = NewSoundEvent(9, block, snd);
-                    ev->unk0E = 1;
-                    ev->unk0C = time;
+                    do { /* block weight for ev (alloc order ev > i > address); likely a macro */
+                        ev->unk0E = 1;
+                        ev->unk0C = time;
+                    } while (0);
                 }
             }
             break;
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SetSoundVol);
-#endif
 
 void SetSoundVolByID(s32 id, s16 snd, s16 vol, s16 a3, s16 arg4) {
     SoundBlock *block = FindSoundBlockByID(id);
