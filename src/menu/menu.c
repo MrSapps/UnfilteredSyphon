@@ -2821,33 +2821,26 @@ void func_8013E480(void) {
     TextSetStringIntensity(*D_8013F904, 0xB4, 0xB4, 0xF0);
 }
 
-#ifdef NON_MATCHING
-/* 65 lines left (r3C). The original reaches the .y halves through a forced address
- * (`((s16 *)&v)[1]` = INDIRECT_REF of a constant -> memory_address forces it into a reg,
- * like XY(v).x does), which gives the addiu/lhu/sh RMW form; the first test reads
- * `*(s32 *)&XY(D_8013FEA4)` (a2 base). Still open: the original computes all four deltas
- * before any store (ours sinks/hoists the stores differently) and the quad corner loads.
- * r6H: the /4s differ too: orig `bgez x; move t,x; addiu t,x,3; sra` (expand_divmod's adjusted copy
- * with x still live), ours adds in place; s16 deltas / re-reading XY(D_8013FEA4) are worse (68-73). */
+/* Eases the highlight box toward its target. The same four locals hold the deltas and then the
+ * box's x, y, width and height (so they live to the end and cse keeps them, not expand_divmod's
+ * copy, as the /4 operands); the corner sums are inline. */
 void func_8013E5B0(void) {
-    s32 dx0, dy0, dx1, dy1;
-    s32 x, y;
-    s32 x1, y1;
+    s32 x, y, w, h;
     MenuQuad *quad;
 
     if (*(s32 *)&XY(D_8013FEA4) == 0 && D_8013FEA8 == 0) {
-        dx0 = XY(D_8013FE8C).x - XY(D_8013FE94).x;
-        dy0 = XY(D_8013FE8C).y - XY(D_8013FE94).y;
-        dx1 = XY(D_8013FE90).x - XY(D_8013FE98).x;
-        dy1 = XY(D_8013FE90).y - XY(D_8013FE98).y;
-        XY(D_8013FEA4).x = dx0;
-        XY(D_8013FEA4).y = dy0;
-        XY(D_8013FEA8).x = dx1;
-        XY(D_8013FEA8).y = dy1;
-        XY(D_8013FE9C).x = dx0 / 4;
-        XY(D_8013FE9C).y = dy0 / 4;
-        XY(D_8013FEA0).x = dx1 / 4;
-        XY(D_8013FEA0).y = dy1 / 4;
+        x = XY(D_8013FE8C).x - XY(D_8013FE94).x;
+        y = XY(D_8013FE8C).y - XY(D_8013FE94).y;
+        w = XY(D_8013FE90).x - XY(D_8013FE98).x;
+        h = XY(D_8013FE90).y - XY(D_8013FE98).y;
+        XY(D_8013FEA4).x = x;
+        XY(D_8013FEA4).y = y;
+        XY(D_8013FEA8).x = w;
+        XY(D_8013FEA8).y = h;
+        XY(D_8013FE9C).x = x / 4;
+        XY(D_8013FE9C).y = y / 4;
+        XY(D_8013FEA0).x = w / 4;
+        XY(D_8013FEA0).y = h / 4;
     }
     HILITE_STEP(XY(D_8013FE94).x, XY(D_8013FE8C).x, XY(D_8013FE9C).x);
     HILITE_STEP(((s16 *)&D_8013FE94)[1], XY(D_8013FE8C).y, XY(D_8013FE9C).y);
@@ -2855,17 +2848,14 @@ void func_8013E5B0(void) {
     HILITE_STEP(((s16 *)&D_8013FE98)[1], XY(D_8013FE90).y, XY(D_8013FEA0).y);
     x = XY(D_8013FE94).x >> 6;
     y = XY(D_8013FE94).y >> 6;
-    x1 = x + (XY(D_8013FE98).x >> 6);
-    y1 = y + (XY(D_8013FE98).y >> 6);
+    w = XY(D_8013FE98).x >> 6;
+    h = XY(D_8013FE98).y >> 6;
     quad = &gMenuPolys[30];
     *(s32 *)&quad->x0 = MAP_XY(x, y);
-    *(s32 *)&quad->x1 = MAP_XY(x1, y);
-    *(s32 *)&quad->x2 = MAP_XY(x, y1);
-    *(s32 *)&quad->x3 = MAP_XY(x1, y1);
+    *(s32 *)&quad->x1 = MAP_XY(x + w, y);
+    *(s32 *)&quad->x2 = MAP_XY(x, y + h);
+    *(s32 *)&quad->x3 = MAP_XY(x + w, y + h);
 }
-#else
-INCLUDE_ASM("asm/menu/nonmatchings/menu", func_8013E5B0);
-#endif
 
 #ifdef NON_MATCHING
 /* 11 lines left (r3C), 4 of them the "\\%s\\MENU.HOG;1" literal that the original has in
