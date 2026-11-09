@@ -1778,7 +1778,13 @@ extern InitAnimSlot gCASAnimInfo[];
  * find_free_reg: scratchpad/AL/la.sh). Left: [83]/[84].active are s0-relative (orig absolute;
  * cas[84].active blows up cse for the following .active run, cas[83].active must then sit
  * before the barrier and lands ahead of la Pul4); sched2 sinks [75].unk14 below .unk04; and
- * la iCallbackWK/ShimR store hoisted above [111].unk04/08 in sched2. */
+ * la iCallbackWK/ShimR store hoisted above [111].unk04/08 in sched2.
+ * r15AO: in sched2 every priority here is 1, so picks fall to rank_for_schedule's LUID tie-break,
+ * i.e. the sched1 output order. Ours sched1 places `li 0x180000` after the [75].unk18 store (the li
+ * gets the 7f000001 birthing boost once unk08's store is scheduled), and sched2 then lets
+ * [75].unk14 sink below it; orig's li apparently was not boosted (n_sets 2?). A two-set block var
+ * `v` for 0x80000/0x180000 is copy-propagated away (no change); cas[83].active before the barrier
+ * is absolute but lands before the lui/ori consts (12). */
 /* Sets up the per-animation callbacks and timing of the CAS animation table. */
 void CASAnimInit(void) {
     InitAnimSlot *cas = gCASAnimInfo;
