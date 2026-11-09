@@ -1446,11 +1446,8 @@ void npcGrenadeLanded(s32 which) {
     }
 }
 
-#ifdef NON_MATCHING
-/* draft: structure right, 17 insns long; abs/loop register allocation differs
- * r8S (165 -> 100): the three |x - range| are __builtin_abs (abssi2), `next` is s32 (no andi
- * 0xFF on the copies). Left: curPt is spilled (orig keeps it in s0), s-reg permutation of
- * npc/link/p/i in the loops. */
+/* K&R definition: some callers leave out the path. The two do-while(0) wrappers (range, name) only
+ * raise range/npc global-alloc priority (flow.c loop-depth ref weight) to get the s-reg order. */
 s32 NPCPointIQ(obj, path)
 Gobj *obj;
 PathPoint *path;
@@ -1459,18 +1456,16 @@ PathPoint *path;
     s32 dist;
     s32 best;
     s32 d2;
-    VECTOR32 away;
-    VECTOR32 to;
     NPC *npc = NPC_OF(obj);
     VECTOR32 *goal = &npc->lastSeenPos;
     s32 range = 0;
     s32 skipKind = -1;
     s32 next;
-    u8 cur;
-    PathPoint *curPt;
-    PathPoint *p;
+    s32 cur;
+    u32 kind;
     s32 i;
     s32 j;
+    s32 k;
     s32 link;
     s32 link2;
     s32 start;
@@ -1481,7 +1476,9 @@ PathPoint *path;
             EGSGeometry_GetFuzzyDistancePoint2Point(&mGrenadeGobj[0]->move->pos, &D_8011E8B8, &dist);
             if (dist < 0xA00) {
                 goal = &mGrenadeGobj[0]->move->pos;
-                range = 0x780;
+                do {
+                    range = 0x780;
+                } while (0);
             }
         } else if (npcGrenadeLandedCheck & 2) {
             EGSGeometry_GetFuzzyDistancePoint2Point(D_8011030C->pos, &D_8011E8B8, &dist);
@@ -1498,7 +1495,9 @@ PathPoint *path;
         }
     }
     if (range == 0) {
-        name = npc->nameMsgId;
+        do {
+            name = npc->nameMsgId;
+        } while (0);
         if (name < 10) {
             range = 32000;
         } else if (npc->flags & 1) {
@@ -1524,27 +1523,26 @@ PathPoint *path;
         goal = &D_8011D1E0;
     }
     next = npc->curPoint;
-    curPt = &path[next];
-    pt.vx = curPt->x;
-    pt.vy = curPt->y;
-    pt.vz = curPt->z;
+    pt.vx = path[next].x;
+    pt.vy = path[next].y;
+    pt.vz = path[next].z;
     EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &best);
     best = __builtin_abs(best - range);
     cur = next;
-    if (((curPt->flags & 0xF00) >> 8) == 7) {
+    if (((path[next].flags & 0xF00) >> 8) == 7) {
         skipKind = 7;
     }
     for (i = 0; i < 3; i++) {
-        link = curPt->links[i];
-        p = &path[link];
-        if (link >= 0 && link != cur && ((p->flags & 0xF00) >> 8) != 1 && ((p->flags & 0xF00) >> 8) != skipKind) {
-            pt.vx = p->x;
-            pt.vy = p->y;
-            pt.vz = p->z;
+        link = *(path[cur].links + i);
+        kind = (path[link].flags & 0xF00) >> 8;
+        if (link >= 0 && link != cur && kind != 1 && kind != skipKind) {
+            pt.vx = path[link].x;
+            pt.vy = path[link].y;
+            pt.vz = path[link].z;
             EGSGeometry_GetFuzzyDistancePoint2Point(&pt, goal, &dist);
             dist = __builtin_abs(dist - range);
             for (j = 0; j < 3; j++) {
-                link2 = p->links[j];
+                link2 = *(path[link].links + j);
                 if (link2 >= 0 && link2 != cur && link2 != link && link2 != 1 && link2 != skipKind) {
                     pt.vx = path[link2].x;
                     pt.vy = path[link2].y;
@@ -1580,13 +1578,13 @@ PathPoint *path;
         if (npc->awareness == 1) {
             start = rand() & 3;
             for (i = 0; i < 3; i++) {
-                j = start + i;
-                if (j >= 3) {
-                    j -= 3;
+                k = start + i;
+                if (k >= 3) {
+                    k -= 3;
                 }
-                link = path[cur].links[j];
-                if (link >= 0 && link != cur && ((path[link].flags & 0xF00) >> 8) != 1
-                    && ((path[link].flags & 0xF00) >> 8) != 7) {
+                link = *(path[cur].links + k);
+                kind = (path[link].flags & 0xF00) >> 8;
+                if (link >= 0 && link != cur && kind != 1 && kind != 7) {
                     next = link;
                     npc->flags |= 0x40000;
                 }
@@ -1597,17 +1595,19 @@ PathPoint *path;
             return next;
         }
         if (npc->awareness == 2 && range <= 0x3C0 && !(obj->target->flags & 2)) {
+            VECTOR32 away;
+            VECTOR32 to;
+
             away.vx = goal->vx - D_8011E8B8.vx;
             away.vy = goal->vy - D_8011E8B8.vy;
             away.vz = goal->vz - D_8011E8B8.vz;
             for (i = 0; i < 3; i++) {
-                link = path[cur].links[i];
-                p = &path[link];
-                if (link >= 0 && link != cur && ((p->flags & 0xF00) >> 8) != 1
-                    && ((p->flags & 0xF00) >> 8) != skipKind) {
-                    pt.vx = p->x;
-                    pt.vy = p->y;
-                    pt.vz = p->z;
+                link = *(path[cur].links + i);
+                kind = (path[link].flags & 0xF00) >> 8;
+                if (link >= 0 && link != cur && kind != 1 && kind != skipKind) {
+                    pt.vx = path[link].x;
+                    pt.vy = path[link].y;
+                    pt.vz = path[link].z;
                     to.vx = goal->vx - pt.vx;
                     to.vy = goal->vy - pt.vy;
                     to.vz = goal->vz - pt.vz;
@@ -1622,9 +1622,6 @@ PathPoint *path;
     }
     return next;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/npc", NPCPointIQ);
-#endif
 
 s32 NPCPickNextPoint(Gobj *obj, PathPoint *path, s32 cur) {
     NPC *npc = NPC_OF(obj);
