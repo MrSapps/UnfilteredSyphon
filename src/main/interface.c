@@ -239,7 +239,7 @@ void func_8003E13C(void);
 u16 WeaponMakeRoundsString(u16 str, s32 weapon);
 void TextRemoveString();
 void EGSDisplayInfraredOn(void *camera, s32 mode);
-void EGSDisplayInfraredOff(void *camera, s32 mode);
+void EGSDisplayInfraredOff(); /* takes only the camera (egshmd.c); one caller passes a stray mode */
 u8 TextAddWindow(s32 x, s32 y, s32 w, s32 h);
 void TextSetWindowMini(u8 window, s32 on);
 void TextSetWindowColor(u8 window, s32 r, s32 g, s32 b);
@@ -3480,7 +3480,11 @@ INCLUDE_ASM("asm/main/nonmatchings/interface", func_80041BCC);
 #endif
 
 #ifdef NON_MATCHING
-/* regalloc of the hoisted goggle-frame invariants (the original also uses fp and spills one sign word); the busy return is placed inside the inlined iSetupDirectionSprites */
+/* (r8T, 156 -> 136) busy returns written in place (loop.c moves the in-loop return block to the
+ * last outer BARRIER, inside the inlined iSetupDirectionSprites), EGSDisplayInfraredOff takes one
+ * arg, spr[2].mx = ((w3 >> 1) - 1) + w2. Left: before the goggle-frame loop the original schedules
+ * the scale mult first (ours last) and allocates the hoisted lvl*50/lvl*31 quotients differently
+ * (orig uses fp, spills one sign word at 0x20); the rangefinder/zoom-bar code after it also differs. */
 /* Infrared view (mode 3): one zoom step of the goggle frame, rangefinder and sprites. */
 u8 func_80042DA4(u8 active) {
     IfaceSprite *spr = SpriteGet(0x2E); /* goggle frame, 5 sprites */
@@ -3495,14 +3499,14 @@ u8 func_80042DA4(u8 active) {
 
     if (D_80105F30[2] < 0) {
         if (D_8010F8B4 != 0) {
-            goto busy;
+            return D_8010F8AC == 3;
         }
         {
             IfacePolyF3 *f3;
 
             for (i = 0, f3 = mSniperArrows; i < 2; i++, f3++) {
                 if (f3->link != 0) {
-                    goto busy;
+                    return D_8010F8AC == 3;
                 }
             }
         }
@@ -3511,7 +3515,7 @@ u8 func_80042DA4(u8 active) {
 
             for (i = 0, l = D_80118264; i < 18; i++, l++) {
                 if (l->link != 0) {
-                    goto busy;
+                    return D_8010F8AC == 3;
                 }
             }
         }
@@ -3520,7 +3524,7 @@ u8 func_80042DA4(u8 active) {
 
             for (i = 0, q = mSniperPolys; i < 16; i++, q++) {
                 if (q->link != 0) {
-                    goto busy;
+                    return D_8010F8AC == 3;
                 }
             }
         }
@@ -3545,7 +3549,7 @@ u8 func_80042DA4(u8 active) {
             for (i = 0; i < 5; i++) {
                 EGSDisplayDeleteSprite(gInterfaceWindow, &spr[i]);
             }
-            EGSDisplayInfraredOff(*gCamera, 0);
+            EGSDisplayInfraredOff(*gCamera);
             SysStatePush(6);
             func_8003D0E8(0x503028, 0xE77E6B, 0xD0D0D0);
             D_8010F894 = 5;
@@ -3567,7 +3571,7 @@ u8 func_80042DA4(u8 active) {
         iSetupDirectionSprites(D_8010F8AC);
         spr[1].mx = -1;
         spr[0].mx = spr[0].w;
-        spr[2].mx = spr[2].w + (u16)((spr[3].w >> 1) - 1);
+        spr[2].mx = spr[2].w + ((spr[3].w >> 1) - 1);
         spr[3].mx = (spr[3].w >> 1) - 1;
         spr[4].mx = 1 - (spr[3].w >> 1);
         for (i = 0; i < 5; i++) {
@@ -3678,8 +3682,6 @@ u8 func_80042DA4(u8 active) {
     iAnimateDirectionSprites(lvl);
     return 1;
 
-busy:
-    return D_8010F8AC == 3;
 }
 #else
 INCLUDE_ASM("asm/main/nonmatchings/interface", func_80042DA4);
