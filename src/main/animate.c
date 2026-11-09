@@ -1392,6 +1392,13 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
  * refs: integrate.c maps a user-variable pseudo argument straight onto the parameter, only
  * expressions / non-user regs get a fresh pseudo.  bone needs live > ~137 insns (now 103) or
  * fewer refs for slot (3063) to outrank it.
+ * r7N (77 -> 28): `bone = NULL;` before `ang = slot->aimAngle;` (else branch; makes bone conflict
+ * with slot) + `slot->aimAngle = ang;` inside 6 nested do-while(0) (flow.c weights that slot ref
+ * x7: slot 23 refs, pri 4144 > bone 4077) gives slot s0, bone s1, gobj s2, aimType s3, aiming s1.
+ * Left: local-alloc temps in the recoil/hit /10 divisions and the bone pointer, the ang sum order,
+ * AND the frame: ours is 0xE0 vs 0xD0 (masked by score.py; vs.py shows it). The two `AnimVec rot`
+ * blocks land at sp+0x68 instead of 0x48 (bonePos/delta slots of the aiming block are not reused),
+ * which also shifts the else-branch m/ang/u; `unused` only papers over part of it.
  */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
@@ -1489,7 +1496,19 @@ void func_8007E650(AnimSlot *slot) {
                     ang.vx += 0x38;
                 }
                 ang.vz -= 0x400;
+                do {
+                do {
+                do {
+                do {
+                do {
+                do {
                 slot->aimAngle = ang;
+                } while (0);
+                } while (0);
+                } while (0);
+                } while (0);
+                } while (0);
+                } while (0);
             } else {
                 aiming = 0;
             }
@@ -1527,8 +1546,8 @@ void func_8007E650(AnimSlot *slot) {
             } u;
             AnimFrame *bone;
 
-            ang = slot->aimAngle;
             bone = NULL;
+            ang = slot->aimAngle;
             if (aimType == 1) {
                 bone = gobj->anim->bones[11];
             } else if (aimType == 2) {
