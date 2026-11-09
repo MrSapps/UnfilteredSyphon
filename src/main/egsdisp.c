@@ -2057,7 +2057,9 @@ void EGSDisplayPacketAreaFree(void) {
  * s32-param inline doing the (s16) cast gives the original's plain move into s0. Left: the (s16)
  * extension lands in v1 (original a1, so v0/v1/a0 were all busy there at local-alloc; the la of
  * gCameraArray is pinned after the chain by the loop-note barrier) and parent's a0 copy is
- * scheduled later than in the original. */
+ * scheduled later than in the original. r8Q: original sll v0/sra a1 means the sra dest was NOT tied to the
+ * sll temp (local-alloc combine_regs refuses when the dest already has a qty or dies twice); reusing `id`/`err`
+ * as the extension dest unties it (sll v0; sra v1) but costs 15-21 lines elsewhere. a1 also needs v1/a0 busy. */
 static inline EGSCamera *GetCam(s32 i) { return &gCameraArray[(s16)i]; }
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
     s32 id;
@@ -3730,7 +3732,10 @@ INCLUDE_ASM("asm/main/nonmatchings/egsdisp", EGSDisplaySortGMD);
  * Returning 0/ret swapped just moves the s2 copy into the bnez slot: both original returns are literal 0, so
  * s2's last use must vanish after global-alloc (no-op move / jump2); if/else + one shared return is worse (14).
  * r5A: not REG_EQUIV: ret set once (no in-loop set, `return ret` twice) gets REG_EQUIV 0, but reload only
- * substitutes it for unallocated pseudos (alter_reg renumbers allocated ones first) -> both returns copy s3 (8). */
+ * substitutes it for unallocated pseudos (alter_reg renumbers allocated ones first) -> both returns copy s3 (8).
+ * r8Q: s2's only remaining use here is the loop-hoisted `ret = 0` that cse2 turns into `s2 = s2` (deleted in
+ * final). Dead counters (`ret++` in the loop / for-increment) and in-loop `ret = ret` are deleted (7). Untested
+ * idea: a combine-emitted (use) at a CODE_LABEL (distribute_notes) also keeps a reg alive with no code. */
 s32 EGSDisplayCalculateHMDTerrainLighting(EGSListNode *node, EGSAnim *anim, SVECTOR *out) {
     LightAccum acc;
     SVECTOR unused;
