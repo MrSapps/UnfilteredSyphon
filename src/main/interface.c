@@ -1743,14 +1743,17 @@ static inline void iRadarScale(GOBJ_MATRIX *out) {
     IfaceRows rows;
     IfaceSV3 r0;
     IfaceSV3 r1;
+    s16 v;
 
     r0.vy = 0;
     r0.vz = 0;
-    r0.vx = D_8010FFF0;
+    v = D_8010FFF0;
+    r0.vx = v;
     rows.r[0] = r0;
     r1.vx = 0;
     r1.vy = 0;
-    r1.vz = D_8010FFF4;
+    v = D_8010FFF4;
+    r1.vz = v;
     rows.r[1] = r1;
     rows.r[2] = D_8010F8D8;
     *(IfaceRows *)tmp.m = rows;
@@ -1768,13 +1771,24 @@ static inline s32 iXYAdd(s32 xy, s32 d) {
     return pt.w;
 }
 
+static inline void iFadeBox(IfacePoly4 *box) {
+    IfacePoly4 *p = box;
+    IfaceColor cur;
+    IfaceColor want;
+
+    cur.w = p->color.word;
+    want.w = 0x503028;
+    iStepColor(&cur, &want);
+    p->color.word = want.w | 0x28000000;
+}
+
 #ifdef NON_MATCHING
-/* loop: (r4G) the fade path is iStepColor on block-local cur/want through a copy p = box (52 -> 32;
- * the original's t3 copy of s2). Left: the box->xy/color dest-address givs (0xC..0x1C) get
- * combined and strength-reduced into an extra s-reg (orig keeps only s2 = box, s3 = i: 4 s-regs);
- * and the original has a self-copy of m.t (3 lw + 3 sw at sp+0x34) between TransposeMatrix and
- * func_8003E894 that store_expr/cse delete in every form tried (direct, via inline, VECTOR32 cast,
- * volatile; a block temp goes through memory). box = &D_80117A30[i] is worse. */
+/* (r6F, 32 -> 13) the m.t self-copy is `m.t[k] = m.t[k]` per element (a BLKmode struct self-copy is
+ * dropped by sched.c as a no-op set after reload); box = &base[i] with base an invariant local makes
+ * box a giv of i that absorbs the field address givs (orig s2); fade via inline (shared inline slot 0x60).
+ * Left: the t3 copy `p = box` sits before the color test in the orig (ours inside the fade block);
+ * the lhu of D_8010FFF0 is hoisted above the prologue by sched2; sched2 order of the XY(2,-2)/(-2,2)
+ * lui/ori in the box-grow block. */
 /* Radar update: NPC boxes and blips (with the danger level they add), the target box and
  * the bomb pointer, all in the player's frame scaled to the radar. */
 void func_8003D76C(void) {
@@ -1787,6 +1801,7 @@ void func_8003D76C(void) {
     s32 type;
     s32 level;
     Gobj *obj;
+    IfacePoly4 *base;
 
     iRadarScale(&scale);
     m.m[0][0] = (*(EGSFrame **)*gCamera)->m[0][0];
@@ -1809,21 +1824,19 @@ void func_8003D76C(void) {
     m.m[1][1] = 0x1000;
     MatrixNormal_0(&m, &m);
     TransposeMatrix(&m, &m);
+    m.t[0] = m.t[0];
+    m.t[1] = m.t[1];
+    m.t[2] = m.t[2];
     func_8003E894(&m);
     MulMatrix0(&scale, &m, &m);
-    for (i = 0, box = D_80117A30; i < 6; i++, box++) {
+    base = D_80117A30;
+    for (i = 0; i < 6; i++) {
+        box = &base[i];
         id = D_80117B2C[i];
         if (id == -1) {
             if (box->link != 0) {
                 if (box->color.word != 0x28503028) {
-                    IfaceColor cur;
-                    IfaceColor want;
-                    IfacePoly4 *p = box;
-
-                    cur.w = p->color.word;
-                    want.w = 0x503028;
-                    iStepColor(&cur, &want);
-                    p->color.word = want.w | 0x28000000;
+                    iFadeBox(box);
                 } else {
                     EGSDisplayDeletePoly(gInterfaceWindow, box);
                 }
