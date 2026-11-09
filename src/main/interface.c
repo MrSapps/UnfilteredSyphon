@@ -3694,14 +3694,21 @@ extern IfacePoly4 *gMenuPolys; /* menu background quads, [30] is the backdrop */
 extern IfaceLine *gMenuLines;  /* menu outline lines */
 
 #ifdef NON_MATCHING
-/* regalloc throughout (pointer/index registers in the sweep and tick loops); structure and stores follow the original */
+/* r11AC: 375 -> 141 masked diff lines. Shape that the original's registers prove: one lvl var
+ * for both *level reads (s0), separate counters (k: entry loops s1, block-local j: activate path
+ * s0, i: hide path s1), activate block has its own v/poly/line, line++ steps in the sweep loops,
+ * SET_SEMI_TRANS before unk04 (loop.c keeps the last DEST_ADDR giv: poly+4), mark loops index a
+ * &gMenuLines[112] base, xl/ya and xr/yb share a/b (xr's andi 0xFFFF needs yb's negative sets).
+ * Left: hide path i (pri 27840) beats line (26760) for s0 (orig: line s0, i s1); y gets a3 (pref 7)
+ * because b conflicts with a3; rule loop's unk04 = 5 is hoisted (savings 2) where the original
+ * leaves it in each arm; givs j*10 / j*10-180 derived from each other instead of one product. */
 /* Menu view (mode 4): one step of the menu background sweep and its tick lines.
  * D_80118264[0..5] are the menu's highlight and pointer lines. */
 u8 func_80043B04(u8 active) {
     s32 *level;
-    s32 prev;
     s32 lvl;
     s32 i;
+    s32 k;
     s32 from;   /* quads shown before this step */
     s32 to;     /* quads shown after it */
     s32 tick0;  /* left ticks, before/after */
@@ -3710,14 +3717,13 @@ u8 func_80043B04(u8 active) {
     s32 rule1;
     s32 mark0;  /* menu markers, before/after */
     s32 mark1;
-    const s32 *v;
     IfacePoly4 *poly;
     IfaceLine *line;
 
     if (D_80105F30[3] < 0) {
         IfaceLine *l;
 
-        for (i = 0, l = D_80118264; i < 6; i++, l++) {
+        for (k = 0, l = D_80118264; k < 6; k++, l++) {
             if (l->link != 0) {
                 return D_8010F8AC == 4;
             }
@@ -3728,7 +3734,7 @@ u8 func_80043B04(u8 active) {
             IfaceLine *l;
 
             D_80105F30[3] = -1;
-            for (i = 0, l = D_80118264; i < 36; i++, l++) {
+            for (k = 0, l = D_80118264; k < 36; k++, l++) {
                 if (l->link != 0) {
                     EGSDisplayDeletePoly(gInterfaceWindow, l);
                 }
@@ -3737,14 +3743,14 @@ u8 func_80043B04(u8 active) {
         return active;
     }
     level = &D_80105F30[3];
-    prev = *level;
+    lvl = *level;
     if (!func_80040F08(active, level)) {
         return 0;
     }
-    from = prev * 30 / 12;
-    tick0 = prev * 26 / 12;
+    from = lvl * 30 / 12;
+    tick0 = lvl * 26 / 12;
     rule0 = tick0;
-    mark0 = prev * 20 / 12;
+    mark0 = lvl * 20 / 12;
     lvl = *level;
     to = lvl * 30 / 12;
     tick1 = lvl * 26 / 12;
@@ -3752,9 +3758,11 @@ u8 func_80043B04(u8 active) {
     mark1 = lvl * 20 / 12;
     if (lvl <= 0) {
         if (active) {
-            EGSDisplayBuildLineF(&D_80118264[0], 0xF060F0, 0x04000400, 0x04000400);
-            for (i = 1, line = &D_80118264[1]; i < 36; i++, line++) {
-                EGSDisplayBuildLineF(line, 0xB4645A, 0x04000400, 0x04000400);
+            IfaceLine *l = D_80118264;
+
+            EGSDisplayBuildLineF(l, 0xF060F0, 0x04000400, 0x04000400);
+            for (k = 1, l++; k < 36; k++, l++) {
+                EGSDisplayBuildLineF(l, 0xB4645A, 0x04000400, 0x04000400);
             }
             if (D_80118264[0].link == 0) {
                 EGSDisplayAddPoly(gInterfaceWindow, &D_80118264[0]);
@@ -3772,6 +3780,14 @@ u8 func_80043B04(u8 active) {
     }
 
     if (active) {
+        s32 j;
+        s32 y;
+        s32 a;
+        s32 b;
+        const s32 *v;
+        IfacePoly4 *poly;
+        IfaceLine *line;
+
         v = &D_80011C18[from * 2];
         poly = &gMenuPolys[from];
         line = &gMenuLines[from * 2];
@@ -3780,38 +3796,42 @@ u8 func_80043B04(u8 active) {
             gMenuPolys[30].color.word = 0x28B46450;
             SET_SEMI_TRANS(&gMenuPolys[30].tag);
         }
-        for (i = from; i < to; i++, v += 2, poly++, line += 2) {
+        for (j = from; j < to; v += 2, j++) {
             EGSDisplayBuildPoly4F(poly, 0xA0463C, v[0], v[1], v[2], v[3]);
-            poly->unk04 = 6;
             SET_SEMI_TRANS(&poly->tag);
+            poly->unk04 = 6;
             if (poly->link == 0) {
                 EGSDisplayAddPoly(gInterfaceWindow, poly);
             }
-            if (i != 14) {
-                EGSDisplayBuildLineF(&line[0], 0xB4645A, v[0], v[2]);
-                line[0].unk04 = 5;
-                if (line[0].link == 0) {
-                    EGSDisplayAddPoly(gInterfaceWindow, &line[0]);
+            poly++;
+            if (j != 14) {
+                EGSDisplayBuildLineF(line, 0xB4645A, v[0], v[2]);
+                line->unk04 = 5;
+                if (line->link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             }
-            if (i != 16) {
-                EGSDisplayBuildLineF(&line[1], 0xB4645A, v[1], v[3]);
-                line[1].unk04 = 5;
-                if (line[1].link == 0) {
-                    EGSDisplayAddPoly(gInterfaceWindow, &line[1]);
+            line++;
+            if (j != 16) {
+                EGSDisplayBuildLineF(line, 0xB4645A, v[1], v[3]);
+                line->unk04 = 5;
+                if (line->link == 0) {
+                    EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             }
+            line++;
         }
         if (to < 30) {
             EGSDisplayBuildPoly4F(poly, 0xFFB478, v[0], v[1], v[2], v[3]);
             poly->unk04 = 6;
             EGSDisplayAddPoly(gInterfaceWindow, poly);
-            EGSDisplayBuildLineF(&line[0], 0xFFB478, v[1], v[3]);
-            line[0].unk04 = 5;
-            EGSDisplayAddPoly(gInterfaceWindow, &line[0]);
-            EGSDisplayBuildLineF(&line[1], 0xFFB478, v[1], v[3]);
-            line[1].unk04 = 5;
-            EGSDisplayAddPoly(gInterfaceWindow, &line[1]);
+            EGSDisplayBuildLineF(line, 0xFFB478, v[1], v[3]);
+            line->unk04 = 5;
+            EGSDisplayAddPoly(gInterfaceWindow, line);
+            line++;
+            EGSDisplayBuildLineF(line, 0xFFB478, v[1], v[3]);
+            line->unk04 = 5;
+            EGSDisplayAddPoly(gInterfaceWindow, line);
         }
         switch (to) {
         case 26:
@@ -3870,113 +3890,110 @@ u8 func_80043B04(u8 active) {
         D_80118264[2].xy0 = XY32(35, -94);
         D_80118264[2].xy1 = XY32(to * 78 / 30 + 35, -94);
 
-        for (i = tick0, line = &gMenuLines[60 + tick0]; i <= tick1; i++, line++) {
-            s32 y = i >= 18 ? -10 - (i * 10 - 180) : i * 10 - 89;
-            s32 xr;
-            s32 xl;
+        for (j = tick0, line = &gMenuLines[60 + tick0]; j <= tick1; j++, line++) {
+            y = j >= 18 ? -10 - (j - 18) * 10 : j * 10 - 89;
 
-            if (i == 0) {
-                xr = 31;
-            } else if (i < 18) {
-                xr = 34;
+            if (j == 0) {
+                b = 31;
+            } else if (j < 18) {
+                b = 34;
             } else {
-                xr = i == 18 ? 154 : 156;
+                b = j == 18 ? 154 : 156;
             }
-            xl = -156;
-            if (i >= 7) {
-                if (i == 7) {
-                    xl = -151;
+            a = -156;
+            if (j >= 7) {
+                if (j == 7) {
+                    a = -151;
                 } else {
-                    xl = -147;
-                    if (i >= 18) {
-                        if (i == 18) {
-                            xl = 43;
+                    a = -147;
+                    if (j >= 18) {
+                        if (j == 18) {
+                            a = 43;
                         } else {
-                            xl = 43;
-                            if (i < 25) {
-                                xl = 42;
+                            a = 43;
+                            if (j < 25) {
+                                a = 42;
                             }
                         }
                     }
                 }
             }
-            if (i == tick1) {
+            if (j == tick1) {
                 if (tick1 < 26) {
-                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(xl, y), XY32(xr, y));
+                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(a, y), XY32(b, y));
                     line->unk04 = 5;
                     EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             } else {
-                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(xl, y), XY32(xr, y));
-                line->unk04 = 5;
+                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(a, y), XY32(b, y));
                 SET_SEMI_TRANS(&line->tag);
+                line->unk04 = 5;
                 if (line->link == 0) {
                     EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             }
         }
-        for (i = rule0, line = &gMenuLines[86 + rule0]; i <= rule1; i++, line++) {
-            s32 x = i >= 16 ? i * 12 - 192 + 44 : i * 12 - 151;
-            s32 ya;
-            s32 yb;
+        for (j = rule0, line = &gMenuLines[86 + rule0]; j <= rule1; j++, line++) {
+            y = j >= 16 ? (j - 16) * 12 + 44 : j * 12 - 151;
 
-            if (i == 0) {
-                ya = -20;
+            if (j == 0) {
+                a = -20;
             } else {
-                ya = 88;
-                if (i >= 15) {
-                    ya = 86;
-                    if (i != 15) {
-                        if (i == 16) {
-                            ya = -10;
+                a = 88;
+                if (j >= 15) {
+                    a = 86;
+                    if (j != 15) {
+                        if (j == 16) {
+                            a = -10;
                         } else {
-                            ya = -9;
-                            if (i < 25) {
-                                ya = -5;
+                            a = -9;
+                            if (j < 25) {
+                                a = -5;
                             }
                         }
                     }
                 }
             }
-            if (i == 0) {
-                yb = -94;
+            if (j == 0) {
+                b = -94;
             } else {
-                yb = -95;
-                if (i >= 15) {
-                    yb = -91;
-                    if (i != 15) {
-                        if (i == 16) {
-                            yb = -82;
+                b = -95;
+                if (j >= 15) {
+                    b = -91;
+                    if (j != 15) {
+                        if (j == 16) {
+                            b = -82;
                         } else {
-                            yb = -84;
-                            if (i < 25) {
-                                yb = -85;
+                            b = -84;
+                            if (j < 25) {
+                                b = -85;
                             }
                         }
                     }
                 }
             }
-            if (i == rule1) {
+            if (j == rule1) {
                 if (rule1 < 26) {
-                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(x, ya), XY32(x, yb));
+                    EGSDisplayBuildLineF(line, 0xF0B478, XY32(y, a), XY32(y, b));
                     line->unk04 = 5;
                     EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             } else {
-                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(x, ya), XY32(x, yb));
-                line->unk04 = 5;
+                EGSDisplayBuildLineF(line, 0x8C3C46, XY32(y, a), XY32(y, b));
                 SET_SEMI_TRANS(&line->tag);
+                line->unk04 = 5;
                 if (line->link == 0) {
                     EGSDisplayAddPoly(gInterfaceWindow, line);
                 }
             }
         }
-        for (i = mark0; i < mark1; i++) {
-            EGSDisplayAddPoly(gInterfaceWindow, &gMenuLines[112 + i]);
+        line = &gMenuLines[112];
+        for (j = mark0; j < mark1; j++) {
+            EGSDisplayAddPoly(gInterfaceWindow, &line[j]);
         }
-        if (i < 12) {
-            D_80118264[0].xy0 = gMenuLines[112 + i].xy0;
-            D_80118264[0].xy1 = gMenuLines[112 + i].xy1;
+        if (j < 12) {
+            D_80118264[0].xy0 = line[j].xy0;
+            D_80118264[0].xy1 = line[j].xy1;
             return 1;
         }
         goto hide;
@@ -3987,16 +4004,18 @@ u8 func_80043B04(u8 active) {
     if (gMenuPolys[30].link != 0) {
         EGSDisplayDeletePoly(gInterfaceWindow, &gMenuPolys[30]);
     }
-    for (i = to; i < from; i++, poly++, line += 2) {
+    for (i = to; i < from; i++, poly++) {
         if (poly->link != 0) {
             EGSDisplayDeletePoly(gInterfaceWindow, poly);
         }
-        if (line[0].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &line[0]);
+        if (line->link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, line);
         }
-        if (line[1].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &line[1]);
+        line++;
+        if (line->link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, line);
         }
+        line++;
     }
     switch (to) {
     case 26:
@@ -4004,19 +4023,10 @@ u8 func_80043B04(u8 active) {
     case 28:
     case 29:
     case 30:
+        i = -((to - 26) * 56) / 4;
         D_80118264[1].xy0 = XY32(115, 4);
-        D_80118264[1].xy1 = XY32(-((to - 26) * 56) / 4 + 115, 4);
-    show3:
-        D_80118264[3].xy0 = XY32(-54, 98);
-        D_80118264[3].xy1 = XY32((to - 10) * -115 / 20 - 54, 98);
-        /* fallthrough */
-    case 8:
-    case 9:
-        D_80118264[4].xy0 = XY32(-169, 90);
-        D_80118264[4].xy1 = XY32(-169, (to - 8) * 8 / 22 + 90);
-        D_80118264[5].xy0 = XY32(-169, 51);
-        D_80118264[5].xy1 = XY32(-169, -((to - 6) * 81) / 24 + 51);
-        break;
+        D_80118264[1].xy1 = XY32(i + 115, 4);
+        goto show3;
     case 10:
     case 11:
     case 12:
@@ -4036,16 +4046,33 @@ u8 func_80043B04(u8 active) {
         if (D_80118264[1].link != 0) {
             EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[1]);
         }
-        goto show3;
+    show3:
+        i = (to - 10) * -115 / 20;
+        D_80118264[3].xy0 = XY32(-54, 98);
+        D_80118264[3].xy1 = XY32(i - 54, 98);
+        /* fallthrough */
+    case 8:
+    case 9:
+        i = (to - 8) * 8 / 22;
+        D_80118264[4].xy0 = XY32(-169, 90);
+        D_80118264[4].xy1 = XY32(-169, i + 90);
+        /* fallthrough */
+    case 6:
+    case 7:
+        i = -((to - 6) * 81) / 24;
+        D_80118264[5].xy0 = XY32(-169, 51);
+        D_80118264[5].xy1 = XY32(-169, i + 51);
+        break;
     default:
-        if (D_80118264[3].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[3]);
+        line = &D_80118264[3];
+        if (line[0].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, line);
         }
-        if (D_80118264[4].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[4]);
+        if (line[1].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &line[1]);
         }
-        if (D_80118264[5].link != 0) {
-            EGSDisplayDeletePoly(gInterfaceWindow, &D_80118264[5]);
+        if (line[2].link != 0) {
+            EGSDisplayDeletePoly(gInterfaceWindow, &line[2]);
         }
         break;
     }
@@ -4064,8 +4091,9 @@ u8 func_80043B04(u8 active) {
     for (i = rule1, line = &gMenuLines[86 + rule1]; i < rule0; i++, line++) {
         EGSDisplayDeletePoly(gInterfaceWindow, line);
     }
+    line = &gMenuLines[112];
     for (i = mark1; i < mark0; i++) {
-        EGSDisplayDeletePoly(gInterfaceWindow, &gMenuLines[112 + i]);
+        EGSDisplayDeletePoly(gInterfaceWindow, &line[i]);
     }
     if (D_80118264[0].link != 0) {
     hide:
