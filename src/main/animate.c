@@ -943,6 +943,11 @@ INCLUDE_ASM("asm/main/nonmatchings/animate", func_80079950);
  * does not help either: cse's follow_jumps path takes the first jump to `third`, folds the test
  * and rethreads the jump straight to two_handed.  (x ^ 0x2000) != 0 / (x - 0x1000) == 0 forms
  * fold too (cse knows x != 0x1000 from the first test's fall-through).
+ * r8S: a do-while(0) between test 2 and 3 only moves the fold from cse1 to cse2. Note the
+ * original's test 3 compares against the SAME reg as test 1 (a1 = 0x1000), so a cse pass did
+ * see both constants yet did not fold: fold_rtx needs `sex` to carry the 0x2000 constant
+ * (record_jump_equiv merge) or test 1's NE in qty_comparison; a mode/subreg mismatch
+ * (record_jump_cond only records REG op0 in `mode`) is the remaining candidate.
  */
 u8 func_8007D120(AnimSlot *slot) {
     AnimCharState *state;
@@ -1399,6 +1404,12 @@ void AnimateGobjElectrocute(AnimGobj *gobj) {
  * AND the frame: ours is 0xE0 vs 0xD0 (masked by score.py; vs.py shows it). The two `AnimVec rot`
  * blocks land at sp+0x68 instead of 0x48 (bonePos/delta slots of the aiming block are not reused),
  * which also shifts the else-branch m/ang/u; `unused` only papers over part of it.
+ * r8S: double-nesting the spine rot block (`{ { AnimVec rot; ... } }`, r7 tell: an addr-taken
+ * block local is preserved one level up) frees its slot so the head rot reuses 0x48 as in the
+ * original (vs.py imm 48 -> 41). Frame still 0xE0: the original's else-branch u (48 bytes) sits
+ * at 0x88..0xB8, so the then-branch must already have reached 0xB8 (ours stops at 0x98 after
+ * diff) -- 32 more bytes of then-branch locals, or these slots are function-scope vars shared by
+ * both branches (0x48 bonePos/rot/X, 0x58 delta+ang/m, 0x78 cur/ang, 0x88 diff/u).
  */
 void func_8007E650(AnimSlot *slot) {
     AnimVec spine;
@@ -1514,6 +1525,7 @@ void func_8007E650(AnimSlot *slot) {
             }
         }
         if (spine.vx != 0 || spine.vy != 0 || spine.vz != 0) {
+            {
             AnimVec rot;
 
             rot.vx = -gobj->anim->restRot[13][0];
@@ -1523,6 +1535,7 @@ void func_8007E650(AnimSlot *slot) {
             rot.vy += spine.vy;
             rot.vz += spine.vz;
             EGSFrameSetRotationParentYXZ(gobj->anim->bones[13], &rot);
+            }
         }
         if (head.vx != 0 || head.vy != 0 || head.vz != 0 || (aiming && aimType == 1)) {
             AnimVec rot;
