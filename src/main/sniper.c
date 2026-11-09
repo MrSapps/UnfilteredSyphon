@@ -638,7 +638,10 @@ __asm__(
  * (flow.c loop weight) and fixed damage/rt/i -> $s0/$s1/$s2. Left: at.vy temp gets v1 not v0
  * (local-alloc), the dist if/else delay slot (orig repeats `sll` in the else arm), radius not
  * computed straight into a2, fx/who s-reg swap, and the GrenadeLauncher/Tracer arg order
- * (orig sets a2 / la a1 first; ternary/cast-prototype variants did not change it). */
+ * (orig sets a2 / la a1 first; ternary/cast-prototype variants did not change it).
+ * r7L: the original stores at.vy twice (t[1], then -vy after the t[2] load): `at.vz = ..;
+ * at.vy = -at.vy;` gives that shape but swaps the v0/v1 temps (31). The arg order is a sched1
+ * LUID tie (a1/a2 both priority 1, the later-emitted a2 lands next to the jal). */
 void SniperShoot(void) {
     VECTOR32 from;
     VECTOR32 at;

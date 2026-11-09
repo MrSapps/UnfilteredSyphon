@@ -2026,7 +2026,9 @@ void NPCShoot(Gobj *obj) {
  * r4J: reusing the param itself as v (`PathPoint *points = pts; ... pts = NULL`) just moves the
  * a0 copy preference to `points` (cse turns the copies into points = a0) -> same 19.
  * prune_preferences only leaves a0 in v's regs_someone_prefers if v does not prefer a0 itself,
- * so the original's v must carry an a0 (full) preference, or points conflict with hard a0. */
+ * so the original's v must carry an a0 (full) preference, or points conflict with hard a0.
+ * r7L: v as the reused param with `points = (PathPoint *)v` (with or without a dead `points = NULL`
+ * init) still loses: combine folds (set P a0) into (set points P), so points keeps the a0 copy pref. */
 VECTOR32 *getPointActionVector(PathPoint *points, Gobj *obj) {
     VECTOR32 *v = NULL;
     VECTOR32 *p = &D_8011D1F0;
