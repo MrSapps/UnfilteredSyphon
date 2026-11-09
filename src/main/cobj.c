@@ -1009,7 +1009,11 @@ void EGSDisplayGetSectorRotBoxList(void *model, u32 *count, u32 **boxes);
  * jumps back in to the barrier after the entry jump, so the original's hit handling was probably
  * written after the box loop (break out, then set unk0C/unk08 and jump back to the found code).
  * `goto hit0/hit4` with the hit blocks after the for gives 51 (fewer bad immediates, 16 -> 9). The
- * prologue (links = gLevData+..+0x80 kept in fp, i/ts) also differs independently. */
+ * prologue (links = gLevData+..+0x80 kept in fp, i/ts) also differs independently.
+ * r14AL (47 -> 43): links[i] goes through a pointer-param inline (CobjGetTerrSectorAt(&links[i]))
+ * so loop.c no longer strength-reduces it (orig: addu links,i each pass). Now links (3 refs) loses
+ * global-alloc to the hoisted const 4 (9 refs, s7) and const 1 (fp) and is spilled; the original
+ * has 1 in s7, links in fp and 4 rematerialised, i.e. links outranks 4 there. */
 static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
     CobjTerrSector *ts;
 
@@ -1019,6 +1023,10 @@ static inline CobjTerrSector *CobjGetTerrSector(s32 sector) {
         ts = NULL;
     }
     return ts;
+}
+
+static inline CobjTerrSector *CobjGetTerrSectorAt(u8 *p) {
+    return CobjGetTerrSector(*p);
 }
 
 static inline s32 CobjIdxValid(u32 idx, u32 count) {
@@ -1049,7 +1057,7 @@ s32 CobjLoop(CobjQuery *q) {
             if (i == -1) {
                 ts = CobjGetTerrSector(q->sector);
             } else {
-                ts = CobjGetTerrSector(links[i]);
+                ts = CobjGetTerrSectorAt(&links[i]);
             }
             break;
         case -2:
