@@ -639,7 +639,11 @@ void EGSDisplayAddPoly(void *display, void *prim);
  * Left: drawType 2 arg order, original `li a2,0x190` before `lw a1,D_801100BC` (ours after).
  * sched1 ties all four arg sets at priority 1 and takes LUID order (a0..a3); the original needs
  * the a1 load picked first (higher priority/LUID). prim = p->prim after the call, a local for
- * the color, a call-through cast, volatile load and barriers around it change nothing. */
+ * the color, a call-through cast, volatile load and barriers around it change nothing.
+ * r8O (-dr/-dS): expand_call precomputes the color into a pseudo (lw P; a1 = P) and combine
+ * merges it into `lw a1` (nothing between them sets memory/calls). Poly3F keeps P because the
+ * stack-arg store sits between (use_crosses_set_p). With P kept, sched1's birthing boost on
+ * `lw P` would issue it right after a2 (the original order); need a natural way to keep P. */
 /* Spawns every particle of g from the emitter/direction/life/color set up by the ParticleInit* calls. */
 void ParticleStart(ParticleGroup *g, s32 count) {
     void *display;
@@ -977,6 +981,10 @@ void NPCSoundGobj(s32 arg0, s32 from, void *pos, s32 arg3);
 
 #ifdef NON_MATCHING
 /* logic complete; spill slots/callee-saved choice and the D_801100D0/D_801100D4 reloads differ */
+/* r8O (182 -> 138): angleStep after the D_8011D1A0 = pos struct copy (it flushes cse memory, so
+ * D_801100CC/D_801100D0 are reloaded as in the original) and D_801100D4 read once into c (the
+ * original keeps it in a3 for D_80110034 = ...). Left: s-reg permutation (bright s3, idx s4,
+ * &D_8011D1A0 s5, swing fp; sag spilled at 0xA8) and the spill-slot layout. */
 /* Animates the taser wire: flies out segment by segment, then sways and crackles until retracted. */
 void ParticleUpdateTaser(ParticleGroup *unused) {
     VECTOR32 screen;
@@ -1033,18 +1041,19 @@ void ParticleUpdateTaser(ParticleGroup *unused) {
         pos.vy = D_8011D190.vy + D_8011D1B0.vy * (D_801100CC - D_801100D0);
         pos.vz = D_8011D190.vz + D_8011D1B0.vz * (D_801100CC - D_801100D0);
         angle = 0x200;
-        sag = D_801100D4 * 2;
-        angleStep = ((D_801100CC - D_801100D0) << 5) / D_801100CC;
+        c = D_801100D4;
+        sag = c * 2;
         D_80110034 = 0;
         D_80110038 = 0;
         D_80110030 = sag;
         D_801100D8 = sag;
         D_8011D1A0 = pos;
+        angleStep = ((D_801100CC - D_801100D0) << 5) / D_801100CC;
         swing = 0;
         if (particleTaserState == 3) {
             D_801100D0 = 0;
         } else if (D_801100D0 <= 0) {
-            D_80110034 = D_801100D4;
+            D_80110034 = c;
             if (!(rand() & 1)) {
                 D_80110034 = -D_80110034;
             }
@@ -1256,7 +1265,13 @@ typedef struct FootAnimView {
  * r7J: sched1 lets a pseudo set cross calls when the pseudo already crosses one (sched.c
  * reg_n_calls_crossed), so `light = light9 >> 8` (priority 1) floats above all three rands. The
  * original keeps it right after rand #2: `do { light = light9 >> 8; } while (0);` after the vz
- * statement reproduces that (57) but the loop note ends cse1 so every D_80118FC0 store re-lui's. */
+ * statement reproduces that (57) but the loop note ends cse1 so every D_80118FC0 store re-lui's.
+ * r8O (-dS trace): sra has priority 1, rand #2 has 48, so it can only sit right after rand #2 if it
+ * depends on that call. `c = rand(); __asm__ volatile(""); light = light9 >> 8;
+ * D_80118FC0.vz = (c & 0x1FFF) - ...` (asm = sched barrier without ending cse) gives the exact
+ * placement (37 -> 29) but is not plausible source. Left after that: steps s5 (ours s0), light9 s6,
+ * &D_80118FD0 s7 (ours one lower each): nothing visible conflicts with steps in s0/s1, so global
+ * pass 0 must avoid them (copy preferences of conflicting allocnos?). */
 /* A tracer line from gobj's gun to target (every few NPC shots), and an ejected shell for the player. */
 void ParticleTracer(GameObjectRuntime *gobj, VECTOR32 *target) {
     void *display;
