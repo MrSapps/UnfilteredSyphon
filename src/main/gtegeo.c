@@ -580,7 +580,10 @@ s32 AddFaceToFaceList(GameObjectRuntime *gobj, LOSFace *face) {
  * same [box][i][j][k] index in every addVector (cse folds i/j/k == 1), interleaved corner sums and
  * separate a/s counters for the face loops fixed everything up to the face loop. Left: the original
  * keeps a plain s*44 giv (j==0 test, exit test, owner-bitfield address a2+t5+la) while ours combines
- * the bitfield address giv with the normal-store giv (same add_val reg 569) and eliminates s*44. */
+ * the bitfield address giv with the normal-store giv (same add_val reg 569) and eliminates s*44.
+ * (fake) `if (s * 44 == 0)` keeps the s*44 giv and drops the score to 12; adding a block-local
+ * `CollisionBoxOwner *o = ...; o->bits.id = ...` makes the bitfield address a non-giv (20 alone) but in
+ * c-typeck order ((a*88+sym)+box*264)+s*44 instead of the original (s*44 + t5) + (sym+26). */
 s32 iCobjHandleCollisionBox_RegisterBox(GameObjectRuntime *gobj, GameObjectRuntime *owner, s32 box) {
     LOSBounds bounds;
     MATRIX m;
