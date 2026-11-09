@@ -2290,12 +2290,23 @@ void KillAllEventsForSound(SoundBlock *block, s16 snd) {
     }
 }
 
-#ifdef NON_MATCHING
-/* structure follows the target; tail merging (shared skip/count-- tails) and register choice still differ */
+#ifndef _PSYQ
+/*
+ * maspsx counts an indexed store to a .sbss array as gp-relative and puts a load-delay nop
+ * before it; the original has lui/addu with no nop. Reach the array through an asm name
+ * maspsx doesn't recognise (cf. dTicksNoGp in egsdisp.c).
+ */
+extern u8 D_801101E0NoGp[] __asm__("D_801101E0+0+0");
+#else
+#define D_801101E0NoGp D_801101E0
+#endif
+
 /*
  * SEP mark callback: the marks embedded in the MIDI underscores form a small
  * per-sequence script (conditions on the excite level / registers, channel
  * groups muted by level, macros, queued SEPs). seq == -1 resets everything.
+ * Every case breaks to the single return: per-case `return 0`s give each tail its own v0 set
+ * and change the registers and cross-jumping of the shared tails.
  */
 s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
     s16 left, right;
@@ -2340,7 +2351,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             }
             D_80107930[seq] = 1;
             D_80107950[seq] = 11;
-            return 0;
+            break;
         case 11:
             if (D_80107910[seq] == 0) {
                 D_801221E8[D_80107970[seq]].reg = data;
@@ -2349,7 +2360,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107930[seq] = D_80107970[seq] * 3;
             }
             D_80107950[seq] = 4;
-            return 0;
+            break;
         case 4:
             if (D_80107910[seq] == 0) {
                 i = (D_80107930[seq] - 1) / 3;
@@ -2363,20 +2374,20 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 }
             }
             if (--D_80107930[seq] != 0) {
-                return 0;
+                break;
             }
             if (D_80107910[seq] == 1) {
                 D_80107910[seq] = 0;
             }
-            return 0;
+            break;
         case 1:
             if (D_80107910[seq] == 0) {
-                D_801101E0[D_80107970[seq]] = data;
+                D_801101E0NoGp[D_80107970[seq]] = data;
             } else if (D_80107910[seq] == 1) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 2:
             if (D_80107910[seq] == 0) {
                 if (D_801101E0[D_80107970[seq]] != data) {
@@ -2386,7 +2397,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 8:
             if (D_80107910[seq] == 0) {
                 if (D_8010FD78 < data + 1) {
@@ -2396,7 +2407,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 9:
             if (D_80107910[seq] == 0) {
                 if (D_8010FD78 != data) {
@@ -2406,7 +2417,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 10:
             if (D_80107910[seq] == 0) {
                 if (data - 1 < D_8010FD78) {
@@ -2416,7 +2427,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 12:
             if (D_80107910[seq] == 0) {
                 if (D_80107930[seq] != 2) {
@@ -2430,7 +2441,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 13:
             if (D_80107910[seq] == 0) {
                 if (D_80107930[seq] == 2) {
@@ -2442,23 +2453,23 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 D_80107910[seq] = 0;
             }
             D_80107930[seq]--;
-            return 0;
+            break;
         case 14:
             D_80107970[seq] = data - 1;
             D_80107930[seq] = 1;
             D_80107950[seq] = 15;
-            return 0;
+            break;
         case 15:
             D_80107930[seq] = 1;
             D_80107950[seq] = 16;
             gMIDIMacro[D_80107970[seq]].count = data;
-            return 0;
+            break;
         case 16:
             gMIDIMacro[D_80107970[seq]].data[D_80107930[seq] - 1] = data;
             if (gMIDIMacro[D_80107970[seq]].count < ++D_80107930[seq]) {
                 D_80107930[seq] = 0;
             }
-            return 0;
+            break;
         }
         return 0;
     }
@@ -2469,47 +2480,47 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         D_80107930[seq] = 1;
         D_80107970[seq] = 0;
         D_80107950[seq] = data + 8;
-        return 0;
+        break;
     case 3:
         if (D_80107910[seq] == 0) {
             SsSepStop(acc, seq);
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 4:
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 2;
         }
-        return 0;
+        break;
     case 5:
         if (D_80107910[seq] == 2) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 6:
         D_80107930[seq] = 2;
         D_80107950[seq] = 12;
-        return 0;
+        break;
     case 7:
         D_80107930[seq] = 2;
         D_80107950[seq] = 13;
-        return 0;
+        break;
     case 8:
         if (D_80107910[seq] == 0) {
             D_8010FD83 = 1;
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 11:
         D_80107930[seq] = 1;
         D_80107950[seq] = 14;
-        return 0;
+        break;
     case 12:
     case 13:
     case 14:
@@ -2523,12 +2534,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 SoundSeqCallback(acc, seq, gMIDIMacro[data - 12].data[i]);
             }
             D_8010FD80 = 0;
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 16:
     case 17:
     case 18:
@@ -2550,12 +2561,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 }
                 D_8010FD82 = 0;
             }
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 24:
     case 25:
     case 26:
@@ -2567,12 +2578,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         if (D_80107910[seq] == 0) {
             D_801101D8[D_8010FD82] = D_801101E0[data - 24] - 1;
             D_8010FD82++;
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 32:
     case 33:
     case 34:
@@ -2592,7 +2603,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         D_80107930[seq] = 1;
         D_80107970[seq] = data - 32;
         D_80107950[seq] = 3;
-        return 0;
+        break;
     case 48:
     case 49:
     case 50:
@@ -2624,12 +2635,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 }
             }
             SsChannelMute(acc, seq, D_80107890[seq]);
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 64:
     case 65:
     case 66:
@@ -2650,8 +2661,8 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             D_8010FD80 = 0;
             SsSepStop(acc, seq);
             GetVolumesFromPan(D_8010FD7C, D_8010FD7E, &left, &right, 1);
-            SsSepSetVol(acc, data + (D_8010FD83 * 16 - 64), left, right);
-            SsSepPlay(acc, data + (D_8010FD83 * 16 - 64), 1, 0);
+            SsSepSetVol(acc, data + (s16)(D_8010FD83 * 16 - 64), left, right);
+            SsSepPlay(acc, data + (s16)(D_8010FD83 * 16 - 64), 1, 0);
             D_8010FD83 = 0;
             if (D_8010FD82 != 0) {
                 for (i = 0; i < D_8010FD82; i++) {
@@ -2660,12 +2671,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
                 }
                 D_8010FD82 = 0;
             }
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 80:
     case 81:
     case 82:
@@ -2686,12 +2697,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             D_801101D8[D_8010FD82] = data - 80 + D_8010FD83 * 16;
             D_8010FD83 = 0;
             D_8010FD82++;
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 96:
     case 97:
     case 98:
@@ -2703,7 +2714,7 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         D_80107930[seq] = 1;
         D_80107970[seq] = data - 96;
         D_80107950[seq] = 1;
-        return 0;
+        break;
     case 104:
     case 105:
     case 106:
@@ -2716,12 +2727,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             if (D_801101E0[data - 104] < 0x7E) {
                 D_801101E0[data - 104]++;
             }
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 112:
     case 113:
     case 114:
@@ -2734,12 +2745,12 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
             if (D_801101E0[data - 112] != 0) {
                 D_801101E0[data - 112]--;
             }
-            return 0;
+            break;
         }
         if (D_80107910[seq] == 1) {
             D_80107910[seq] = 0;
         }
-        return 0;
+        break;
     case 120:
     case 121:
     case 122:
@@ -2751,13 +2762,10 @@ s32 SoundSeqCallback(s16 acc, s16 seq, s16 data) {
         D_80107930[seq] = 1;
         D_80107970[seq] = data - 120;
         D_80107950[seq] = 2;
-        return 0;
+        break;
     }
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/snddrv", SoundSeqCallback);
-#endif
 
 void SetMIDIRegister(s32 reg, s16 value) {
     if (value >= 0x80) {
