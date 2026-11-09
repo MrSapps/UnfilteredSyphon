@@ -344,7 +344,7 @@ void EGSGeometryINT_GetXZDistancePoint2Point(Vec4 *a, Vec4 *b, s32 *dist);
 void EGSGeometry_VectorRotateYXZ(Vec4 *in, Vec4 *angles, Vec4 *out);
 
 /* 20.12 fixed point shift that rounds toward zero */
-#define SHR_TRUNC(x, n) ((x) < 0 ? -((-(x)) >> (n)) : (x) >> (n))
+#define SHR_TRUNC(x, n) ((x) >= 0 ? (x) >> (n) : -((-(x)) >> (n)))
 #define WRAP_ANGLE(a)          \
     if ((a) > 0x800) {         \
         (a) -= 0x1000;         \
@@ -677,7 +677,6 @@ static void func_801421D8(u8 *facingOut) {
     s32 d[2]; /* distance, d[1] */
     u8 inBoxA;
     u8 inBoxB;
-    Vec4 rot;
     s32 dist2;
     u8 facing;
     u8 far;
@@ -693,7 +692,7 @@ static void func_801421D8(u8 *facingOut) {
     s32 spot;
     s32 i;
     s32 lim;
-    s32 mode;
+    s32 turn;
     s32 x;
     ObjInfoXform *info;
     ChopperXform *xf;
@@ -780,14 +779,14 @@ static void func_801421D8(u8 *facingOut) {
         if ((facing || far) && !approach) {
             D_801455C0 = 1;
             if (facing) {
-                mode = 0x547;
-                if (!far) {
-                    mode = 0xAB8;
+                if (far) {
+                    D_80145720 = 0x547;
+                } else {
+                    D_80145720 = 0xAB8;
                 }
             } else {
-                mode = 0x547;
+                D_80145720 = 0x547;
             }
-            D_80145720 = mode;
             if (!D_8014556C) {
                 if (D_8014578C == 0x13) {
                     if (D_80145720 == 0x547) {
@@ -803,16 +802,16 @@ static void func_801421D8(u8 *facingOut) {
                 d[1] -= ang.vy;
                 WRAP_ANGLE(d[1]);
                 x = d[1] << 12;
-                rotDelta.vy = SHR_TRUNC(x, 3);
-                if (rotDelta.vy > 0x38E38) {
+                turn = SHR_TRUNC(x, 3);
+                rotDelta.vy = turn;
+                if (turn > 0x38E38) {
                     rotDelta.vy = 0x38E38;
-                } else if (rotDelta.vy < -0x38E38) {
+                } else if (turn < -0x38E38) {
                     rotDelta.vy = -0x38E38;
                 }
             }
         }
-        x = rotDelta.vy * -8 - (ang.vz << 12);
-        rotDelta.vz = SHR_TRUNC(x, 3);
+        rotDelta.vz = SHR_TRUNC(-rotDelta.vy * 8 - (ang.vz << 12), 3);
     }
 
     savedPos = chopperPos;
@@ -837,57 +836,59 @@ static void func_801421D8(u8 *facingOut) {
             D_8014575C = speed;
         } else {
             EGSGeometry_IsIntersectXZPoint2UnrotBox(&chopperPos, &D_801455CC, 0, &inBoxA);
-            if (!facing) {
+            if (facing) {
+                if (inBoxA) {
+                    inBoxB = 0;
+                    if (diving) {
+                        if (D_8014556E && !D_80145788) {
+                            if (D_8014575C > 2) {
+                                D_8014575C -= 2;
+                                if (D_8014575C < 2) {
+                                    D_8014575C = 2;
+                                }
+                            }
+                        } else if (D_8014556F) {
+                            D_8014575C += 10;
+                            if (D_8014575C >= D_80145750) {
+                                D_80145570 = 0;
+                            }
+                            if (D_8014575C >= D_8014574C) {
+                                D_8014575C = D_8014574C;
+                            }
+                        }
+                        speed = D_8014575C;
+                    } else {
+                        speed = D_8014574C;
+                        D_8014575C = speed;
+                    }
+                } else {
+                    if (!diving) {
+                        EGSGeometry_IsIntersectXZPoint2UnrotBox(&chopperPos, &D_801455EC, 0, &inBoxB);
+                    } else {
+                        inBoxB = 1;
+                    }
+                    if (!inBoxB) {
+                        speed = D_8014574C;
+                        D_8014575C = 0;
+                    } else {
+                        if (D_80145744 < chopperPos.vy) {
+                            if (!diving) {
+                                lim = D_8014574C;
+                            } else {
+                                lim = D_80145754;
+                            }
+                            D_8014575C += 2;
+                            if (lim < D_8014575C) {
+                                D_8014575C = lim;
+                            }
+                        }
+                        speed = D_8014575C;
+                    }
+                }
+            } else {
                 inBoxB = 0;
                 speed = D_8014574C;
                 D_8014575C = speed;
-            } else if (inBoxA) {
-                inBoxB = 0;
-                if (diving) {
-                    if (D_8014556E && !D_80145788) {
-                        if (D_8014575C > 2) {
-                            D_8014575C -= 2;
-                            if (D_8014575C < 2) {
-                                D_8014575C = 2;
-                            }
-                        }
-                    } else if (D_8014556F) {
-                        D_8014575C += 10;
-                        if (D_8014575C >= D_80145750) {
-                            D_80145570 = 0;
-                        }
-                        if (D_8014575C >= D_8014574C) {
-                            D_8014575C = D_8014574C;
-                        }
-                    }
-                    speed = D_8014575C;
-                } else {
-                    speed = D_8014574C;
-                    D_8014575C = speed;
-                }
-            } else {
-                if (!diving) {
-                    EGSGeometry_IsIntersectXZPoint2UnrotBox(&chopperPos, &D_801455EC, 0, &inBoxB);
-                } else {
-                    inBoxB = 1;
-                }
-                if (!inBoxB) {
-                    speed = D_8014574C;
-                    D_8014575C = 0;
-                } else {
-                    if (D_80145744 < chopperPos.vy) {
-                        if (!diving) {
-                            lim = D_8014574C;
-                        } else {
-                            lim = D_80145754;
-                        }
-                        D_8014575C += 2;
-                        if (lim < D_8014575C) {
-                            D_8014575C = lim;
-                        }
-                    }
-                    speed = D_8014575C;
-                }
             }
         }
 
@@ -965,9 +966,8 @@ static void func_801421D8(u8 *facingOut) {
             }
         } else {
             /* strafing pass: circle around the player */
-            Vec4 step = { 0, D_80145794 ? -0xB : 0xB, 0 };
+            Vec4 rot = { 0, D_80145794 ? -0xB : 0xB, 0 };
 
-            rot = step;
             D_80145720 = 0x547;
             D_8014561C->flags1 = (D_8014561C->flags1 & 0x80) | ((D_8014561C->flags1 - 1) & 0x7F);
             tmp.vx = chopperPos.vx - D_80145670.vx;
