@@ -1754,11 +1754,11 @@ static inline void iRadarScale(GOBJ_MATRIX *out) {
 
 static inline s32 iXYAdd(s32 xy, s32 d) {
     IfacePointW pt;
-    IfacePointW delta;
+    s32 delta;
 
-    delta.w = d;
+    delta = d;
     pt.w = xy;
-    iPointAdd(&pt, &delta);
+    iPointAdd(&pt, (IfacePointW *)&delta);
     return pt.w;
 }
 
@@ -1774,12 +1774,13 @@ static inline void iFadeBox(IfacePoly4 *box) {
 }
 
 #ifdef NON_MATCHING
-/* (r6F, 32 -> 13) the m.t self-copy is `m.t[k] = m.t[k]` per element (a BLKmode struct self-copy is
+/* (r6F, 32 -> 6) the m.t self-copy is `m.t[k] = m.t[k]` per element (a BLKmode struct self-copy is
  * dropped by sched.c as a no-op set after reload); box = &base[i] with base an invariant local makes
  * box a giv of i that absorbs the field address givs (orig s2); fade via inline (shared inline slot 0x60).
+ * iXYAdd's delta is a plain s32 (non-struct scalar store, so sched keeps it behind the pt reads; -> 6).
  * Left: the t3 copy `p = box` sits before the color test in the orig (ours inside the fade block);
- * the lhu of D_8010FFF0 is hoisted above the prologue by sched2; sched2 order of the XY(2,-2)/(-2,2)
- * lui/ori in the box-grow block. */
+ * the lhu of D_8010FFF0 is hoisted above the prologue by sched2 (struct-cast loads don't help);
+ * one sh $0 order in the m.m zeroing. */
 /* Radar update: NPC boxes and blips (with the danger level they add), the target box and
  * the bomb pointer, all in the player's frame scaled to the radar. */
 void func_8003D76C(void) {
