@@ -181,23 +181,9 @@ int EGSFrameAddNode(EGSFrame *frame, EGSFrame *parent)
     return 0;
 }
 
-#ifdef NON_MATCHING
-/* loop entry not threaded past the cur!=frame test; prev in a2 not a1.
- * The loop shape (frame test on top, bnez cur at the bottom) already matches; only the entry
- * differs. CSE folds the duplicated cur!=NULL entry test but not the frame one, in any operand
- * order (cur == frame / frame != cur, 7-10); a do-while gives a different layout (9).
- * r5A: thread_jumps can't do it: it needs identical operand order and no CODE_LABEL between b1's
- * target and b2 (the loop-top label sits there). `goto body;` before the while with `body:` at the
- * top of the body and `node = cur->node; prev = cur;` gives the entry + prev a1/node v1 (6 -> 2);
- * left: reorg puts the prev copy into the beqz slot (original: copy before the lw, slot = 0x2B).
- * r7N: the copy only stays out of the slot if a CODE_LABEL sits between it and the lw at reorg
- * (fill_simple_delay_slots' backward scan, stop_search_p). `prev = cur; goto body; while (..) {
- * prev = cur; body: ...}` has that label through sched2 (copy first, entry ok), but jump2
- * cross-jumps the two copies and deletes it; with `pnode` reused for node the regs match (2). */
 int EGSFrameRemoveNode(EGSFrame *frame)
 {
     EGSFrameNode *pnode;
-    EGSFrameNode *node;
     EGSFrame *cur;
     EGSFrame *prev;
 
@@ -221,13 +207,19 @@ int EGSFrameRemoveNode(EGSFrame *frame)
     if (frame == cur) {
         pnode->child = frame->node->next;
     } else {
+        /* `goto body` threads the entry past the cur != frame test. The unused label `walk` is
+         * deliberate: named labels survive jump.c, and it keeps reorg's backward delay-slot scan
+         * from moving the prev copy into the beqz slot (the original fills it with the 0x2B). */
+        goto body;
         while (cur != NULL && cur != frame) {
+        body:
             prev = cur;
-            node = cur->node;
-            if (node == NULL) {
+        walk:
+            pnode = cur->node;
+            if (pnode == NULL) {
                 return EGS_ERR_NONODE;
             }
-            cur = node->next;
+            cur = pnode->next;
         }
         if (prev->node == NULL) {
             return EGS_ERR_NONODE;
@@ -241,9 +233,6 @@ int EGSFrameRemoveNode(EGSFrame *frame)
     frame->node->dirty = 1;
     return 0;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/egsframe", EGSFrameRemoveNode);
-#endif
 
 int EGSFrameUpdateNode(EGSFrame *frame)
 {
