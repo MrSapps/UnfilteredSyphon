@@ -257,34 +257,6 @@ s32 iCollisionPhysicsGetKineticFrictionForce(VECTOR32 *v, s32 force, VECTOR32 *o
         (hit)->coef = EGSMathFIXMul(a, b);  \
     }
 
-static inline u16 CobjOverLimit(s32 len, s32 limit) {
-    if (len < limit) {
-        return 0;
-    }
-    return 1;
-}
-
-static inline u16 CobjOverLimit2(s32 len, s32 limit) {
-    if (len >= limit) {
-        return 1;
-    }
-    return 0;
-}
-
-#ifdef NON_MATCHING
-/* regalloc only: kinetic gets s5 and hits s7 (original: hits s6, staticSum s5, kinetic s7).
- * kinetic (8 refs, live 194, pri 1237) must drop below hits (736). Reusing kinetic for prev
- * (`kinetic = *kineticFlag; ... kinetic = kinetic == 0 ? CobjOverLimit2(..) : CobjOverLimit(..)`)
- * gives the right s5/s6/s7 (8 lines) but the original keeps prev separate in s2 and sets
- * kinetic directly in each branch; a dead `kinetic = 0` at the top is deleted (no effect).
- * r4D: kinetic's 8 refs = 4 inline sets + 2 zero_extends + `kinetic = 1` + final store; 7 would
- * do (2*7/194 < hits' 736). Inlines returning u16 give the right s5/s6/s7 but a ret copy at the
- * join; s32/int returns or a `u8 r` local turn the if/else into slt/xori (scc).
- * r7N: now u16 inlines (19 -> 5; only the ret pseudo (v1) + its copy into kinetic (s7) left).
- * global.c has no pseudo-pseudo copy preference (only hard-reg prefs via expand_preferences), so
- * ret can only land in s7 if it IS kinetic (u8: 8 refs, then kinetic outranks hits). With u8,
- * nested do-while(0) weights can order p201 > staticSum > hits > kinetic (hits 14, staticSum 8,
- * zext copy 8 refs) but the loop notes reshuffle sched/cse elsewhere (33+ lines). */
 s32 CollisionPhysicsGobj_DetectorMotion(Gobj *obj, Gobj *other, CobjPhysics *det, CobjContact **hits, s32 count,
                                         u8 *kineticFlag) {
     VECTOR32 a;
@@ -352,10 +324,11 @@ s32 CollisionPhysicsGobj_DetectorMotion(Gobj *obj, Gobj *other, CobjPhysics *det
     for (i = 0; i < count; i++) {
         hits[i]->motion = h;
     }
-    if (prev == 0) {
-        kinetic = CobjOverLimit2(len, 0x3321);
+    /* one if/else on a ?: condition: real branches (no scc) and kinetic set directly (s7) */
+    if (prev == 0 ? len >= 0x3321 : len >= 0x1000) {
+        kinetic = 1;
     } else {
-        kinetic = CobjOverLimit(len, 0x1000);
+        kinetic = 0;
     }
     staticSum = 0;
     fr.vx = 0;
@@ -415,9 +388,6 @@ s32 CollisionPhysicsGobj_DetectorMotion(Gobj *obj, Gobj *other, CobjPhysics *det
     *kineticFlag = kinetic;
     return 1;
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cobj", CollisionPhysicsGobj_DetectorMotion);
-#endif
 
 s32 func_8007369C(CobjNode *node, CobjNode **list) {
     CobjNode *n;
