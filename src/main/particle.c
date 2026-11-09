@@ -3594,15 +3594,10 @@ void EGSDisplayAddSprite(void *display, void *prim);
 #define CAMERA_MATRIX (*(CameraMatrix **)*gCamera)
 #define SPRITE(p) ((ParticleSprite *)(p)->prim)
 
-#ifdef NON_MATCHING
-/* scheduling of the camera-matrix copy and register choice for p/sprite differ */
-/* r6E (114 -> 24): the delete/add loops use their own pointers (e, f: block-local, so local-alloc ties
- * the i*0x68 chain to them in s0) and the main loop its own q; screen offsets via s16 inlines
- * (POSITION.x - 0xC0 computed first, lhu). Left: the original reads `i = q->next` but then q
- * (32 refs, live 120: 13333) outranks sprite (30/106: 11320) and takes s0; `D_80119040[i].next`
- * drops q to 30 refs (right regs) but recomputes the address (13 lines). Also sprite->b = 0 is
- * stored after the three color lbu's, and the else-branch y/w/h order. */
-/* Glows: camera-facing sprites sized by the projected height of the group */
+/* Glows: camera-facing sprites sized by the projected height of the group.
+ * The delete/add loops use their own block-local pointers (e, f) and the main loop q
+ * (`i = q->next`, as in ParticleDisplayPolyWorld). The do-while(0) around the tag store
+ * raises sprite's loop-weighted refs so it outranks q for s0. */
 static inline s16 ScreenOX(void) { return POSITION.x - 0xC0; }
 static inline s16 ScreenOY(void) { return POSITION.y - 0x78; }
 #define SCREEN_OX ScreenOX()
@@ -3711,9 +3706,9 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
                     w *= 2;
                 }
                 sprite->x = screen.vx - SCREEN_OX;
+                sprite->y = ScreenY(screen.vy);
                 sprite->w = w;
                 sprite->h = w;
-                sprite->y = ScreenY(screen.vy);
             }
             depth = (screen.vz >> 2) - (screen.vz >> 4);
                 depth += (bias = g->unk26 - 16);
@@ -3722,11 +3717,13 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
             } else {
                 sprite->z = 0;
             }
-            sprite->tag &= 0x7FFFFFFF;
+            do {
+                sprite->tag &= 0x7FFFFFFF;
+            } while (0);
             if (infrared) {
                 sprite->r = 0;
-                sprite->b = 0;
                 sprite->g = (u32)(((u8 *)&q->color)[2] + ((u8 *)&q->color)[1] + ((u8 *)&q->color)[0]) >> 2;
+                sprite->b = 0;
             } else {
                 sprite->r = q->color;
                 sprite->g = (u32)q->color >> 8;
@@ -3735,7 +3732,7 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
         }
         prev = i;
     next:
-        i = D_80119040[i].next;
+        i = q->next;
         D_80110080++;
     }
     if (added) {
@@ -3745,9 +3742,6 @@ void ParticleDisplayPolyFlat4(ParticleGroup *g) {
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/particle", ParticleDisplayPolyFlat4);
-#endif
 
 INCLUDE_RODATA("asm/main/nonmatchings/particle", D_80012050);
 
