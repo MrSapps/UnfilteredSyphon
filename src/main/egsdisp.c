@@ -2077,7 +2077,9 @@ void EGSDisplayPacketAreaFree(void) {
  * r9W: the a0/a1 param copies are a never-scheduled leading run in sched1 (sched.c skips reg-source SETs
  * up to the first note), so a0 can't stay live; moving gCameraID's increment after GetCam (v1 live) is 22.
  * r10AA: loading gCameraArray into a local before the index math (`EGSCamera *b = gCameraArray; b + (s16)i`)
- * keeps the base live across the chain (gets a0) and pushes the extension to v1 (10): a1 needs one more busy reg. */
+ * keeps the base live across the chain (gets a0) and pushes the extension to v1 (10): a1 needs one more busy reg.
+ * r14AI: prototypes match (EGSFrameCreate/Get/SetPosition, GsInitCoordinate2). `void *parentArg` + copy
+ * to break the leading param-copy run is merged by cse (no change). */
 static inline EGSCamera *GetCam(s32 i) { return &gCameraArray[(s16)i]; }
 s32 EGSCameraCreate(EGSFrame *parent, VECTOR *pos, u16 dist, void *region, u16 priority, u8 otShift, s32 unused, EGSCamera **out) {
     s32 id;

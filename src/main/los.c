@@ -144,7 +144,10 @@ void WindowLOSLoop(LOSContext *ctx);
  * (struct-field gCamera reads + scalar `*p = ..` vx store) sinks the store in both passes: 23. GetCamPos(&cam)
  * inline = same 5. Twice-set p (=&from for the mid reads, =&ctx for SCRATCH_CALL1): 46, combine can't fold
  * p's uses across the HALF blocks; a 3-insn combine split (combine.c "two independent SETs") is the only
- * path that folds a use yet keeps a still-live set, so the dead addiu needs p's uses in the length block. */
+ * path that folds a use yet keeps a still-live set, so the dead addiu needs p's uses in the length block.
+ * r14AI: prototypes checked (GTELOSLoop takes u8 flags, harmless with constants). A set with no uses in
+ * block 0 is birthing-boosted in sched1 and lands right before the bltz, which is where the dead addiu
+ * sits, so it is set in block 0 and only used in later blocks (cse/flow would kill it if unused). */
 u8 _LOSPoint2Point(LOSRequest *req) {
     LOSVector from;
     LOSVector delta;

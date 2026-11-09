@@ -652,8 +652,12 @@ __asm__(".set D_80112DD0, D_80112DD0_bss\n"
 /* r8R (prologue): combine folds the a2 SI copy into the QI `flag` copy, leaving a NOTE that ends sched.c's
  * unscheduled leading param-copy run after the a0 copy; the QI copy is then birthing-boosted next to the first
  * `a2 = 6`. `s32 flag` + `(u8)flag == 1` keeps `move s7,a2` at the top (orig: mid-prologue, after s5's la).
- * `li a1,1` floats to the top because the unused `on` copy is deleted (no a1 anti-dependence). */
+ * `li a1,1` floats to the top because the unused `on` copy is deleted (no a1 anti-dependence).
+ * r14AI: sched1 dump: `li a1,1` (prio 1) is ready from T-17 and loses every tie until the block top.
+ * Range block: orig keeps r6/r5/r4 in stack slots 0x90-0x98 (spills after the 8 vectors), 1 in s2 then s0
+ * (two different constant-1 pseudos), and re-materialises la D_800101E4 per copy (address used once). */
 /* Loads a camera mode's view: lead/watch frames, offsets, limits and ranges. */
+static inline VECTOR32 iOnes(void) { return D_800101E4; }
 s32 func_8001B000(s32 mode, u8 on, u8 flag) {
     static const VECTOR32 up = { 0, 1, 0 };
     static const VECTOR32 rangeScale = { 0xC00, 0x1000, 0xC00 };
@@ -929,13 +933,23 @@ s32 func_8001B000(s32 mode, u8 on, u8 flag) {
         factor = &angle;
     }
     {
-        r6 = view->range[2].vx;
-        r5 = view->range[1].vx;
-        r4 = view->range[0].vx;
+        s32 rr[3];
+        u8 one;
+
+        {
+            s32 a = view->range[2].vx;
+            s32 b = view->range[1].vx;
+            s32 c = view->range[0].vx;
+
+            rr[0] = a;
+            rr[1] = b;
+            rr[2] = c;
+        }
+        one = 1;
         if (&view->range[2] != NULL) {
             CAM->unkD1C = view->range[2];
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = one;
             CameraAccessMoveInfo(gCamera, 1, 0, 6);
             scale2 = view->range[2];
             if (factor != NULL) {
@@ -951,52 +965,53 @@ s32 func_8001B000(s32 mode, u8 on, u8 flag) {
             }
             CAM->unkD1C = scale2;
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = one;
             CameraAccessMoveInfo(gCamera, 1, 3, 6);
         }
-        cur = D_800101E4;
-        scale2.vx = r6;
-        scale2.vy = r6;
-        scale2.vz = r6;
+        cur = iOnes();
+        scale2.vx = rr[0];
+        scale2.vy = rr[0];
+        scale2.vz = rr[0];
         CAM->unkD1C = scale2;
         CAM->unkD30 = cur;
-        CAM->unkD40 = 1;
+        CAM->unkD40 = one;
         CameraAccessMoveInfo(gCamera, 1, 2, 6);
+        on = 1;
         if (&view->range[1] != NULL) {
             CAM->unkD1C = view->range[1];
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = on;
             CameraAccessMoveInfo(gCamera, 1, 0, 5);
             CAM->unkD1C = view->range[1];
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = on;
             CameraAccessMoveInfo(gCamera, 1, 3, 5);
         }
-        cur = D_800101E4;
-        scale2.vx = r5;
-        scale2.vy = r5;
-        scale2.vz = r5;
+        cur = iOnes();
+        scale2.vx = rr[1];
+        scale2.vy = rr[1];
+        scale2.vz = rr[1];
         CAM->unkD1C = scale2;
         CAM->unkD30 = cur;
-        CAM->unkD40 = 1;
+        CAM->unkD40 = on;
         CameraAccessMoveInfo(gCamera, 1, 2, 5);
         if (&view->range[0] != NULL) {
             CAM->unkD1C = view->range[0];
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = on;
             CameraAccessMoveInfo(gCamera, 1, 0, 4);
             CAM->unkD1C = view->range[0];
             CAM->unkD30 = scale;
-            CAM->unkD40 = 1;
+            CAM->unkD40 = on;
             CameraAccessMoveInfo(gCamera, 1, 3, 4);
         }
-        cur = D_800101E4;
-        scale2.vx = r4;
-        scale2.vy = r4;
-        scale2.vz = r4;
+        cur = iOnes();
+        scale2.vx = rr[2];
+        scale2.vy = rr[2];
+        scale2.vz = rr[2];
         CAM->unkD1C = scale2;
         CAM->unkD30 = cur;
-        CAM->unkD40 = 1;
+        CAM->unkD40 = on;
         CameraAccessMoveInfo(gCamera, 1, 2, 4);
     }
     if (flag == 1) {
@@ -2056,7 +2071,10 @@ s32 EGSDeviceControllerVibrate(s32 cmd, s32 value, s32 ticks);
  * statement orders (one pointer per d field) bottom out at 4: left are the vz frame reload, which the original
  * hoists above the a.vy store (needs a.vy stored as a scalar `*qy`, but that reshuffles the block: >= 19), and
  * the pos.vz load at the block top (its pseudo is birthing-boosted in sched1; `t = pos.vz; t = src.vz - t;`
- * removes the boost but it still lands after the reload chain: 8). */
+ * removes the boost but it still lands after the reload chain: 8).
+ * r14AI: sched1 trace: the pos.vz load is alone in the ready list at T-13 (the vz frame reload waits on
+ * the in-struct a.vy store), so even unboosted it is placed there; both issues are one: the reload must not
+ * depend on the a.vy store. Twice-set `dist = pos.vz` unboosts it but dist then takes s0 (14). */
 /* Applies the active camera shakes to the display frame: each shake jitters along the
  * camera's right and side axes, fading with distance from its source frame, and the
  * total drives the pad's rumble. */
