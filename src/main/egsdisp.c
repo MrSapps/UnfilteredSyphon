@@ -504,7 +504,7 @@ extern DamageEntry gGabeCacheEntry;
 extern void *gDLA_npc_gun_flash[];
 extern char D_80013734[];
 extern u8 D_8014BAD8[]; /* initial packet area */
-extern GsBOXF D_80013724; /* video-mode border box */
+extern const GsBOXF D_80013724; /* video-mode border box */
 extern u16 POSITION[2]; /* fade tiles, per draw buffer */
 extern u16 gCameraID;
 extern s32 gTerrainFog;
@@ -1174,7 +1174,7 @@ void a_prim(u32 *ot, void *prim) {
 }
 
 /* D_80013724 (the video-mode border box) */
-INCLUDE_PART1("asm/main/nonmatchings/egsdisp", iEGSDisplaySort)
+const GsBOXF D_80013724 = {0, -256, -240, 512, 3, 0, 0, 0};
 
 s32 iEGSDisplaySort(EGSCamera *camera, u8 sortHMDs, s32 tick) {
     DR_TPAGE tpage;
