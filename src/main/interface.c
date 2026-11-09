@@ -1051,17 +1051,27 @@ static inline s32 iRadarXY(s32 xy) {
     return pt.w;
 }
 
-#ifdef NON_MATCHING
-/* (r6F, 132 -> 54) icon defs through a def pointer (no address giv), the background sprite through
- * a block pointer (orig keeps &D_801174E8 in s5), inner sprite loop on block-local copies, and
- * `(&D[i])->unk04 = k` in the prim loops (an ADDR_EXPR deref makes the unk04 address a giv of the
- * &D[i] call-arg pointer, so it combines with it: orig sw 0x4(s0); addiu s0, 0x24).
- * Frame: the pad local fixes the size, but the offsets fit better if this call's iRadarXY had
- * unused[16] (func_8003C724 needs 8). Left: the n copy (a1) for the inner bound; the meter loop
- * (D_801175CC base/offset givs); the -2 spill slot. */
-INCLUDE_PART1("asm/main/nonmatchings/interface", InterfaceSetup)
+/* iRadarXY(0) as InterfaceSetup has it: same code, but its leftover block is 16 bytes. */
+static inline s32 iRadarOrigin(void) {
+    IfacePointW pt;
+    s32 center;
 
-extern const VECTOR32 D_80011D2C;
+    pt.w = 0;
+    center = 0x50FF67;
+    iPointAdd(&pt, (IfacePointW *)&center);
+    {
+        u8 unused[16];
+    }
+    return pt.w;
+}
+
+/* Matching notes: (&D[i])->unk04 = k in the prim loops makes the unk04 address a giv of the
+ * &D[i] call-arg pointer; SET_SEMI_TRANS on &D[i].tag gives the +8 base giv with the code byte at
+ * +7; the meter origins go through a pointer (no i*4 giv); block-local copies / loop-local spr
+ * and none keep the original register choices; iRadarOrigin's 16-byte leftover is the frame gap
+ * at sp+0x48. */
+
+const VECTOR32 D_80011D2C = {0, 0, 0};
 extern IfaceSprite D_801174E8;          /* radar background sprite */
 extern char D_80117FFC[];               /* rounds text sprites */
 extern char D_8011765C[], D_80117764[], D_8011786C[]; /* meter caption buffers */
@@ -1086,7 +1096,6 @@ void SysPostMessage(u8 id, u8 priority, s32 from, s32 to, s32 d0, s32 d1, s32 d2
 
 void InterfaceSetup(void) {
     VECTOR32 pos;
-    u8 pad[8]; /* unused: the original frame is 8 bytes bigger */
     u16 w;
     u16 h;
     s32 i;
@@ -1110,13 +1119,17 @@ void InterfaceSetup(void) {
         SpriteSuperSetXY(spr, n, 400, 400);
         SpriteCreateMulti(&D_80117514[i], n, spr);
         {
-            IfaceSprite *s = spr;
-            s32 c = n;
             s32 k;
 
-            for (k = 0; k < c; k++) {
-                s[k].unk24 = 0;
-                s[k].unk28 = 0;
+            k = 0;
+            if (n != 0) {
+                IfaceSprite *s = spr;
+                s32 c = n;
+
+                do {
+                    s[k].unk24 = 0;
+                    s[k].unk28 = 0;
+                } while (++k < c);
             }
         }
     }
@@ -1170,7 +1183,7 @@ void InterfaceSetup(void) {
     EGSDisplayBuildPoly4F(&D_80117B08, 0xFFFFFF, OFFSCREEN, OFFSCREEN, OFFSCREEN, OFFSCREEN);
     D_80117B08.unk04 = 1;
     D_80117B08.link = 0;
-    EGSDisplayBuildPoly3G(&D_801174A0, 0xFEC4C4, iRadarXY(0), 0, 0, 0x75583E, 0x75583E);
+    EGSDisplayBuildPoly3G(&D_801174A0, 0xFEC4C4, iRadarOrigin(), 0, 0, 0x75583E, 0x75583E);
     D_801174A0.link = 0;
     EGSDisplayBuildPoly3G(&D_801174C4, 0xFEC4C4, 0, 0, 0, 0x75583E, 0x75583E);
     D_801174C4.link = 0;
@@ -1191,22 +1204,24 @@ void InterfaceSetup(void) {
     D_8010F882 = 0xFFFF;
     D_8010F884 = 0xFFFF;
     for (i = 0; i < 4; i++) {
-        s32 top = (u16)D_80011BE0[i].vx | (D_80011BE0[i].vy << 16);
-        s32 bottom = (u16)D_80011BE0[i].vx | ((D_80011BE0[i].vy + 4) << 16);
+        const IfacePoint *o = &D_80011BE0[i];
+        s32 top = (u16)o->vx | (o->vy << 16);
+        s32 bottom = (u16)o->vx | ((o->vy + 4) << 16);
 
         EGSDisplayBuildPoly4F(&D_801175CC[i], D_80011BD0[i], top, top, bottom, bottom);
-        D_801175CC[i].color.c[3] |= 2;
-        D_801175CC[i].unk04 = 1;
+        SET_SEMI_TRANS(&D_801175CC[i].tag);
+        (&D_801175CC[i])->unk04 = 1;
         D_801175CC[i].link = 0;
         EGSDisplayAddPoly(gInterfaceWindow, &D_801175CC[i]);
         if (i > 0) {
             for (j = 0; j < 2; j++) {
-                IfaceLine *line = &D_801179A0[(i - 1) * 2 + j];
+                s32 k = (i - 1) * 2 + j;
+                IfaceLine *line = &D_801179A0[k];
 
                 EGSDisplayBuildLineF(line, 0xE77E6B, OFFSCREEN, OFFSCREEN);
                 D_801179A0[i].link = 0;
                 EGSDisplayAddPoly(gInterfaceWindow, line);
-                SET_SEMI_TRANS(&line->tag);
+                SET_SEMI_TRANS(&D_801179A0[k].tag);
                 line->unk04 = 0;
             }
         }
@@ -1222,7 +1237,8 @@ void InterfaceSetup(void) {
         EGSDisplayBuildPoly3F(&((u8 *)D_8011896C)[i * 0x1C], 0x106010, 0, 0, 0);
     }
     for (i = 0x2D; i < 0x3B; i++) {
-        spr = SpriteGet(i);
+        IfaceSprite *spr = SpriteGet(i);
+
         EGSTextureSetSpriteTransparency(SpriteGet(i), 1);
         spr->b = 0x40;
         spr->g = 0x40;
@@ -1233,18 +1249,19 @@ void InterfaceSetup(void) {
     D_8010F8BC = SpriteGet(0x33);
     InterfaceSetMode(0);
     D_80110020 = 1;
-    for (i = 7; i >= 0; i--) {
-        D_80105F30[i - 1] = -1;
+    {
+        s32 none = -1;
+
+        for (i = 7; i >= 0; i--) {
+            D_80105F30[i - 1] = none;
+        }
     }
     D_8010F8C0 = -5;
     InterfaceSetAddLevelSpecificNPCCallback(NULL);
     InterfaceSetRadarWorldRadius(0x3C);
-    SysPostMessage(0xE, 4, -2, -2, 0, 0, 0, 0);
+    SysPostMessage(0xE, 4, 0xFFFE, 0xFFFE, 0, 0, 0, 0);
     LoadImage(&D_8010FFF8, D_80117DFC);
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/interface", InterfaceSetup);
-#endif
 
 void func_8003C3F4(void) {
     s32 phase = (u32)gSystemTick % 6;
