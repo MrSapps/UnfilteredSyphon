@@ -453,22 +453,11 @@ static void func_801420B8(void) {
 __asm__(".set D_8014289C, parkObjectives+4\n");
 #endif
 
-#ifdef NON_MATCHING
 /*
- * One instruction short: the original copies ObjectMatchToRefIDByCatID's result
- * into $v1 before the healthInfo load, and keeps `type` in $v1 rather than $a1.
- * Also: in the COP branch ours compares GOBJ_TYPE(ref) against `type`'s reg (cse2 equivalence after
- * type == 0x35) where the original uses the hoisted 0x35 in $s4. Reusing cop/rt for the
- * ObjectMatchToRefIDByCatID result or refType for the inner type tests doesn't help.
- * r4H: the cse2 equivalence comes from make_regs_eqv: `type` becomes the canonical reg for the
- * hoisted 0x35 because its last use (bomb branch `type = GOBJ_TYPE(cop->id)`) is later. Using
- * refType in BOTH the hostage do-loop and the bomb branch puts type in v1 and the COP compare on
- * the hoisted reg (as the original), but then 0x35 and 0x29A tie on refs (12 each) and 0x29A's
- * longer live range (348 vs 344) gives it s4 instead of s3 (still 14 lines).
- * r8S (14 -> 2): refType in both places + `do { refType = ...; } while (0)` in the hostage loop
- * fixes the s3/s4 tie. Left: the original keeps `move v1,v0` after ObjectMatchToRefIDByCatID;
- * ours combine.c folds the npc copy into the healthInfo load (npc dies there). Using rt/cop/a
- * direct call, an s16 cast or a do-while(0) between the copy and the load all still fold.
+ * The original keeps `move v1,v0` after ObjectMatchToRefIDByCatID: something stopped combine from
+ * folding the copy into the healthInfo load. A named label (deleted by jump.c), asm_input(""),
+ * and duplicated call arms (45 lines: loop.c strength-reduces a third i<<16) don't reproduce it;
+ * a volatile insn between the copy and the load does (can_combine_p). The asm below is FAKE.
  */
 void iParkInit(s32 mode) {
     int i;
@@ -540,6 +529,7 @@ void iParkInit(s32 mode) {
             ref = gameObjectsInfo[i].refId;
             if (ref == -1 || GOBJ_TYPE(ref) == GOBJ_TYPE_COP) {
                 npc = ObjectMatchToRefIDByCatID(i, 2);
+                __asm__ volatile("" : : : "memory"); /* FAKE: keeps the result copy (combine stops at a volatile insn) */
                 if (npc->healthInfo->health <= 0) {
                     D_80143118 = 1;
                 }
@@ -573,7 +563,4 @@ void iParkInit(s32 mode) {
     }
     gDefaultLevelDmgFX = 0xB;
 }
-#else
-INCLUDE_ASM("asm/park/nonmatchings/park", iParkInit);
-#endif
 
