@@ -293,7 +293,7 @@ void ParticleExplosion(s32 id, Vec4 *pos, Vec4 *dir, s32 scale, s32 arg4);
 void DamageGOBJ(s16 from, s16 by, s16 id, s16 amount, s16 type);
 
 
-void InterfaceSetRadarWorldRadius(s32 arg0, s32 inner, s32 outer);
+void InterfaceSetRadarWorldRadius(s32 radius);
 void EGSGeometryINT_GetDistancePointToPoint(Vec4 *a, Vec4 *b, s32 *dist);
 void EGSGeometryFIX_VectorGetAngleFromXZPlane(Vec4 *dir, s32 *angles);
 s32 ratan2(s32 y, s32 x);
@@ -511,34 +511,13 @@ static void func_8014196C(s32 id) {
     EGSAnimSetBox(D_8014561C->anim, 0, box);
 }
 
-#ifdef NON_MATCHING
-/* scheduling only: the original loads pos.vy before D_8014574C and stores D_80145734 after D_80145730/D_80145758.
- * sched2 ties: both loads priority 1, luid order decides (ours has 282=D_8014574C before 249=pos.vy
- * after sched1). 60 random orders of the store statements, no-r, r-first and a y local: none better.
- * Not fixed by: moving any one statement of the block, 300 random statement orders, a twice-set h temp,
- * reading D_8014574C directly instead of r, D_80145750 = D_80145754 - (r >> 3).
- * r5C: root cause is sched1 luid order: a1 = r>>3 (insn 307) is placed right above the low-priority a1 arg copy
- * (birthing_insn_p boost), near the top, so sched2's luid tie-break puts sra a1 / lw 574C early. The original's
- * sched1 had 307 after the r>>1 sra. Twice-set temps for r>>3 (h = r; h >>= 3) don't change it.
- * r7M (-dS): 307 becomes ready only after the a1 copy (324) is scheduled, and 324 (prio 2, no hazard)
- * loses every tie to the prio-2 global stores ("greater potential hazard"), so it lands at the top.
- * r8R: rank_for_schedule ties go to schedule_select's potential_hazard, which is 0 for a reg copy and >0 for
- * any memory-unit insn, so 324 can only win if it outranks the stores: the original needs either prio >= 3 for
- * the a1 copy or prio 1 for the pos.vy-derived stores. h temp, `(h = r >> 3)` in the expression, a 3-arg cast
- * call, do{}while(0) barriers before r / before unk190: all 6-11.
- * r9X: priorities are forward load-latency paths (priority() = max pred prio + cost - 1): the stores are 2 only
- * because pos.vy is a load (cost 2) in this block; the a1 copy can reach 3 only via a second load in r's chain.
- * Copying pos.vy into a local before the health block keeps it in a reg (no lw, 23 lines); pos.vy really is
- * the 0x24(sp) slot of pos in the original. */
 /* Level start: place the chopper and set up its flight envelope. */
 static void func_80141C64(void) {
     Vec4 ofs;
     Vec4 pos;
     s32 dist;
     GameObjectHealth *health;
-    s32 h;
     s32 i;
-    s32 *p;
     s32 r;
 
     D_80145670.vx = PLAYER_XFORM()->x;
@@ -576,14 +555,14 @@ static void func_80141C64(void) {
     D_8014573C = pos.vy - 0x5A0;
     D_80145740 = pos.vy - 0x870;
     D_8014572C = pos.vy;
-    r = D_8014574C;
     D_80145730 = pos.vy - 0x680;
-    D_80145758 = r >> 4;
     D_80145734 = pos.vy + 0x3C;
+    r = D_8014574C;
+    D_80145758 = r >> 4;
     D_80145754 = r >> 1;
     D_80145750 = (r >> 1) - (r >> 3);
     D_8014561C->xform->unk190 = r;
-    InterfaceSetRadarWorldRadius(0x14F, r >> 3, r);
+    InterfaceSetRadarWorldRadius(0x14F);
     if (!D_80145798) {
         if (D_80145790 == 2) {
             chopperPos.vy = D_80145738;
@@ -619,9 +598,6 @@ static void func_80141C64(void) {
         func_801417A0();
     }
 }
-#else
-INCLUDE_ASM("asm/chopper/nonmatchings/chopper", func_80141C64);
-#endif
 
 static const s32 D_80141480 = 0xB;
 
