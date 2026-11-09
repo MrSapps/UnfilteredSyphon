@@ -101,7 +101,7 @@ typedef struct CASEvent {
     /* 0x00 */ u8 valid;
     /* 0x01 */ u8 pad01[3];
     /* 0x04 */ s32 code;
-    /* 0x08 */ void (*fn)(s16 id, s32 set, s32 index, GameObjectRuntime *rt);
+    /* 0x08 */ void (*fn)(s16 id, s32 set, s32 index);
 } CASEvent; /* size 0xC */
 
 typedef struct CASDone {
@@ -147,25 +147,20 @@ void SYSCasInit(void) {
     D_8010FF90 = 0;
 }
 
-#ifdef NON_MATCHING
-/* register allocation/spills differ (one more stack slot; s-reg assignment) */
 /* Animation event handler: run the action's event callbacks, finish its slot, queue the
  * sequence-start callbacks. */
 static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
+    s32 slot;
     GameObjectRuntime *rt;
     HAnim *ha;
     struct CASSlots *t;
     CASAction *action;
     CASDone *done;
     CASEvent *events;
-    CASEvent *ev;
     CASSequence *seq;
-    CASAnimEvent *e;
-    s32 slot;
     s32 i;
+    s32 j;
     s32 hit;
-    u32 kind;
-    s32 code;
     u8 found;
 
     rt = gameObjectsInfo[info->id].runtime;
@@ -173,55 +168,57 @@ static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
     ha->eventMask &= ~event;
     slot = -1;
     t = &rt->cas->queue->slots;
-    if (rt->cas->actionTable == NULL) {
+    action = rt->cas->actionTable;
+    if (action == NULL) {
         return;
     }
-    action = &((CASAction *)rt->cas->actionTable)[info->action];
+    action = &action[info->action];
     done = &action->done;
     events = action->events;
     if (action->hasEvents) {
         if (event == 0x80000000) {
-            func_80029B78(rt, info->action, -1, event);
+            func_80029B78(rt, info->action, -1);
         }
         if (events != NULL) {
             i = 0;
             hit = -1;
             found = 0;
             if (events->valid) {
-                kind = event & 0xFFFF0000;
-                code = event & 0xFF;
-                ev = events;
                 do {
-                    if (kind == 0x04000000 && code == ev->code) {
+                    u32 kind = event & 0xFFFF0000;
+                    s32 code = event & 0xFF;
+
+                    if (kind == 0x04000000 && code == events[i].code) {
                         found = 1;
-                        if (ev[1].valid) {
+                        if (events[i + 1].valid) {
                             hit = i + 1;
                         } else {
-                            seq = CASGetAnimSequence(info->set, info->mode, info->sub);
+                            CASSequence *seq = CASGetAnimSequence(info->set, info->mode, info->sub);
                             if ((ha->unk28 == 0x8000 && seq->unk09[0] == -1)
                                 || (ha->unk28 == 0x4000 && seq->unk09[1] == -1) || seq->unk09[2] == -1) {
                                 hit = 0;
                             }
                         }
                         if (hit != -1) {
-                            ha->eventMask = (ha->eventMask & ~0xFF) | (events[hit].code | 0x04000000);
+                            u32 m = ha->eventMask & ~0xFF;
+                            s32 c = events[hit].code | 0x04000000;
+                            ha->eventMask = m | c;
                         }
-                    } else if (kind == 0x80000000 && ev->code == -1) {
+                    } else if (kind == 0x80000000 && events[i].code == -1) {
                         found = 1;
                     }
                     if (found) {
-                        ev->fn(rt->id, info->set->unk04, i, rt);
+                        events[i].fn(rt->id, info->set->unk04, i);
                         break;
                     }
-                    ev++;
                     i++;
-                } while (ev->valid);
+                } while (events[i].valid);
             }
         }
     }
-    for (i = 0; i < 3; i++) {
-        if (t->action[i] != 0xFF && t->action[i] == info->action) {
-            slot = i;
+    for (j = 0; j < 3; j++) {
+        if (t->action[j] != 0xFF && t->action[j] == info->action) {
+            slot = j;
             break;
         }
     }
@@ -239,20 +236,18 @@ static void func_80029298(s32 unused, u32 event, CASAnimEvent *info) {
             CASRequestAction(rt->id, seq->nextAction);
         }
         if (seq->onStart != NULL || seq->startMsg != 0) {
-            e = &t->deferred[t->numDeferred];
-            e->id = info->id;
-            e->req0 = info->req0;
-            e->mode = info->mode;
-            e->sub = info->sub;
-            e->set = info->set;
+            s32 n = t->numDeferred;
+
+            t->deferred[n].id = info->id;
+            t->deferred[n].req0 = info->req0;
+            t->deferred[n].mode = info->mode;
+            t->deferred[n].sub = info->sub;
+            t->deferred[n].set = info->set;
             t->numDeferred++;
             CASRequestAction(rt->id, 0x5A);
         }
     }
 }
-#else
-INCLUDE_ASM("asm/main/nonmatchings/cas", func_80029298);
-#endif
 
 CASSequence *CASGetAnimSequence(CASAnimSet *set, s32 action, s32 sub) {
     CASSequence *seqs;
